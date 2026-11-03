@@ -10,7 +10,7 @@
 
 AgentOS 是基于 Java 实现的面向企业场景的 **Agent OS**。它装在企业自己的 K8s 或服务器上，作为统一底座，在底座上跑各种业务 Agent（运维助手、客服助手、HR 助手、销售助手、知识管理助手等），共享一套渠道接入、模型路由、工具调用、记忆系统、沙箱执行能力。数据完全留在企业自己的基础设施，不锁任何云生态。
 
-业界已经有开源 Agent 项目把这套设计验证过（OpenClaw 用 Node.js，Hermes Agent 用 Python），但 Java 生态没有任何项目把"Agent OS"作为定位。Java 是大量企业现有后端的事实标准技术栈，Spring AI Alibaba 已经把底层 LLM 调用解决了，缺的就是上面那一层"Agent OS"。AgentOS 填这个位置。
+业界已经有开源 Agent 项目把这套设计验证过（OpenClaw 用 Node.js，Hermes Agent 用 Python），但 Java 生态没有任何项目把"Agent OS"作为定位。Java 是大量企业现有后端的事实标准技术栈，Spring AI 已经把底层 LLM 调用解决了，缺的就是上面那一层"Agent OS"。AgentOS 填这个位置。
 
 #### Agent OS vs Agent Runtime 的分层
 
@@ -216,7 +216,6 @@ AgentOS init   # 在当前目录下创建 .AgentOS/ 工作区
 ├── output/            # Agent 产出物
 ├── memory/
 │   └── MEMORY.md      # 长期记忆文件
-├── sessions/          # 会话历史
 ├── logs/              # 结构化日志
 ├── AGENTS.md          # Bootstrap：项目级 agent 行为说明
 ├── SOUL.md            # Bootstrap：默认 agent 人格定义
@@ -224,7 +223,7 @@ AgentOS init   # 在当前目录下创建 .AgentOS/ 工作区
 ```
 
 - 三个 Bootstrap 文件在 Agent 启动时被自动加载到系统提示词，让 Agent 知道项目背景、自己的身份、用户偏好
-- `AgentOS init` 幂等：已存在的目录和文件一律不覆盖。六个子目录建好后，用 `AgentOS profile create <name>` 生成第一个 Agent 目录
+- `AgentOS init` 幂等：已存在的目录和文件一律不覆盖。五个子目录建好后，用 `AgentOS profile create <name>` 生成第一个 Agent 目录
 
 ---
 
@@ -243,9 +242,10 @@ identity:
   prompt: string                # 人格/系统提示词（或引用 SOUL.md）
 
 provider:
-  name: string                  # Provider 名称（deepseek/qwen/kimi 等）
-  model: string                 # 模型名
-  temperature: float            # 温度参数（可选）
+  name: string                  # Provider 名称（primary/deepseek/kimi 等），不写则用默认 provider
+  model: string                 # 模型名（可选，默认用 provider 配置的模型）
+  temperature: float            # 温度参数（可选；推理模型通常不支持，不写就不发送）
+  reasoning_effort: string      # 推理强度（可选，仅推理模型）：none / low / medium / high 等
 
 tools:
   - string                      # 可用 Tool 名称列表
@@ -257,13 +257,25 @@ channels:
   - name: string                # Channel 名称
     config: {}                  # Channel 配置
 
+schedules:
+  - key: string                 # 任务键，同一 Agent 内唯一
+    cron: string                # Spring cron 表达式（6 段，含秒）
+    zone: string                # 时区，如 Asia/Shanghai
+    message: string             # 到点发给 Agent 的消息
+
 bootstrap:
   - string                      # Bootstrap 文件列表
 
 settings:
   max_iterations: 10            # 最大 ReAct 迭代次数
-  max_history_turns: 20         # 最大对话历史轮数
+  max_history_turns: 20         # 放进 prompt 的最近对话轮数
+  max_history_tokens: 32000     # 放进 prompt 的历史 token 上限，与轮数上限同时生效
+  turn_timeout: 300s            # 一轮处理的总时长上限
+  tool_search: auto             # 工具多时按需暴露：auto / on / off
+  always_tools: []              # 开启工具搜索时始终可见的工具
 ```
+
+Skill 绑定不写在 frontmatter 里，而是在 Agent 目录的 `skills/` 下建相对软连接。
 
 **Agent 管理命令**（命令组名沿用 `profile`，操作的是 `.AgentOS/agents/` 下的 Agent 目录）：
 
@@ -282,7 +294,7 @@ AgentOS profile delete <name>    # 删除 Agent（整个目录）
 
 Provider 是 LLM 调用的统一抽象。所有 LLM 调用通过 Provider 接口走，Agent 不感知具体调的是哪家。
 
-核心阶段直接基于 Spring AI Alibaba 的 `ChatClient` 实现。Spring AI Alibaba 已经做好了主流 LLM（DeepSeek、通义、文心、Kimi、智谱、混元、豆包、Anthropic、OpenAI 等）的 connector，AgentOS 把它们包装成 Provider，不重复造轮子。
+核心阶段直接基于 Spring 官方 Spring AI 2.0 的 `ChatModel` 抽象实现，不引入 Spring AI Alibaba 系列依赖。Spring AI 提供 OpenAI、DeepSeek、Anthropic、Ollama 等模型实现；通义、Kimi、智谱等国内模型通过 OpenAI 兼容接口接入。AgentOS 把它们包装成 Provider，不重复造轮子。
 
 每个 Provider 实例配置：
 - `provider 名`（deepseek、qwen、kimi 等）
@@ -290,7 +302,7 @@ Provider 是 LLM 调用的统一抽象。所有 LLM 调用通过 Provider 接口
 - `API key`
 - `可选的 base URL`
 
-**核心阶段不做**：fallback 和 hedge racing。Provider 故障时直接报错给 Agent；成本透明只做基础版（每次 LLM 调用记录 token 使用量、Provider、模型落到日志）。
+**核心阶段不做**：fallback 和 hedge racing。Provider 故障时直接报错给 Agent；成本透明只做基础版（每次 LLM 调用记录 token 使用量、Provider、模型，写入 `llm_calls` 表）。
 
 ---
 
@@ -313,8 +325,9 @@ ReAct 循环是 Agent 的核心工作机制，也是 AgentOS 最关键的一段�
 
 **实现要点：**
 - 核心循环约数十行 Java 代码，自己实现而不依赖 Spring AI 的 Agent 抽象
-- 最大迭代次数可在 Profile 里覆盖
-- 每次 LLM 调用和 Tool 调用都记录结构化日志
+- 最大迭代次数可在 `AGENT.md` 里覆盖；单轮工具调用总次数另有上限
+- 每次 LLM 调用和 Tool 调用都写入审计表（`llm_calls`、`tool_invocations`），并记录结构化日志
+- 单次 LLM 调用、单个工具、整轮处理各有超时
 
 **核心阶段不做**：Tool 调用并行、上下文动态压缩、Agent 间任务委托。
 
@@ -326,18 +339,17 @@ ReAct 循环是 Agent 的核心工作机制，也是 AgentOS 最关键的一段�
 
 #### 会话记忆
 
-- 当前对话的完整历史，按 Channel + 用户 + Profile 联合标识
-- Session 数据持久化到本地 SQLite，重启后可以恢复
-- 上下文超过 LLM context window 上限时简单截断早期对话
+- 当前对话的完整历史，同一 Channel + 用户 + Profile 同时只有一个活跃会话；会话归档后再来消息会开新会话
+- Session 数据持久化到 PostgreSQL，重启后可以恢复
+- 按轮次截断：只把最近 N 轮（默认 20）对话放进 prompt，完整历史保留在库里
 
 #### 长期记忆（极简版）
 
-- 存在 `.AgentOS/memory/MEMORY.md` 一个 Markdown 文件，跨所有对话保留
+- 默认存在 `.AgentOS/memory/MEMORY.md` 一个 Markdown 文件，跨所有对话保留，分"核心记忆"和"归档记忆"两个区
 - Agent 通过两个内置 Tool 主动读写：
-  - `save_memory(content)`：把要长期记住的事追加到 MEMORY.md
-  - `recall_memory(query)`：按关键词检索 MEMORY.md 里的相关内容
-- Agent 启动时 MEMORY.md 整个文件作为长期上下文注入到 system prompt
-- 文件超过 4000 字时简单截断（扩展阶段做压缩）
+  - `save_memory(content, scope)`：把要长期记住的事追加到核心区或归档区（默认归档区）
+  - `recall_memory(query)`：按关键词检索归档区的相关内容
+- 每轮组装 prompt 时重新读取并注入：核心区全量注入、永不截断；归档区超过 4000 字符时只保留最新部分（扩展阶段做压缩）
 
 **核心阶段不做**：自动从对话中抽取事实、语义检索（用关键词匹配）、情景记忆、Memory Wiki、矛盾检测。
 
@@ -349,17 +361,19 @@ ReAct 循环是 Agent 的核心工作机制，也是 AgentOS 最关键的一段�
 
 Tool 是 Agent 可以调用的外部能力。Agent 通过 LLM Function Calling 决定何时调哪个 Tool，AgentOS 负责 Tool 的注册、查找、调用、结果回传。
 
-#### 内置 Tool（核心阶段 5 个）
+#### 内置 Tool（核心阶段 9 个）
 
 | Tool | 类型 | 说明 |
 |------|------|------|
 | `read_file` | 文件 | 读取文件内容，受路径白名单限制 |
 | `write_file` | 文件 | 写入文件内容，受路径白名单限制 |
 | `list_dir` | 文件 | 列出目录，受路径白名单限制 |
-| `shell` | Shell | 执行 bash 命令，有超时和命令白名单限制 |
-| `http_get` / `http_post` | HTTP | 发起 HTTP 请求，有域名白名单限制 |
-| `save_memory` | Memory | 把内容追加到 MEMORY.md |
-| `recall_memory` | Memory | 按关键词检索 MEMORY.md |
+| `shell` | Shell | 执行白名单内的可执行文件（参数数组直传，不经 Shell 解释），有超时 |
+| `http_get` | HTTP | 发起 GET 请求，有域名白名单限制 |
+| `http_post` | HTTP | 发起 POST 请求，有域名白名单限制 |
+| `save_memory` | Memory | 把内容追加到长期记忆的核心区或归档区 |
+| `recall_memory` | Memory | 按关键词检索长期记忆归档区 |
+| `notify` | 通知 | 把消息推送到按名称引用的通知渠道（企业 IM 群机器人 webhook 等） |
 
 #### Plugin Tool（业务方扩展）
 
@@ -419,9 +433,9 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 | 系统状态 | `GET /api/v1/health` | 健康检查 |
 | 系统状态 | `GET /api/v1/info` | 运行信息 |
 
-#### 扩展阶段补齐的端点（15 个）
+#### 扩展阶段补齐的端点
 
-Profile 的 show/reload/create/update/delete；Memory 的 append/clear/search；Tool describe 和调用历史查询；LLM call 历史、token 统计；Webhook 触发、流式 SSE 响应；Prometheus metrics、OpenAPI spec。
+Agent 目录的上传/查看/更新/删除与一句话生成 `AGENT.md`；定时任务管理；Memory 的 append/clear/search；Tool describe 和调用历史查询；LLM call 历史、token 统计；Webhook 触发、流式 SSE 响应；Prometheus metrics、OpenAPI spec。
 
 **核心阶段不做**：认证机制（无认证假设内网）、流式响应 SSE、WebSocket、RBAC 权限。
 
@@ -440,7 +454,7 @@ Profile 的 show/reload/create/update/delete；Memory 的 append/clear/search；
 
 Session 是用户和 Agent 一次对话的上下文容器，包含起止时间、用户身份、Agent 标识、对话历史、当前上下文、临时变量。Session 标识由 Channel、用户、Agent 联合生成。
 
-核心阶段 Session 数据持久化到本地 SQLite（`.AgentOS/sessions/` 下）。重启 AgentOS 后，正在进行的 Session 可以恢复。Session 上下文超过 LLM 的 context window 时，简单截断早期对话保留近期对话。
+核心阶段 Session 数据持久化到 PostgreSQL。重启 AgentOS 后，正在进行的 Session 可以恢复。Session 上下文超过 LLM 的 context window 时，简单截断早期对话保留近期对话。
 
 ---
 
@@ -572,16 +586,16 @@ AgentOS 作为开源项目，需要一个独立的主页作为对外门面，讲
 
 - 已注册的 Profile 配置和已写入的 Session 数据保证不丢
 - LLM Provider 故障时核心阶段直接报错，完整 failover 在扩展阶段实现
-- Tool 调用失败时按重试策略再调，默认指数退避最多三次
+- Tool 调用失败时，只对声明为幂等的工具（如读文件、`http_get`）自动重试，指数退避最多三次；有副作用的工具（如 `notify`、`http_post`、`write_file`）不自动重试，避免重复推送或重复写入
 
 ### 8.3 可运维性
 
-- 配置变更通过修改 `AGENT.md` frontmatter，核心阶段重启服务生效
+- 配置变更通过修改 `AGENT.md`：正文每轮重新读取、立即生效；frontmatter（Provider、Tool、定时规则）核心阶段重启服务生效
 - 支持物理机、虚拟机、Docker、Kubernetes 部署
 
 ### 8.4 兼容性
 
-- **JDK**：21 及以上（Spring Boot 3.x 要求）
+- **JDK**：21 及以上（使用 virtual thread；Spring AI 2.0.x 要求 Spring Boot 4.0.x / 4.1.x）
 - **操作系统**：Linux 主流发行版（Ubuntu 22.04+、CentOS 8+、Debian 11+、Alibaba Cloud Linux 3、Rocky Linux）
 - **LLM 协议**：OpenAI 兼容协议是事实标准，只要 Provider 实现这套协议，AgentOS 就能直接接
 
@@ -605,8 +619,8 @@ AgentOS 作为开源项目，需要一个独立的主页作为对外门面，讲
 
 ```
 用户执行 AgentOS init
-  → AgentOS 创建 .AgentOS/ 目录及六个子目录
-    （agents / skills / output / memory / sessions / logs）
+  → AgentOS 创建 .AgentOS/ 目录及五个子目录
+    （agents / skills / output / memory / logs）
   → 创建三个 Bootstrap 文件（AGENTS.md、SOUL.md、USER.md）
   → 幂等：已存在的目录和文件一律不覆盖
 用户编辑 Bootstrap 文件填入项目背景、Agent 人格、用户偏好
@@ -622,7 +636,7 @@ AgentOS 作为开源项目，需要一个独立的主页作为对外门面，讲
   → AgentLoader.deriveProfile() 把 frontmatter 派生成 Profile
   → 初始化 Provider 连接
   → 注册 Tool 到 Agent 工具池
-  → ContextLoader 把 AGENT.md 正文、Bootstrap 文件、引用到的 Skill 正文加载到系统提示词
+  → ContextLoader 把 AGENT.md 正文、Bootstrap 文件、已绑定 Skill 的名称和描述加载到系统提示词（Skill 正文按需读取）
   → Agent 进入待对话状态
 ```
 
@@ -667,55 +681,20 @@ Session 超时无消息 → 结束，对话历史归档可查
 
 ## 10. 数据模型
 
-### Profile（YAML 文件）
+本章只列数据实体和它们记录什么，字段定义以技术方案第 9 章为准，避免两处维护不一致。
 
-见 [5.2 Profile 配置](#52-profile-配置)。
-
-### Session（持久化到 SQLite）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `session_id` | VARCHAR | 主键，channel+user+profile 联合生成 |
-| `profile_name` | VARCHAR | 关联的 Profile 名称 |
-| `channel` | VARCHAR | 接入渠道 |
-| `user_id` | VARCHAR | 用户标识 |
-| `messages_json` | TEXT | JSON 序列化的对话历史 |
-| `status` | VARCHAR | `active` / `archived` |
-| `created_at` | TIMESTAMP | 创建时间 |
-| `last_active_at` | TIMESTAMP | 最后活跃时间 |
-| `archived_at` | TIMESTAMP | 归档时间（可空） |
-
-### Memory（文件形态，非数据库表）
-
-长期记忆是 `.AgentOS/memory/MEMORY.md` 一个 Markdown 文件，按追加方式写入，无结构化 schema。扩展阶段引入向量库后，Memory 才有结构化的 embedding 存储。
-
-### Tool Invocation（记录每次 Tool 调用）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | BIGINT | 主键 |
-| `session_id` | VARCHAR | 关联 Session |
-| `tool_name` | VARCHAR | Tool 名称 |
-| `input_json` | TEXT | 调用参数（JSON） |
-| `result_json` | TEXT | 执行结果（JSON） |
-| `success` | BOOLEAN | 是否成功 |
-| `error_message` | TEXT | 错误信息（可空） |
-| `duration_ms` | BIGINT | 执行耗时（毫秒） |
-| `created_at` | TIMESTAMP | 调用时间 |
-
-### LLM Call（记录每次 LLM 调用）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | BIGINT | 主键 |
-| `session_id` | VARCHAR | 关联 Session |
-| `provider` | VARCHAR | Provider 名称 |
-| `model` | VARCHAR | 模型名 |
-| `prompt_tokens` | INT | 输入 token 数 |
-| `completion_tokens` | INT | 输出 token 数 |
-| `total_tokens` | INT | 总 token 数 |
-| `duration_ms` | BIGINT | 调用耗时（毫秒） |
-| `created_at` | TIMESTAMP | 调用时间 |
+| 实体 | 存储 | 记录什么 |
+|------|------|---------|
+| Agent / Profile | 文件：`.AgentOS/agents/<name>/AGENT.md` | frontmatter 是运行配置，正文是任务指令，见 [5.2](#52-定义一个-agentagentmd) |
+| 会话 Session | PostgreSQL `sessions` | 一次对话的容器；同一 Channel + 用户 + Agent 同时只有一个活跃会话 |
+| 轮次 Turn | PostgreSQL `agent_turns` | 一条用户消息到最终响应的一次处理，含状态、迭代次数、起止时间 |
+| 会话消息 | PostgreSQL `session_messages` | 用户消息、助手消息（含工具调用请求）、工具结果，一条一行 |
+| 长期记忆 | 默认文件 `.AgentOS/memory/MEMORY.md`；可选 PostgreSQL `memory_entries` 或 Mem0 | 核心区与归档区 |
+| Tool 调用审计 | PostgreSQL `tool_invocations` | 每次 Tool 调用的参数、结果、状态、重试次数、耗时 |
+| LLM 调用审计 | PostgreSQL `llm_calls` | 每次 LLM 调用的 Provider、模型、token 用量（含缓存命中）、限流余量、结束原因、耗时 |
+| 定时任务 | PostgreSQL `scheduled_tasks`、`task_executions` | 任务登记、运行状态与执行历史 |
+| 通知渠道 | PostgreSQL `notify_channels` | 按名称引用的推送目标 |
+| 向量 | PostgreSQL（pgvector）`kb_vectors`、`memory_vectors`、`tool_vectors` | 配置 Embedding 后的知识库切片、记忆、工具描述向量 |
 
 ---
 
@@ -734,10 +713,10 @@ AgentOS 核心功能的实施按 **4 周节奏**组织，每周 3 小时，合�
 
 **第一周**（3 小时）：对接 LLM + ReAct 循环
 - `AgentOS init` 工作区初始化、`AGENT.md` frontmatter 解析
-- Provider 抽象（基于 Spring AI Alibaba，先跑通 DeepSeek 或 Kimi）
+- Provider 抽象（基于 Spring AI 2.0 `ChatModel`，先跑通 DeepSeek 或 Kimi）
 - ReAct 循环（核心循环约数十行 Java，含 LLM 调用、Tool 调用解析、消息累积）
 - 一个基础内置 Tool（HTTP）、CLI Channel
-- Session 管理（内存版，第四周加 SQLite 持久化）
+- Session 管理（PostgreSQL 持久化，库在项目开始时提供）
 
 **第二周**（3 小时）：Memory + Tool 体系
 - Memory 长期记忆极简版（MEMORY.md 文件、`save_memory` 和 `recall_memory` 两个内置 Tool、启动时整个文件注入 system prompt）
@@ -751,7 +730,7 @@ AgentOS 核心功能的实施按 **4 周节奏**组织，每周 3 小时，合�
 
 **第四周**（3 小时）：多 Agent 演示 + 工程化收尾
 - 多 Agent 演示（配置两个不同 Profile 的 Agent 在同一实例并存）
-- 命令行工具完整 12 个命令、Session 持久化到 SQLite（跨重启恢复）
+- 命令行工具完整 12 个命令、Session 跨重启恢复验证
 - Bootstrap 文件机制（AGENTS.md、SOUL.md、USER.md 加载到系统提示词）
 - 结构化日志、项目主页（VitePress 或类似静态站点工具）
 
@@ -775,8 +754,8 @@ AgentOS 核心功能的实施按 **4 周节奏**组织，每周 3 小时，合�
 
 | 事项 | 说明 | 决议时间 |
 |------|------|---------|
-| Provider 抽象接口设计 | 直接用 Spring AI `ChatClient`，还是在 `ChatClient` 之上加一层 AgentOS 自己的抽象 | 技术方案阶段 |
-| 底层存储选 SQLite 还是 H2 | SQLite 是嵌入式 C 实现，H2 是纯 Java | 技术方案阶段 |
+| Provider 抽象接口设计 | 直接用 Spring AI `ChatClient`，还是在 `ChatModel` 之上加一层 AgentOS 自己的抽象 | 已决议：在 `ChatModel` 之上加 `ProviderService`（技术方案第 3 章） |
+| 底层存储选型 | 嵌入式库（SQLite/H2）还是独立数据库 | 已决议：PostgreSQL（含 pgvector），见技术方案第 9 章 |
 | Bootstrap 文件加载顺序和优先级 | AGENTS.md、SOUL.md、USER.md 怎么组合进系统提示词 | 技术方案阶段 |
 | GraalVM Native Image 引入时机 | 核心阶段还是扩展阶段 | 核心阶段结束后 |
 
@@ -792,13 +771,13 @@ AgentOS 核心功能的实施按 **4 周节奏**组织，每周 3 小时，合�
 - [ ] Profile 配置和管理（支持多 Profile 并存）
 - [ ] Provider 抽象（至少跑通 DeepSeek 和 Kimi 两个）
 - [ ] ReAct 循环（多轮 Tool 调用、正确累积消息历史、达到最大迭代次数时正确终止）
-- [ ] Memory 长期记忆（save_memory 写入、recall_memory 关键词检索、启动时注入 system prompt）
+- [ ] Memory 长期记忆（save_memory 写入、recall_memory 关键词检索、每轮注入 system prompt）
 - [ ] 内置 Tool（文件、HTTP、Shell、save_memory、recall_memory、notify）
 - [ ] Plugin Tool 接入（方式一零代码 Agent 目录 + MCP 跑通；方式三 @Tool 注解示例跑通）
 - [ ] MCP Client 集成、CLI Channel
 - [ ] 定时任务 `AgentScheduler`（第三触发源，cron 到点自动触发，跟 CLI/Web Service 复用同一条 `AgentService` 链路）
 - [ ] Web Service 核心 10 个 REST 端点全部跑通
-- [ ] Session 持久化（SQLite，跨重启恢复）
+- [ ] Session 持久化（PostgreSQL，跨重启恢复）
 - [ ] 12 个命令行工具
 - [ ] 配置与密钥加载
 
@@ -816,16 +795,17 @@ AgentOS 核心功能的实施按 **4 周节奏**组织，每周 3 小时，合�
 - 命令行工具有清晰的帮助和错误提示
 - 项目主页可访问，讲清楚 AgentOS 是什么、怎么快速开始
 
-### 场景验收（两个 Demo）
+### 场景验收（三个 Demo）
 
-早期按"一个 Demo 验证一个能力"拆了五个 Demo，但真实场景从来不是单一能力独立跑的——一个能打动人的 Agent，一定是多个能力叠在一起、自己到点跑起来的。改成两个**每日自动运行**的端到端 Demo，每个 Demo 横向串起多个核心能力，两个 Demo 加起来覆盖全部五大核心能力加定时任务这个第三触发源。两个 Demo 跑通是核心功能发布的**硬条件**：
+早期按"一个 Demo 验证一个能力"拆了五个 Demo，但真实场景从来不是单一能力独立跑的——一个能打动人的 Agent，一定是多个能力叠在一起、自己到点跑起来的。改成三个**每日自动运行**的端到端 Demo，每个 Demo 横向串起多个核心能力，三个 Demo 分别演示 Agent 目录的三种丰富度（光杆 `AGENT.md`、绑定公共 Skill、带 `scripts/` 脚本），加起来覆盖全部五大核心能力加定时任务这个第三触发源。三个 Demo 跑通并通过评估测试（技术方案 12.4）是核心功能发布的**硬条件**：
 
 | Demo | 验证能力 | 场景描述 | 验收标准 |
 |------|---------|---------|---------|
 | **Demo 一：每日天气** | 能力一+二（LLM + ReAct）、能力四（内置 HTTP Tool）、定时任务（`AgentScheduler`） | 每天早上到点自动查天气、生成穿搭建议，推送到企业 IM 群 | 不需要人工触发，到点自动跑完整 ReAct 循环；查天气和推送各一次 HTTP 调用，都过 Sandbox 域名白名单且都写入 `tool_invocations`；`GET /api/v1/sessions/{id}` 能查到这次自动触发的完整对话记录 |
 | **Demo 二：每日科技日报** | 能力四（Plugin Tool 方式一 Agent 目录零代码 + 方式二 MCP）、能力三（Memory）、定时任务（`AgentScheduler`） | 每天到点自动汇总当日科技新闻并推送，且日报内容会体现用户之前说过的关注方向（比如"更关注 AI 和芯片"） | 业务方全程不写 Java 代码，只写 `AGENT.md`（含 `schedules` 字段）并在 Agent `skills/` 绑定公共 Skill，再配置 `mcp_servers.yaml`；prompt 只出现 Skill 元数据，模型按需读取正文并完成日报 |
+| **Demo 三：每日 GitHub 日报** | 能力二（ReAct）、能力三（Memory）、能力四（Agent 目录 `scripts/` 脚本经专用 Tool 封装）、定时任务（`AgentScheduler`） | 每天到点抓 GitHub 今日与本月热门项目，挑出 AI 相关的做总结并推送 | `tool_invocations` 有 `github_daily` 调用；脚本产出的 JSON 进上下文、脚本代码不进；AI 段体现记忆里的偏好；改 `AGENT.md` 正文下一轮立即生效 |
 
-两个 Demo 都是"钟推"（`AgentScheduler` 到点自动触发），但都要能同时支持"人推"手动补跑一次做验证（`AgentOS chat` 或 `POST /agents/{name}/invoke`），验证同一个 Agent 不管从哪个入口触发，走的都是同一条 `AgentService` 链路。
+三个 Demo 都是"钟推"（`AgentScheduler` 到点自动触发），但都要能同时支持"人推"手动补跑一次做验证（`AgentOS chat` 或 `POST /agents/{name}/invoke`），验证同一个 Agent 不管从哪个入口触发，走的都是同一条 `AgentService` 链路。
 
 ---
 

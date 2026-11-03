@@ -151,11 +151,11 @@ Java/Spring 生态在企业后端是极其完整的，从 Web 框架（**Spring 
 这个缺位之所以现在值得、也能够被补上，有几个具体的技术支点：
 
 1. **Spring Boot 是企业后端的事实标准。** 一个 Java Agent OS 就是一个 Spring Boot 应用，运维体系无缝对接，IT 部门不需要学新东西，装上就能纳入现有体系。
-2. **Spring AI Alibaba 提供了现成的主流 LLM connector。** 十余个 LLM 的接入不需要重新造轮子，直接复用 Spring AI 的 `ChatClient` 抽象，让 Java Agent OS 的 LLM Provider 层站在巨人肩膀上。
+2. **Spring AI 提供了现成的主流 LLM connector。** OpenAI、Anthropic、DeepSeek、Ollama 等模型有官方实现，国内模型多数提供 OpenAI 兼容接口，接入不需要重新造轮子，直接复用 Spring AI 的 `ChatModel` 抽象，让 Java Agent OS 的 LLM Provider 层站在巨人肩膀上。
 3. **JVM 成熟的运维工具链能直接复用。** Nacos、Sentinel、SkyWalking、Arthas、JFR、Prometheus + Grafana，跟 Java Agent OS 是无缝的，企业现有运维体系不需要为它单独搭一套。
 4. **跟企业现有 Java 系统对接成本最低。** Tool 直接调企业现有 Java 服务，不需要写跨语言的胶水代码。
 5. **严监管行业的私有部署要求让 Java 成为确定性选择。** 这些行业的核心系统大量是 Java，私有部署、完全审计、合规过审是硬要求，用 Java 实现可以走企业现有的 Java 审计流程，不需要为新组件单独搭一套合规通道。
-6. **GraalVM Native Image 让 Java 的启动和内存不再是短板。** JDK 21 + Spring Boot 3.x + GraalVM 能做到接近 Node.js 和 Python 的启动速度和内存占用，单二进制部署可行。需要说明的是，Native Image 对 Spring AI 这类重反射、重动态代理的框架仍有编译期配置的工程代价，AOT 适配不是零成本，但这条路是通的，且在持续成熟。
+6. **GraalVM Native Image 让 Java 的启动和内存不再是短板。** JDK 21 + Spring Boot 4.x + GraalVM 能做到接近 Node.js 和 Python 的启动速度和内存占用，单二进制部署可行。需要说明的是，Native Image 对 Spring AI 这类重反射、重动态代理的框架仍有编译期配置的工程代价，AOT 适配不是零成本，但这条路是通的，且在持续成熟。
 
 ### 4.4 Spring AI 的崛起是先行信号
 
@@ -216,7 +216,7 @@ Dify 的产物是一条 workflow，你用拖拽的方式，把 Prompt 节点、H
 
 框架的产物是代码，它给开发者一组库和 SDK，让你用代码把一个 Agent 写出来，写完之后部署、运维、扩展、保活都是你自己的事，框架不管运行环境。AgentOS 的产物是一个装好就跑的服务，基础设施一应俱全，业务方不写 Agent 后端代码，只配置 Agent、写 Tool。
 
-> 一句话区别：框架是"给你材料让你自己盖房子"，AgentOS 是"盖好的房子，你拎包入住"。两者是复用关系而非竞争关系，AgentOS 内部的 LLM 调用层，正是直接复用 Spring AI / Spring AI Alibaba 这类框架来实现的。
+> 一句话区别：框架是"给你材料让你自己盖房子"，AgentOS 是"盖好的房子，你拎包入住"。两者是复用关系而非竞争关系，AgentOS 内部的 LLM 调用层，正是直接复用 Spring AI 这类框架来实现的。
 
 把三者收成一句话：框架给你代码、要你自己搭运行环境；编排平台给你流程、跑在运行时之上；AgentOS 给你运行时本身，一个让 Agent 能常驻、可治理、可审计地跑起来的底座。
 
@@ -241,7 +241,7 @@ AgentOS 借鉴了开源 Agent OS 领域已经被验证的设计哲学。Agent �
 
 - **AgentOS 跟 OpenClaw、Hermes 的关系**是同类不同定位。三者都是 Agent OS，OpenClaw 偏个人、Hermes 偏个人到小团队，AgentOS 直接定位严监管企业场景。三者都采用 markdown + frontmatter 的目录形态，社区的优质 Skill 经过企业审查后理论上可以导入 AgentOS 的全局 Skill 库（`.AgentOS/skills/`）。
 - **AgentOS 跟 Dify、Coze 这类编排平台的关系**是互补。两者甚至可以组合（Dify 作应用层，AgentOS 作基础设施层）。
-- **AgentOS 跟 Spring AI、Spring AI Alibaba、LangChain4j 这些 Java AI 框架的关系**是复用。AgentOS 的 LLM Provider 抽象直接基于 Spring AI Alibaba 的主流 LLM connector，不重复造轮子。
+- **AgentOS 跟 Spring AI、Spring AI Alibaba、LangChain4j 这些 Java AI 框架的关系**是复用。AgentOS 的 LLM Provider 抽象直接基于 Spring 官方 Spring AI 的模型抽象和 connector（技术选型上不引入 Spring AI Alibaba 系列依赖），不重复造轮子。
 
 ---
 
