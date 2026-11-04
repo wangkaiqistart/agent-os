@@ -263,7 +263,7 @@ AgentOS-boot        Spring Boot 启动与依赖聚合
 
 ## 文档
 
-项目官网的源码在 `website/`（VitePress + three.js），本地预览：`cd website && npm install && npm run dev`。
+项目官网：<https://wangkaiqistart.github.io/agent-os/>。源码在 `website/`（VitePress + three.js），本地预览：`cd website && npm install && npm run dev`；推送到 `main` 后由 GitHub Actions 自动发布。
 
 | 文档 | 内容 |
 |------|------|
