@@ -1,0 +1,71 @@
+# AgentOS 配置，键名与取值见技术方案 3.2、3.4、3.5、4.3、8.8。
+# 密钥一律用 ${ENV_VAR} 占位，本地开发从仓库根目录的 .env 读取（模板见 .env.example）。
+spring:
+  application:
+    name: AgentOS
+  config:
+    import: optional:file:.env[.properties]
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${AGENTOS_DB_URL}
+    username: ${AGENTOS_DB_USERNAME}
+    password: ${AGENTOS_DB_PASSWORD}
+  jpa:
+    open-in-view: false                    # 避免 HTTP 请求期间占住数据库连接，见 9.1
+    hibernate:
+      ddl-auto: validate                   # 表结构只由 Flyway 管理
+  flyway:
+    placeholders:
+      embeddingDimensions: ${AGENTOS_EMBEDDING_DIMENSIONS:1024}
+  docker:
+    compose:
+      enabled: false                       # 使用项目方提供的 PostgreSQL
+  ai:
+    model:
+      embedding: none                      # Embedding 只走 agentos.embedding，见 3.4
+    retry:
+      max-attempts: 1                      # 关闭模型实现内置重试（2.0.2 默认 10 次），重试归 ProviderService，见 3.1
+    openai:                                # Starter 自动配置的辅助模型，与 primary 相同，见 1.3
+      base-url: ${AGENTOS_LLM_BASE_URL}
+      api-key: ${AGENTOS_LLM_API_KEY}
+      chat:
+        model: ${AGENTOS_LLM_MODEL}
+    mcp:
+      client:
+        enabled: false                     # MCP 客户端由 McpClientService 编程式创建，见 6.4
+    chat:
+      client:
+        tool-calling:
+          enabled: false                   # 关闭 ToolCallingAdvisor 自动注册，工具只经 ToolExecutor 执行
+    tools:
+      limits:                              # 单轮工具调用上限，见 4.3
+        max-calls-per-tool-default: 10
+        max-calls-per-tool:
+          notify: 3
+        max-total-tool-calls: 30
+        on-limit-exceeded: RETURN_ERROR_RESPONSE
+
+agentos:
+  default-provider: primary
+  providers:
+    primary:
+      type: openai
+      base-url: ${AGENTOS_LLM_BASE_URL}
+      api-key: ${AGENTOS_LLM_API_KEY}
+      model: ${AGENTOS_LLM_MODEL}
+      reasoning-effort: low
+      timeout: 120s
+  embedding:
+    enabled: ${AGENTOS_EMBEDDING_ENABLED:true}
+    base-url: ${AGENTOS_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+    api-key: ${AGENTOS_EMBEDDING_API_KEY:}
+    model: ${AGENTOS_EMBEDDING_MODEL:text-embedding-v4}
+    dimensions: ${AGENTOS_EMBEDDING_DIMENSIONS:1024}
+    max-batch-size: 10                     # 百炼单次最多 10 条，见 3.4
+    timeout: 30s
+  web:
+    sync-wait: 60s
+  shutdown:
+    turn-grace: 60s

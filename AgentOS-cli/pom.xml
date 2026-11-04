@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.agentos</groupId>
+        <artifactId>AgentOS-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>AgentOS-cli</artifactId>
+    <description>命令行入口：Picocli 根命令与子命令、ConfigLoader</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.agentos</groupId>
+            <artifactId>AgentOS-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.agentos</groupId>
+            <artifactId>AgentOS-channel-cli</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <resources>
+            <!-- 只过滤版本资源（@...@ 占位符），其他资源原样复制 -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>agentos-version.properties</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>agentos-version.properties</exclude>
+                </excludes>
+            </resource>
+        </resources>
+        <plugins>
+            <!--
+              额外打一个可单独运行的 jar：AgentOS-cli-exec.jar。
+              原来的普通 jar 保持不变，AgentOS-boot 照常依赖它。
+            -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.agentos.cli.AgentOSCli</mainClass>
+                    <classifier>exec</classifier>
+                    <finalName>AgentOS-cli</finalName>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

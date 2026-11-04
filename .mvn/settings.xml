@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  项目级 Maven 设置：所有依赖只从 Maven Central 解析（见 CLAUDE.md 技术栈约束）。
+  由 .mvn/maven.config 自动加载，覆盖本机全局与用户级 settings 里的镜像配置。
+  本地仓库沿用默认的 ~/.m2/repository，已下载的依赖可以复用。
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 https://maven.apache.org/xsd/settings-1.2.0.xsd">
+    <localRepository>${user.home}/.m2/repository</localRepository>
+    <mirrors>
+        <mirror>
+            <id>central</id>
+            <name>Maven Central</name>
+            <url>https://repo.maven.apache.org/maven2</url>
+            <mirrorOf>*</mirrorOf>
+        </mirror>
+    </mirrors>
+</settings>
