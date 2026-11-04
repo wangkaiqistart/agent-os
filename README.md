@@ -44,23 +44,7 @@ AgentOS 只做运行时，不做可视化编排。需要复杂 workflow 时，�
 
 ## 架构
 
-```
- ┌─────────────────────────── 接入层 ───────────────────────────┐
- │  CLI Channel (chat)    Web Service (REST)    AgentScheduler (cron) │
- └───────────────────────────────┬──────────────────────────────┘
-                                 ▼
-                       AgentService.process()
- ┌─────────────────────────── 引擎层 ───────────────────────────┐
- │        ReActLoop  ──  PromptBuilder  ──  ToolExecutor         │
- └──────────┬──────────────────────┬──────────────────┬─────────┘
-            ▼                      ▼                  ▼
- ┌──────── 能力层 ───────────────────────────────────────────────┐
- │ ProviderService        MemoryService         ToolRegistry + Sandbox │
- │ (Spring AI ChatModel)  (会话 + 长期记忆)     (内置 / @Tool / MCP)     │
- └──────────┬──────────────────────┬──────────────────┬─────────┘
-            ▼                      ▼                  ▼
-      各家 LLM API     PostgreSQL / MEMORY.md     外部 MCP server
-```
+![AgentOS 目标架构：三个触发入口、统一 AgentService、自研 ReAct 引擎、Spring AI 共享能力，以及 PostgreSQL 和文件工作区](docs/images/architecture.svg)
 
 三个入口汇入同一个 `AgentService`。ReAct 循环直接调用 Spring AI 的 `ChatModel`，模型只返回工具调用请求，工具由注入的 `ToolCallingManager` 执行。每个工具都是 Spring AI 的 `ToolCallback`，外面套一层 `GovernedToolCallback` 负责审计、超时和重试，所以任何执行路径都绕不过审计。
 
