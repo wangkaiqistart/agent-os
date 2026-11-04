@@ -6,7 +6,11 @@
 
 AgentOS 是 Java 实现的企业级 **Agent OS**：私有部署的 Agent 统一底座，在一个进程里承载多个业务 Agent，共享 LLM 接入、ReAct 引擎、记忆、工具、沙箱和审计能力。
 
-**仓库目前处于设计阶段，只有 `docs/` 下的设计文档，还没有任何代码、`pom.xml` 或构建脚本。** 下文的模块、命令都是目标形态。动手写代码前先读对应文档章节，不要凭印象实现。
+**仓库目前只有 Maven 骨架：** 根 `pom.xml`（继承 `spring-boot-starter-parent` 4.1.2，导入 `spring-ai-bom` 2.0.2）和核心阶段 9 个模块，每个模块只有 `package-info.java`；`AgentOS-boot` 有启动类 `AgentOSApplication`（先交给 Picocli 根命令 `AgentOSCommand`）和 `application.yaml`。业务代码、Flyway 脚本、测试都还没写。动手写代码前先读对应文档章节，不要凭印象实现。
+
+- 在仓库根目录执行 `mvn`。`.mvn/maven.config` 会加载 `.mvn/settings.xml`，强制所有依赖只从 Maven Central 解析，覆盖本机 settings 里的公司镜像。
+- groupId 是 `com.agentos`，包名 `com.agentos.<模块>`（如 `com.agentos.channel.cli`）。
+- 版本集中在根 `pom.xml` 的 `<properties>`：Spring AI 2.0.2、springdoc 3.2.0、Picocli 4.7.7、ShedLock 7.10.1。
 
 ## 文档地图与优先级
 
@@ -82,18 +86,30 @@ Maven 多模块，模块名前缀 `AgentOS-`：核心阶段 9 个（`core`、`pr
 
 `AgentOS init` 生成 `.AgentOS/`：`agents/<name>/AGENT.md`（frontmatter = Profile，正文 = 任务指令，可带 `skills/` 相对软连接、`scripts/`、`REFERENCE.md`）、`skills/`、`memory/MEMORY.md`、`mcp_servers.yaml`、Bootstrap 文件 `AGENTS.md` / `SOUL.md` / `USER.md`、`output/`、`logs/`。`init` 必须幂等，不覆盖已有文件，也不连接数据库。
 
-## 命令（目标形态，代码尚未实现）
+## 命令
 
 ```bash
-mvn clean package                 # 构建 fat JAR（集成测试依赖 Docker / Testcontainers）
+mvn -B clean package              # 构建，产物 AgentOS-boot/target/AgentOS.jar（集成测试加入后依赖 Docker / Testcontainers）
+python3 scripts/check_env.py      # 检查 .env 里的模型与 Embedding 配置是否可用（不打印 key）
+java -jar AgentOS-boot/target/AgentOS.jar --version       # 完整应用
+java -jar AgentOS-cli/target/AgentOS-cli-exec.jar --version # 只含命令行模块，可单独运行
+# 以下为目标形态，尚未实现
 mvn verify -Pllm                  # 加跑调用真实模型的端到端测试与评估
-java -jar AgentOS-boot/target/*.jar <子命令>
 AgentOS init | status | chat [--profile <name>] | serve | gateway
 AgentOS profile list|create|show|delete <name>
 AgentOS provider list | tool list | session list
 ```
 
 核心阶段 12 个子命令，后续加 `agent import`。`init`、`profile list` 这类命令不启动 Spring 上下文；`chat`、`serve`、`gateway` 才启动。
+
+## 官网
+
+`website/` 是 VitePress 1.6 站点（独立的 npm 项目，不参与 Maven 构建）。首页由 `website/.vitepress/theme/components/HomePage.vue` 渲染，背景是 `HeroScene.vue` 的 three.js 场景（只在浏览器端动态加载，兼容 SSR），`ReactTrace.vue` 是轮次回放终端。首页文案必须与 `docs/` 一致，不要写尚未实现的能力为"已支持"。
+
+```bash
+cd website && npm install && npm run dev    # 本地预览 http://localhost:5173
+npm run build                               # 产物在 website/.vitepress/dist
+```
 
 ## 文档阅读提示
 

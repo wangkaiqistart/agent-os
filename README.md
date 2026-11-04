@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/logo.svg" alt="AgentOS logo" width="128" height="128">
+
 # AgentOS
 
 **Java 原生、私有部署、可审计的企业级 Agent OS**
@@ -260,6 +262,8 @@ AgentOS-boot        Spring Boot 启动与依赖聚合
 1.0 之后由社区推进：IM 渠道、Provider 故障切换、Tool Policy、容器沙箱、SSE 端点、Web 管理台、SSO 与多租户、集群部署。
 
 ## 文档
+
+项目官网的源码在 `website/`（VitePress + three.js），本地预览：`cd website && npm install && npm run dev`。
 
 | 文档 | 内容 |
 |------|------|
