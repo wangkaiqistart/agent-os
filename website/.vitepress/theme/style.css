@@ -1,0 +1,60 @@
+/* AgentOS 官网主题：深色，主色取自 logo 的蓝青渐变，强调色为琥珀 */
+:root,
+.dark {
+  --aos-bg: #050816;
+  --aos-panel: rgba(10, 16, 34, 0.62);
+  --aos-line: rgba(148, 163, 184, 0.18);
+  --aos-muted: #8b9ab3;
+  --aos-sky: #38bdf8;
+  --aos-teal: #2dd4bf;
+  --aos-amber: #fbbf24;
+
+  --vp-c-bg: var(--aos-bg);
+  --vp-c-bg-alt: #070b1d;
+  --vp-c-bg-soft: #0b1226;
+  --vp-c-brand-1: var(--aos-teal);
+  --vp-c-brand-2: #5eead4;
+  --vp-c-brand-3: #14b8a6;
+  --vp-c-divider: var(--aos-line);
+  --vp-nav-bg-color: rgba(5, 8, 22, 0.55);
+  --vp-font-family-base: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Segoe UI', Roboto, sans-serif;
+}
+
+html,
+body {
+  background: var(--aos-bg);
+}
+
+::selection {
+  background: rgba(45, 212, 191, 0.35);
+}
+
+/* 导航栏：半透明毛玻璃，让 three.js 背景透出来 */
+.VPNav .VPNavBar,
+.VPNav .VPNavBar:not(.home),
+.VPNav .VPNavBar .content-body,
+.VPNav .VPNavBar.has-sidebar .content-body {
+  background: transparent !important;
+}
+.VPNav {
+  background: rgba(5, 8, 22, 0.45);
+  backdrop-filter: saturate(160%) blur(14px);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  border-bottom: 1px solid var(--aos-line);
+}
+.VPNavBar .divider {
+  display: none;
+}
+
+/* 内容与页脚浮在背景场景之上 */
+.VPContent,
+.VPFooter {
+  position: relative;
+  z-index: 1;
+}
+.VPFooter {
+  background: rgba(5, 8, 22, 0.75) !important;
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--aos-line) !important;
+}
