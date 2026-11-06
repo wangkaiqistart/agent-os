@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build",
-    "preview": "vitepress preview"
+    "preview": "vitepress preview",
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "check": "npm run check:i18n",
+    "verify": "npm run check && npm run build"
   },
   "devDependencies": {
     "vitepress": "^1.6.4",

@@ -7,6 +7,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 const host = ref(null)
 const failed = ref(false)
 let cleanup = null
+let disposed = false
 
 const C = {
   bg: 0x050816,
@@ -23,10 +24,14 @@ onMounted(async () => {
   if (!el) return
 
   const THREE = await import('three')
+  if (disposed || !host.value) return
   const { EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js')
+  if (disposed || !host.value) return
   const { RenderPass } = await import('three/addons/postprocessing/RenderPass.js')
   const { UnrealBloomPass } = await import('three/addons/postprocessing/UnrealBloomPass.js')
+  if (disposed || !host.value) return
   const { OutputPass } = await import('three/addons/postprocessing/OutputPass.js')
+  if (disposed || !host.value) return
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const small = window.innerWidth < 768
@@ -360,7 +365,10 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => cleanup && cleanup())
+onBeforeUnmount(() => {
+  disposed = true
+  cleanup && cleanup()
+})
 </script>
 
 <template>

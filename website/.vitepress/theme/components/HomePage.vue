@@ -1,49 +1,77 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useData, withBase } from 'vitepress'
 import HeroScene from './HeroScene.vue'
 import ReactTrace from './ReactTrace.vue'
+import { home } from '../i18n.mjs'
 
+const { lang } = useData()
+const locale = lang.value?.startsWith('en') ? 'en' : 'zh'
+const copy = home[locale]
 const repo = 'https://github.com/wangkaiqistart/agent-os'
-const docs = `${repo}/blob/main/docs/TechnicalSolution.md`
+const docs = (slug) => withBase(`${locale === 'en' ? '/en/' : '/'}docs/${slug}`)
 
-const words = ['跑起来', '管起来', '审计起来', '留在企业里']
+const words = locale === 'en' ? ['run', 'govern', 'audit', 'stay private'] : ['跑起来', '管起来', '审计起来', '留在企业里']
 const word = ref(words[0])
 
-const stats = [
-  { n: 5, label: '核心能力' },
-  { n: 9, label: '内置工具' },
-  { n: 10, label: 'REST 端点' },
-  { n: 3, label: '触发入口，共用一条链路' }
+const stats = locale === 'en' ? [
+  { n: 5, label: 'design capabilities' },
+  { n: 9, label: 'target built-in Tools' },
+  { n: 10, label: 'target REST endpoints' },
+  { n: 3, label: 'shared trigger paths' }
+] : [
+  { n: 5, label: '设计能力' },
+  { n: 9, label: '目标内置工具' },
+  { n: 10, label: '目标 REST 端点' },
+  { n: 3, label: '共享触发入口' }
 ]
 const counts = ref(stats.map(() => 0))
 
-const pains = [
+const pains = locale === 'en' ? [
+  'Every team rebuilds model calls, tool execution, memory, and audit trails',
+  'Connecting Node.js / Python Agent projects to Java systems adds glue code',
+  'Tool failures are hard to explain and harder to trace',
+  'External SaaS data paths complicate security and compliance reviews'
+] : [
   '每个业务都要自己写一遍模型调用、工具执行、记忆和审计',
   '现有开源 Agent OS 是 Node.js / Python，接 Java 系统要写大量胶水',
   '工具调用失败没人知道，出了问题无从追溯',
   '数据经过外部 SaaS，过不了安全与合规评审'
 ]
-const gains = [
+const gains = locale === 'en' ? [
+  'Many Agents share one runtime; a new Agent starts with one directory',
+  'A Spring Boot application that fits existing Java operations and audit flows',
+  'Every model and tool call is designed to land in an audit record from day one',
+  'Private deployment keeps data inside the enterprise and secrets in environment variables'
+] : [
   '多个 Agent 共用一个底座，新增一个 Agent 只要放一个目录',
   '就是一个 Spring Boot 应用，直接纳入现有 Java 运维与审计流程',
   '每次模型调用、工具调用从第一天就写入审计表',
   '私有部署，数据不出企业，密钥只走环境变量'
 ]
 
-const caps = [
-  { icon: '◎', title: '对接 LLM', tag: 'Spring AI 2.0 ChatModel',
-    desc: 'provider name 显式映射到 ChatModel，OpenAI 兼容、Anthropic、Ollama 都能接，换模型不改业务。' },
-  { icon: '⟳', title: 'ReAct 循环', tag: 'ToolCallingManager',
-    desc: '循环自己驱动，组件全部来自 Spring AI 2.0。两道上限、四层超时，同步与流式共用一套循环。' },
-  { icon: '◈', title: '三层记忆', tag: 'PgVectorStore',
-    desc: '会话按轮次截断，长期记忆分核心区与归档区，配置 Embedding 后走 pgvector 语义检索。' },
-  { icon: '⬡', title: 'Tool 体系', tag: 'ToolCallback · MCP',
-    desc: '9 个内置工具，MCP、@Tool Bean、零代码三档扩展，统一由 GovernedToolCallback 审计、超时、重试。' },
-  { icon: '⇄', title: 'Web Service', tag: '10 个 REST 端点',
-    desc: '会话、调用、配置、记忆、工具、系统状态。同步等待超时返回 202，同一会话串行，冲突返回 409。' }
+const caps = locale === 'en' ? [
+  { icon: '◎', title: 'LLM access', tag: 'Spring AI 2.0 ChatModel', desc: 'Map named Providers to ChatModels and switch between OpenAI-compatible, Anthropic, and Ollama endpoints.' },
+  { icon: '⟳', title: 'ReAct loop', tag: 'ToolCallingManager', desc: 'AgentOS drives the loop with Spring AI 2.0 components, two limits, four timeouts, and one sync/stream path.' },
+  { icon: '◈', title: 'Three-layer memory', tag: 'PgVectorStore', desc: 'Truncate complete Turns, separate core and archival memory, and add semantic retrieval with Embeddings.' },
+  { icon: '⬡', title: 'Tool system', tag: 'ToolCallback · MCP', desc: 'Nine target built-ins plus MCP, @Tool Beans, and zero-code extensions through one governed callback.' },
+  { icon: '⇄', title: 'Web Service', tag: '10 target REST endpoints', desc: 'Sessions, invocations, configuration, memory, tools, and system state with 202 and 409 semantics.' }
+] : [
+  { icon: '◎', title: '对接 LLM', tag: 'Spring AI 2.0 ChatModel', desc: 'provider name 显式映射到 ChatModel，OpenAI 兼容、Anthropic、Ollama 都能接，换模型不改业务。' },
+  { icon: '⟳', title: 'ReAct 循环', tag: 'ToolCallingManager', desc: '循环自己驱动，组件全部来自 Spring AI 2.0。两道上限、四层超时，同步与流式共用一套循环。' },
+  { icon: '◈', title: '三层记忆', tag: 'PgVectorStore', desc: '会话按轮次截断，长期记忆分核心区与归档区，配置 Embedding 后走 pgvector 语义检索。' },
+  { icon: '⬡', title: 'Tool 体系', tag: 'ToolCallback · MCP', desc: '9 个内置工具，MCP、@Tool Bean、零代码三档扩展，统一由 GovernedToolCallback 审计、超时、重试。' },
+  { icon: '⇄', title: 'Web Service', tag: '10 个目标 REST 端点', desc: '会话、调用、配置、记忆、工具、系统状态。同步等待超时返回 202，同一会话串行，冲突返回 409。' }
 ]
 
-const guards = [
+const guards = locale === 'en' ? [
+  { t: 'Sandbox contract first', d: 'Path, executable, and domain allowlists; the contract can later back containers or microVMs.' },
+  { t: 'Retry only idempotent Tools', d: 'Side-effecting notify and http_post calls are not retried automatically.' },
+  { t: 'Redact before audit', d: 'Webhook tokens, Authorization values, and environment secrets are removed before persistence.' },
+  { t: 'Memory is data, not instructions', d: 'A marked memory block and entry limits reduce prompt-injection risk.' },
+  { t: 'Bound tool results', d: 'Oversized results are truncated with their original length instead of flooding context.' },
+  { t: 'Secrets stay out of files', d: 'Use ${ENV_VAR} placeholders and ConfigLoader validation; never commit .env.' }
+] : [
   { t: 'Sandbox 接口先行', d: '路径、可执行文件、域名白名单；接口不变，后续可换容器或 microVM。' },
   { t: '只重试幂等工具', d: 'notify、http_post 这类有副作用的工具不自动重试，避免重复推送。' },
   { t: '审计先脱敏', d: 'webhook token、Authorization、环境变量密钥在落库和返回模型前替换。' },
@@ -125,48 +153,49 @@ onBeforeUnmount(() => {
     <!-- 首屏 -->
     <section class="hero">
       <div class="hero-inner">
-        <div class="badge"><span class="badge-dot"></span>设计阶段 · 核心阶段开发中 · Apache-2.0</div>
-        <h1 class="title"><span class="grad">AgentOS</span></h1>
+        <div class="badge"><span class="badge-dot"></span>{{ copy.badge }}</div>
+        <h1 class="title"><span class="grad">{{ copy.title }}</span></h1>
         <p class="subtitle">
-          让一群 Agent 在企业里
+          {{ locale === 'en' ? 'Let many Agents' : '让一群 Agent 在企业里' }}
           <span class="word-wrap"><Transition name="word" mode="out-in"><span :key="word" class="word">{{ word }}</span></Transition></span>
         </p>
-        <p class="desc">
-          Java 原生、私有部署、可审计的企业级 Agent OS。装在企业自己的服务器或 K8s 上，
-          一个目录定义一个 Agent，一个进程跑一群 Agent，共享模型接入、ReAct 引擎、记忆、工具、沙箱与审计。
-        </p>
+        <p class="desc">{{ copy.desc }}</p>
         <div class="actions">
-          <a class="btn primary" href="#quickstart">快速开始 →</a>
-          <a class="btn ghost" :href="docs" target="_blank" rel="noopener">技术方案</a>
-          <a class="btn ghost" :href="repo" target="_blank" rel="noopener">GitHub</a>
+          <a class="btn primary" :href="docs('quick-start')">{{ copy.start }}</a>
+          <a class="btn ghost" :href="docs('what')">{{ copy.docs }}</a>
+          <a class="btn ghost" :href="repo" target="_blank" rel="noopener">{{ copy.github }}</a>
         </div>
         <p class="note">JDK 21 · Spring Boot 4 · Spring AI 2.0 · PostgreSQL + pgvector · MCP</p>
       </div>
-      <a class="scroll-hint" href="#why" aria-label="向下滚动"><span></span></a>
+      <a class="scroll-hint" href="#why" :aria-label="locale === 'en' ? 'Scroll down' : '向下滚动'"><span></span></a>
     </section>
 
-    <!-- 数字 -->
-    <section ref="statsEl" class="stats reveal">
+    <!-- 设计目标 -->
+    <section ref="statsEl" class="stats-wrap reveal">
+      <div class="stats-label">{{ copy.design }}</div>
+      <section class="stats">
       <div v-for="(s, i) in stats" :key="s.label" class="stat">
         <div class="stat-n">{{ counts[i] }}</div>
         <div class="stat-l">{{ s.label }}</div>
       </div>
+      </section>
+      <p class="status-line">{{ copy.status }}</p>
     </section>
 
     <!-- 为什么需要 -->
     <section id="why" class="section">
       <div class="head reveal">
-        <span class="tag">为什么需要</span>
-        <h2>难点不在"做出一个 Agent"，<br>而在"让它在企业里可控地跑起来"</h2>
-        <p>Java 生态有 Spring AI 这样的框架，却没有一个装好就能跑的 Agent 底座。AgentOS 补的就是这一层。</p>
+        <span class="tag">{{ copy.whyTag }}</span>
+        <h2>{{ copy.whyTitle }}</h2>
+        <p>{{ copy.whyDesc }}</p>
       </div>
       <div class="compare">
         <div class="cmp bad reveal">
-          <div class="cmp-label">今天</div>
+          <div class="cmp-label">{{ locale === 'en' ? 'Without a shared runtime' : '没有统一底座' }}</div>
           <div v-for="t in pains" :key="t" class="cmp-row"><span class="ico x">✕</span>{{ t }}</div>
         </div>
         <div class="cmp good reveal">
-          <div class="cmp-label">有了 AgentOS</div>
+          <div class="cmp-label">{{ locale === 'en' ? 'With AgentOS' : '有了 AgentOS' }}</div>
           <div v-for="t in gains" :key="t" class="cmp-row"><span class="ico ok">✓</span>{{ t }}</div>
         </div>
       </div>
@@ -175,8 +204,8 @@ onBeforeUnmount(() => {
     <!-- 五大核心能力 -->
     <section class="section">
       <div class="head reveal">
-        <span class="tag">核心能力</span>
-        <h2>五大能力，循环自己驱动，组件全部来自 Spring AI 2.0</h2>
+        <span class="tag">{{ copy.capabilities }}</span>
+        <h2>{{ copy.capabilityTitle }}</h2>
       </div>
       <div class="caps">
         <article v-for="(c, i) in caps" :key="c.title" class="card reveal" :style="{ '--d': i * 70 + 'ms' }" @mousemove="spot">
@@ -191,13 +220,13 @@ onBeforeUnmount(() => {
     <!-- 一次轮次 -->
     <section class="section split">
       <div class="split-text reveal">
-        <span class="tag">一次轮次里发生了什么</span>
-        <h2>每一次模型调用、每一次工具调用，都有据可查</h2>
+        <span class="tag">{{ copy.trace }}</span>
+        <h2>{{ locale === 'en' ? 'Every model and tool call has a trace' : '每一次模型调用、每一次工具调用，都有据可查' }}</h2>
         <ul class="bullets">
-          <li><b>会话串行</b>：同一会话一次只跑一个轮次，每次迭代前续租</li>
-          <li><b>两道上限</b>：max_iterations 限模型调用，spring.ai.tools.limits 限工具调用</li>
-          <li><b>四层超时</b>：单次模型调用、单个工具、整轮、HTTP 同步等待</li>
-          <li><b>审计落库</b>：llm_calls 与 tool_invocations 串起每一次迭代</li>
+          <li><b>{{ locale === 'en' ? 'Session serialization' : '会话串行' }}</b>{{ locale === 'en' ? ': one Turn at a time, lease renewed before each iteration' : '：同一会话一次只跑一个轮次，每次迭代前续租' }}</li>
+          <li><b>{{ locale === 'en' ? 'Two limits' : '两道上限' }}</b>{{ locale === 'en' ? ': max_iterations for model calls and spring.ai.tools.limits for tools' : '：max_iterations 限模型调用，spring.ai.tools.limits 限工具调用' }}</li>
+          <li><b>{{ locale === 'en' ? 'Four timeouts' : '四层超时' }}</b>{{ locale === 'en' ? ': model, tool, Turn, and synchronous HTTP wait' : '：单次模型调用、单个工具、整轮、HTTP 同步等待' }}</li>
+          <li><b>{{ locale === 'en' ? 'Audited storage' : '审计落库' }}</b>{{ locale === 'en' ? ': llm_calls and tool_invocations connect every iteration' : '：llm_calls 与 tool_invocations 串起每一次迭代' }}</li>
         </ul>
       </div>
       <div class="reveal"><ReactTrace /></div>
@@ -282,8 +311,8 @@ onBeforeUnmount(() => {
     <!-- 安全与审计 -->
     <section class="section">
       <div class="head reveal">
-        <span class="tag">安全与审计</span>
-        <h2>为严监管企业设计，安全是第一天就有的</h2>
+        <span class="tag">{{ copy.security }}</span>
+        <h2>{{ locale === 'en' ? 'Designed for governed enterprise runtime' : '为严监管企业设计，安全是第一天就有的' }}</h2>
       </div>
       <div class="guards">
         <div v-for="(g, i) in guards" :key="g.t" class="guard reveal" :style="{ '--d': i * 60 + 'ms' }" @mousemove="spot">
@@ -298,17 +327,23 @@ onBeforeUnmount(() => {
 
     <!-- 快速开始 -->
     <section id="quickstart" class="section cta reveal">
-      <h2>开始构建</h2>
-      <p>项目处于设计阶段，核心阶段的 9 个 Maven 模块已经可以编译打包。</p>
-<pre v-pre class="code cta-code"><span class="c"># 配置数据库、主链路模型与 Embedding（.env 不提交）</span>
+      <h2>{{ copy.ctaTitle }}</h2>
+      <p>{{ copy.ctaDesc }}</p>
+<pre v-if="locale !== 'en'" class="code cta-code"><span class="c"># 配置模型与 Embedding（.env 不提交）</span>
 cp .env.example .env
 
-<span class="c"># 构建并运行</span>
+<span class="c"># 构建并运行版本入口</span>
+mvn -B clean package
+java -jar AgentOS-boot/target/AgentOS.jar --version</pre>
+<pre v-else class="code cta-code"><span class="c"># Configure models and Embeddings (.env is never committed)</span>
+cp .env.example .env
+
+<span class="c"># Build and run the version entry point</span>
 mvn -B clean package
 java -jar AgentOS-boot/target/AgentOS.jar --version</pre>
       <div class="actions">
-        <a class="btn primary" :href="repo + '#快速开始'" target="_blank" rel="noopener">阅读 README</a>
-        <a class="btn ghost" :href="docs" target="_blank" rel="noopener">技术方案</a>
+        <a class="btn primary" :href="docs('quick-start')">{{ locale === 'en' ? 'Read the quick start' : '阅读快速开始' }}</a>
+        <a class="btn ghost" :href="docs('architecture')">{{ locale === 'en' ? 'Architecture' : '总体架构' }}</a>
         <a class="btn ghost" :href="repo" target="_blank" rel="noopener">GitHub</a>
       </div>
     </section>
@@ -398,6 +433,9 @@ java -jar AgentOS-boot/target/AgentOS.jar --version</pre>
 }
 
 /* ---------- 数字 ---------- */
+.stats-wrap { max-width: 1100px; margin: 0 auto 40px; text-align: center; }
+.stats-label { margin-bottom: 12px; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--aos-amber); }
+.status-line { max-width: 760px; margin: -22px auto 0; padding: 0 24px; font-size: 13px; line-height: 1.7; color: var(--aos-muted); }
 .stats {
   max-width: 1100px; margin: 0 auto 40px; padding: 28px 24px;
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;

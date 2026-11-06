@@ -1,9 +1,26 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useData } from 'vitepress'
+import { ui } from '../i18n.mjs'
+
+const { lang } = useData()
+const locale = lang.value?.startsWith('en') ? 'en' : 'zh'
+const title = locale === 'en' ? 'agentos · turn trace (design)' : 'agentos · turn trace（设计示意）'
 
 // 一次轮次（turn）的示意回放：滚动到可见时逐行出现，播完稍停再重播。
 // 内容对应技术方案 12.1 的"每日天气" Demo，数字仅为示意。
-const lines = [
+const lines = locale === 'en' ? [
+  { k: 'meta', t: '▶ turn 7f3a · trigger=scheduler · agent=daily-weather · deadline 300s' },
+  { k: 'sys', t: '  lease acquired · prompt = AGENT.md + Bootstrap + memory + 20 Turns' },
+  { k: 'llm', t: '[iter 1] ChatModel.call  provider=primary · 2.1s · 4,512 tokens' },
+  { k: 'tool', t: '  ↳ tool_call  http_get  {"url":"https://api.weather…/beijing"}' },
+  { k: 'ok', t: '    sandbox ✓ domain allowlist · 0.4s · tool_invocations #1' },
+  { k: 'llm', t: '[iter 2] ChatModel.call  provider=primary · 1.8s · 4,960 tokens' },
+  { k: 'tool', t: '  ↳ tool_call  notify  {"channel":"team-lark","content":"12°C today…"}' },
+  { k: 'ok', t: '    sandbox ✓ · redactor ✓ webhook token redacted · tool_invocations #2' },
+  { k: 'llm', t: '[iter 3] ChatModel.call  provider=primary · 0.9s · finish_reason=stop' },
+  { k: 'done', t: '✔ SUCCEEDED · 3 iterations · 2 tool calls · llm_calls ×3 · 5.2s' }
+] : [
   { k: 'meta', t: '▶ turn 7f3a · trigger=scheduler · agent=daily-weather · deadline 300s' },
   { k: 'sys', t: '  lease acquired · prompt = AGENT.md + Bootstrap + 记忆 + 最近 20 轮' },
   { k: 'llm', t: '[iter 1] ChatModel.call  provider=primary · 2.1s · 4,512 tokens' },
@@ -61,7 +78,7 @@ onBeforeUnmount(() => {
   <div ref="root" class="term">
     <div class="term-bar">
       <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-      <span class="term-title">agentos · turn trace（示意）</span>
+      <span class="term-title">{{ title }}</span>
     </div>
     <pre class="term-body"><code><span
       v-for="(l, i) in lines.slice(0, shown)" :key="i" :class="['ln', l.k]">{{ l.t }}
