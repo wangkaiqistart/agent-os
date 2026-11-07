@@ -1,0 +1,49 @@
+# 工程基线配置：逐键合并进 AgentOS-boot/src/main/resources/application.yaml。
+# 注意 YAML 里重复的顶层键会互相覆盖：spring.* 合并进已有的 spring: 段，
+# spring.ai.* 合并进已有的 spring.ai: 段（chat、tools 已存在，只加 observations 子键），不要另起一段。
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 70s        # 大于 agentos.shutdown.turn-grace（60s），优雅停机时等轮次收尾
+  ai:
+    chat:
+      observations:                        # 合并进已有的 spring.ai.chat: 段
+        log-prompt: false                  # prompt / 回复可能含密钥和用户数据，不进日志
+        log-completion: false
+    tools:
+      observations:                        # 合并进已有的 spring.ai.tools: 段
+        include-content: false             # 工具参数和结果不导出到 Span，审计以 tool_invocations 为准（技术方案 6.1）
+
+# HTTP Server：Spring MVC + virtual thread（spring.threads.virtual.enabled 已开），见技术方案 7.1
+server:
+  port: 8080
+  shutdown: graceful
+
+# 日志：控制台给人看（chat 模式下保持可读），文件写 ECS JSON 给机器看
+# MDC 约定键：sessionId、turnId、agent、iteration，由 ReActLoop 在每轮开始时写入、结束时清理
+logging:
+  file:
+    name: .AgentOS/logs/agentos.log
+  structured:
+    format:
+      file: ecs
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 14
+      total-size-cap: 1GB
+
+# 监控：核心阶段只暴露健康检查；Prometheus 指标导出放扩展阶段（技术方案 1.2）
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never                  # 无认证，不暴露数据库等组件细节
+      probes:
+        enabled: true                      # /actuator/health/liveness、/readiness
+  observations:
+    key-values:
+      application: AgentOS

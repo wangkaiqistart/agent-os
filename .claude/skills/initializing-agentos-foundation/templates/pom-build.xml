@@ -1,0 +1,162 @@
+<!--
+  工程基线：合并进根 pom.xml。不是完整的 pom，按注释分段合并，不要整段覆盖。
+  所有检查都绑定在 verify 阶段：`mvn verify` 失败 = 违反规范。
+-->
+
+<!-- ① 合并进根 pom 的 <properties>（版本 2026-11 从 Maven Central 核实） -->
+<properties>
+    <spotless.version>3.11.0</spotless.version>
+    <google-java-format.version>2.0.0</google-java-format.version>
+    <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
+    <checkstyle.version>14.4.0</checkstyle.version>
+    <spotbugs-maven-plugin.version>4.10.5.0</spotbugs-maven-plugin.version>
+    <spotbugs.version>4.10.5</spotbugs.version>
+    <findsecbugs.version>1.14.0</findsecbugs.version>
+    <archunit.version>1.5.1</archunit.version>
+</properties>
+
+<!-- ② 合并进根 pom 的 <dependencyManagement><dependencies> -->
+<dependency>
+    <groupId>com.tngtech.archunit</groupId>
+    <artifactId>archunit</artifactId>
+    <version>${archunit.version}</version>
+    <scope>test</scope>
+</dependency>
+
+<!-- ③ 根 pom 新增 <dependencies>：所有模块都能写测试（JUnit 6、AssertJ、Mockito、spring-test） -->
+<dependencies>
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+</dependencies>
+
+<!-- ④ 根 pom 新增 <build><plugins>，子模块自动继承 -->
+<build>
+    <plugins>
+        <!-- 依赖与环境禁令：版本由 spring-boot-starter-parent 管理 -->
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-enforcer-plugin</artifactId>
+            <executions>
+                <execution>
+                    <id>enforce-baseline</id>
+                    <goals>
+                        <goal>enforce</goal>
+                    </goals>
+                    <configuration>
+                        <rules>
+                            <requireJavaVersion>
+                                <version>[21,)</version>
+                            </requireJavaVersion>
+                            <requireMavenVersion>
+                                <version>[3.9,)</version>
+                            </requireMavenVersion>
+                            <bannedDependencies>
+                                <excludes>
+                                    <!-- 技术栈约束：不用 Spring AI Alibaba，不用厂商 SDK -->
+                                    <exclude>com.alibaba.cloud.ai</exclude>
+                                    <exclude>com.alibaba:dashscope-sdk-java</exclude>
+                                    <!-- 只用 PostgreSQL，不用 SQLite/H2 -->
+                                    <exclude>com.h2database</exclude>
+                                    <exclude>org.xerial:sqlite-jdbc</exclude>
+                                </excludes>
+                            </bannedDependencies>
+                        </rules>
+                    </configuration>
+                </execution>
+            </executions>
+        </plugin>
+
+        <!-- 格式化：Google Java Style，AOSP 变体（4 空格缩进）。本地先跑 mvn spotless:apply -->
+        <plugin>
+            <groupId>com.diffplug.spotless</groupId>
+            <artifactId>spotless-maven-plugin</artifactId>
+            <version>${spotless.version}</version>
+            <configuration>
+                <java>
+                    <googleJavaFormat>
+                        <version>${google-java-format.version}</version>
+                        <!-- 要纯 Google 风格（2 空格）就改成 GOOGLE -->
+                        <style>AOSP</style>
+                        <reflowLongStrings>false</reflowLongStrings>
+                        <!-- 不重排 Javadoc：中文注释按半角宽度折行会被打乱 -->
+                        <formatJavadoc>false</formatJavadoc>
+                    </googleJavaFormat>
+                </java>
+            </configuration>
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>check</goal>
+                    </goals>
+                    <phase>verify</phase>
+                </execution>
+            </executions>
+        </plugin>
+
+        <!-- 风格：只查格式化器管不到的命名、导入、编码习惯 -->
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-checkstyle-plugin</artifactId>
+            <version>${maven-checkstyle-plugin.version}</version>
+            <dependencies>
+                <dependency>
+                    <groupId>com.puppycrawl.tools</groupId>
+                    <artifactId>checkstyle</artifactId>
+                    <version>${checkstyle.version}</version>
+                </dependency>
+            </dependencies>
+            <configuration>
+                <configLocation>${maven.multiModuleProjectDirectory}/config/checkstyle/checkstyle.xml</configLocation>
+                <consoleOutput>true</consoleOutput>
+                <failOnViolation>true</failOnViolation>
+                <violationSeverity>warning</violationSeverity>
+                <includeTestSourceDirectory>true</includeTestSourceDirectory>
+            </configuration>
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>check</goal>
+                    </goals>
+                    <phase>verify</phase>
+                </execution>
+            </executions>
+        </plugin>
+
+        <!-- 缺陷 + 安全：SpotBugs 加 FindSecBugs（注入、弱加密、路径穿越、不安全反序列化等） -->
+        <plugin>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-maven-plugin</artifactId>
+            <version>${spotbugs-maven-plugin.version}</version>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.spotbugs</groupId>
+                    <artifactId>spotbugs</artifactId>
+                    <version>${spotbugs.version}</version>
+                </dependency>
+            </dependencies>
+            <configuration>
+                <effort>Max</effort>
+                <threshold>Medium</threshold>
+                <excludeFilterFile>${maven.multiModuleProjectDirectory}/config/spotbugs/spotbugs-exclude.xml</excludeFilterFile>
+                <plugins>
+                    <plugin>
+                        <groupId>com.h3xstream.findsecbugs</groupId>
+                        <artifactId>findsecbugs-plugin</artifactId>
+                        <version>${findsecbugs.version}</version>
+                    </plugin>
+                </plugins>
+            </configuration>
+            <executions>
+                <execution>
+                    <goals>
+                        <goal>check</goal>
+                    </goals>
+                    <phase>verify</phase>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>

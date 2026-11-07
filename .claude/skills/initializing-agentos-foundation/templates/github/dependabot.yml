@@ -1,0 +1,23 @@
+# 依赖漏洞与升级提醒。技术栈主版本已定（Spring Boot 4.x、Spring AI 2.0.x），只接受小版本升级
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      spring:
+        patterns: ['org.springframework*']
+    ignore:
+      - dependency-name: 'org.springframework.boot:*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'org.springframework.ai:*'
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: monthly

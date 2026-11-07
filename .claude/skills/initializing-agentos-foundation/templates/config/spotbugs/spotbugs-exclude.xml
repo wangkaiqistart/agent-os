@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SpotBugs + FindSecBugs 排除规则。只排除对 Spring 应用误报率高、价值低的规则，
+  新增排除项必须写明原因；安全类规则（FindSecBugs 的 SECURITY 分类）不要整类排除。
+-->
+<FindBugsFilter>
+    <!-- 构造器注入、record 持有可变集合时大量误报 -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+    <!-- 针对 finalizer 攻击，Spring Bean 不适用 -->
+    <Match>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+</FindBugsFilter>
