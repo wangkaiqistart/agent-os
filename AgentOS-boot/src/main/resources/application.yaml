@@ -5,6 +5,8 @@ spring:
     name: AgentOS
   config:
     import: optional:file:.env[.properties]
+  lifecycle:
+    timeout-per-shutdown-phase: 70s        # 大于 agentos.shutdown.turn-grace（60s），优雅停机时等轮次收尾
   threads:
     virtual:
       enabled: true
@@ -36,16 +38,55 @@ spring:
       client:
         enabled: false                     # MCP 客户端由 McpClientService 编程式创建，见 6.4
     chat:
+      observations:
+        log-prompt: false                  # prompt / 回复可能含密钥和用户数据，不进日志
+        log-completion: false
       client:
         tool-calling:
           enabled: false                   # 关闭 ToolCallingAdvisor 自动注册，工具只经 ToolExecutor 执行
     tools:
+      observations:
+        include-content: false             # 工具参数和结果不导出到 Span，审计以 tool_invocations 为准（技术方案 6.1）
       limits:                              # 单轮工具调用上限，见 4.3
         max-calls-per-tool-default: 10
         max-calls-per-tool:
           notify: 3
         max-total-tool-calls: 30
         on-limit-exceeded: RETURN_ERROR_RESPONSE
+
+# HTTP Server：Spring MVC + virtual thread（spring.threads.virtual.enabled 已开），见技术方案 7.1
+server:
+  port: 8080
+  shutdown: graceful
+
+# 日志：控制台给人看（chat 模式下保持可读），文件写 ECS JSON 给机器看
+# MDC 约定键：sessionId、turnId、agent、iteration，由 ReActLoop 在每轮开始时写入、结束时清理
+logging:
+  file:
+    name: .AgentOS/logs/agentos.log
+  structured:
+    format:
+      file: ecs
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 14
+      total-size-cap: 1GB
+
+# 监控：核心阶段只暴露健康检查；Prometheus 指标导出放扩展阶段（技术方案 1.2）
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never                  # 无认证，不暴露数据库等组件细节
+      probes:
+        enabled: true                      # /actuator/health/liveness、/readiness
+  observations:
+    key-values:
+      application: AgentOS
 
 agentos:
   default-provider: primary

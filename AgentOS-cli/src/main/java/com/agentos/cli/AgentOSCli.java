@@ -10,8 +10,7 @@ import picocli.CommandLine;
  */
 public final class AgentOSCli {
 
-    private AgentOSCli() {
-    }
+    private AgentOSCli() {}
 
     public static void main(String[] args) {
         System.exit(execute(args));

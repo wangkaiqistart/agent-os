@@ -7,3 +7,6 @@
 
 # 构建产物
 target/
+
+# AgentOS 运行日志
+.AgentOS/logs/

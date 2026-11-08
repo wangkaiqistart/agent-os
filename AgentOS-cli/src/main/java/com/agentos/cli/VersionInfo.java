@@ -22,8 +22,11 @@ public class VersionInfo implements IVersionProvider {
             "  构建时间    " + p.getProperty("agentos.build-time", "unknown"),
             "  Spring Boot " + p.getProperty("spring-boot.version", "unknown"),
             "  Spring AI   " + p.getProperty("spring-ai.version", "unknown"),
-            "  Java        " + System.getProperty("java.version")
-                    + " (" + System.getProperty("java.vendor") + ")",
+            "  Java        "
+                    + System.getProperty("java.version")
+                    + " ("
+                    + System.getProperty("java.vendor")
+                    + ")",
             "  系统        " + System.getProperty("os.name") + " " + System.getProperty("os.arch")
         };
     }

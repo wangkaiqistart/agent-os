@@ -6,7 +6,7 @@
 
 AgentOS 是 Java 实现的企业级 **Agent OS**：私有部署的 Agent 统一底座，在一个进程里承载多个业务 Agent，共享 LLM 接入、ReAct 引擎、记忆、工具、沙箱和审计能力。
 
-**仓库目前只有 Maven 骨架：** 根 `pom.xml`（继承 `spring-boot-starter-parent` 4.1.2，导入 `spring-ai-bom` 2.0.2）和核心阶段 9 个模块，每个模块只有 `package-info.java`；`AgentOS-boot` 有启动类 `AgentOSApplication`（先交给 Picocli 根命令 `AgentOSCommand`）和 `application.yaml`。业务代码、Flyway 脚本、测试都还没写。动手写代码前先读对应文档章节，不要凭印象实现。
+**仓库目前是 Maven 骨架加工程基线：** 根 `pom.xml`（继承 `spring-boot-starter-parent` 4.1.2，导入 `spring-ai-bom` 2.0.2，挂了质量门插件，见下文「工程基线」）和核心阶段 9 个模块；`AgentOS-boot` 有启动类 `AgentOSApplication`（先交给 Picocli 根命令 `AgentOSCommand`）和 `application.yaml`。已有的代码只有 API 规范类（core 的 `ErrorCode`、`AgentOSException`，web 的 `ApiResponse`、`GlobalExceptionHandler`、`WebConfig`）和基线测试（`GlobalExceptionHandlerTest`、`ArchitectureRulesTest`、`LoggingBaselineTest`）。业务代码、Flyway 脚本还没写。动手写代码前先读对应文档章节，不要凭印象实现。
 
 - 在仓库根目录执行 `mvn`。`.mvn/maven.config` 会加载 `.mvn/settings.xml`，强制所有依赖只从 Maven Central 解析，覆盖本机 settings 里的公司镜像。
 - groupId 是 `com.agentos`，包名 `com.agentos.<模块>`（如 `com.agentos.channel.cli`）。
@@ -89,6 +89,8 @@ Maven 多模块，模块名前缀 `AgentOS-`：核心阶段 9 个（`core`、`pr
 ## 命令
 
 ```bash
+mvn -B verify                     # 质量门：格式、Checkstyle、SpotBugs、依赖禁令、ArchUnit、测试
+mvn spotless:apply                # 自动格式化
 mvn -B clean package              # 构建，产物 AgentOS-boot/target/AgentOS.jar（集成测试加入后依赖 Docker / Testcontainers）
 python3 scripts/check_env.py      # 检查 .env 里的模型与 Embedding 配置是否可用（不打印 key）
 java -jar AgentOS-boot/target/AgentOS.jar --version       # 完整应用
@@ -101,6 +103,26 @@ AgentOS provider list | tool list | session list
 ```
 
 核心阶段 12 个子命令，后续加 `agent import`。`init`、`profile list` 这类命令不启动 Spring 上下文；`chat`、`serve`、`gateway` 才启动。
+
+## 工程基线
+
+质量门全部绑定在 `mvn verify`，CI（`.github/workflows/ci.yml`）跑的是同一条命令。**`mvn verify` 失败 = 违反规范**，修代码，不要放宽规则或加排除项来让它通过（确需调整先问用户）。
+
+| 检查 | 工具 | 失败时怎么办 |
+|------|------|-------------|
+| 格式（Google Java Style，AOSP 4 空格） | Spotless + google-java-format | `mvn spotless:apply` |
+| 命名、导入、空 catch、switch 缺 default | Checkstyle（`config/checkstyle/checkstyle.xml`） | 按报错位置改 |
+| 缺陷与安全（注入、弱加密、路径穿越） | SpotBugs + FindSecBugs | 改代码；误报用 `@SuppressFBWarnings(value=..., justification=...)` 并写原因 |
+| 禁用依赖（alibaba、H2、SQLite）、JDK 21 | maven-enforcer-plugin | 删依赖 |
+| 设计约束（ToolCallingAdvisor、自建 ToolCallingManager、ThreadLocal、System.out、字段注入、core 依赖实现模块） | ArchUnit（`AgentOS-boot` 的 `ArchitectureRulesTest`） | 按约束改实现 |
+| 密钥泄露 / 源码漏洞 / 依赖漏洞 | gitleaks、CodeQL、Dependabot（`security.yml`、`dependabot.yml`） | 泄露的密钥先轮换，再清理 |
+
+工具查不到、需要自觉遵守的约定：
+
+- 依赖用构造器注入；日志用 SLF4J 占位符（`log.info("x={}", x)`），不拼字符串，不打印密钥、prompt 全文和工具参数。
+- MDC 只用于日志关联，约定键 `sessionId`、`turnId`、`agent`、`iteration`；业务上下文走 `ToolContext`，不从 MDC 读。
+- 业务异常抛 `AgentOSException(ErrorCode, message)`，message 会返回给调用方，不能含内部细节；新增错误码要在 `GlobalExceptionHandler.toHttpStatus` 补映射。
+- REST 响应统一用 `ApiResponse` 信封，Controller 不自己 try/catch 拼错误响应。
 
 ## 官网
 

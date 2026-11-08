@@ -1,0 +1,12 @@
+# gitleaks 配置：沿用默认规则，只放行密钥模板文件。
+# 放行清单只能加"确认是占位符"的路径；扫到真实密钥要轮换密钥，不要加进放行清单。
+title = "AgentOS gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "环境变量模板，只含占位符"
+paths = [
+  '''(^|/)\.env\.example$''',
+]

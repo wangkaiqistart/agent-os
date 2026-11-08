@@ -17,8 +17,7 @@ import picocli.CommandLine.Spec;
         description = "Java 原生、私有部署、可审计的企业级 Agent OS")
 public class AgentOSCommand implements Runnable {
 
-    @Spec
-    CommandSpec spec;
+    @Spec CommandSpec spec;
 
     /** 不带子命令时打印帮助。 */
     @Override
