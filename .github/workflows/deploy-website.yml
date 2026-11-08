@@ -39,7 +39,7 @@ jobs:
       - run: npm run build
         env:
           BASE: /agent-os/          # 改用自定义域名时改成 /
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: website/.vitepress/dist
 
