@@ -23,17 +23,22 @@ spring:
       embeddingDimensions: ${AGENTOS_EMBEDDING_DIMENSIONS:1024}
   docker:
     compose:
-      enabled: false                       # 使用项目方提供的 PostgreSQL
+      enabled: false                       # 使用项目方提供的 PostgreSQL；docker-compose 模块目前不在 classpath，这里防止以后引入时自动起容器
   ai:
+    # 关闭 Starter 的全部模型自动配置：聊天模型只由 ProviderService 按 agentos.providers 显式构建，
+    # Embedding 只由 agentos.embedding 构建；不关的话 Starter 还会建图像、语音、审核模型（spec 001 FR-004、FR-030）
     model:
-      embedding: none                      # Embedding 只走 agentos.embedding，见 3.4
+      chat: none
+      embedding: none
+      image: none
+      audio:
+        speech: none
+        transcription: none
+      moderation: none
     retry:
-      max-attempts: 1                      # 关闭模型实现内置重试（2.0.2 默认 10 次），重试归 ProviderService，见 3.1
-    openai:                                # Starter 自动配置的辅助模型，与 primary 相同，见 1.3
-      base-url: ${AGENTOS_LLM_BASE_URL}
-      api-key: ${AGENTOS_LLM_API_KEY}
-      chat:
-        model: ${AGENTOS_LLM_MODEL}
+      # 只影响基于 RetryTemplate 的模型实现（如 DeepSeek，2.0.2 默认 10 次）；OpenAI 实现走 SDK 自带重试，
+      # 由 ProviderService 构建时设 maxRetries(0)。重试归 ProviderService，见 3.1
+      max-attempts: 1
     mcp:
       client:
         enabled: false                     # MCP 客户端由 McpClientService 编程式创建，见 6.4
@@ -89,15 +94,19 @@ management:
       application: AgentOS
 
 agentos:
-  default-provider: primary
+  default-provider: primary                # Profile 未写 provider 时使用
+  # 每个 provider 只配连接：类型、地址、凭证、超时。聊天模型和生成参数由 Agent 的 Profile 提供（spec 001 FR-001）
   providers:
-    primary:
+    primary:                               # OpenAI 兼容中转，测试环境模型 gpt-5.6-luna（推理模型，较慢）
       type: openai
       base-url: ${AGENTOS_LLM_BASE_URL}
       api-key: ${AGENTOS_LLM_API_KEY}
-      model: ${AGENTOS_LLM_MODEL}
-      reasoning-effort: low
       timeout: 120s
+    deepseek:                              # DeepSeek 官方接口；key 为空时该连接标记为不可用，不影响启动
+      type: deepseek
+      base-url: ${AGENTOS_DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      api-key: ${AGENTOS_DEEPSEEK_API_KEY:}
+      timeout: 60s
   embedding:
     enabled: ${AGENTOS_EMBEDDING_ENABLED:true}
     base-url: ${AGENTOS_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
