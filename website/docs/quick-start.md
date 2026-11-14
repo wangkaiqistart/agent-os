@@ -63,7 +63,7 @@ AgentOS session list
 
 真实开发环境会使用项目方提供的 PostgreSQL、主链路模型和 Embedding 服务。密钥只写在本地 `.env`，不要提交到仓库；模板见根目录 `.env.example`。
 
-主链路模型使用 `primary` Provider，测试环境是 OpenAI 兼容中转上的 `gpt-5.6-luna`；Embedding 独立使用百炼 `text-embedding-v4`，默认 1024 维。详细配置见 [模型与配置](/docs/models)。
+主链路模型使用 `primary` Provider，测试环境是 OpenAI 兼容中转上的 `gpt-5.6-luna`；Embedding 独立使用百炼 `text-embedding-v4`，默认 1024 维。详细配置见 [模型与配置](/docs/models)。`AGENTOS_LLM_BASE_URL` 和 `AGENTOS_EMBEDDING_BASE_URL` 都要写到 `/v1`，代码不会自动补。
 
 ## 下一步 {#next}
 

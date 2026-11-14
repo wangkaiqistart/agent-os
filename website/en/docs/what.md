@@ -75,7 +75,7 @@ AgentOS can sit underneath Dify or Coze as a runtime backend, or be called direc
 |---|---|
 | Agent | A business Agent defined by `.AgentOS/agents/<name>/` |
 | Profile | Runtime configuration derived from `AGENT.md` frontmatter |
-| Provider | A named, replaceable chat-model configuration |
+| Provider | A named, replaceable connection to a model service; the chat model comes from the Profile |
 | Turn | One processing run from a user message to a final response |
 | Session | A context container for messages, turns, and leases |
 | Tool | An Agent capability represented by Spring AI `ToolCallback` |
@@ -89,7 +89,7 @@ The table describes the 1.0 design target; it does not mean every capability is 
 
 | Capability | Design | Current status |
 |---|---|---|
-| LLM access | Spring AI 2.0 `ChatModel` with explicit Provider mapping | Design complete; main path pending |
+| LLM access | Spring AI 2.0 `ChatModel` with explicit Provider mapping | Provider layer implemented (US-1) with offline tests passing; real-model smoke tests pending; not yet wired into the ReAct loop |
 | ReAct loop | An AgentOS-owned loop using Spring AI components | Design complete; pending |
 | Three-layer memory | PostgreSQL sessions, Markdown/PostgreSQL long-term memory, pgvector semantic retrieval | Design complete; pending |
 | Tool system | 9 built-in Tools, MCP, `@Tool` Beans, and a governance wrapper | Design complete; pending |

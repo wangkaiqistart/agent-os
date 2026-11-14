@@ -28,7 +28,7 @@ All three enter `AgentService.process(...)`.
 
 ### Shared capabilities {#capabilities}
 
-- `ProviderService`: explicit provider-name mappings for `ChatModel` and an independent `EmbeddingModel`;
+- `ProviderService`: explicit provider-name mappings for `ChatModel`, with bounded retries, deadlines, and call records; `EmbeddingService`: independently configured text Embeddings, bound to no chat connection;
 - `MemoryService`: one interface for conversational and long-term memory;
 - `ToolRegistry`: manages `ToolCallback` instances wrapped by `GovernedToolCallback` for audit, timeouts, retries, truncation, and redaction.
 
@@ -43,7 +43,7 @@ The core stage contains 9 Maven modules:
 | Module | Responsibility |
 |---|---|
 | `AgentOS-core` | Core abstractions, ReAct, prompts, Turns, and Scheduler contracts |
-| `AgentOS-provider` | Programmatic ChatModel / EmbeddingModel provider mapping |
+| `AgentOS-provider` | Programmatic chat-model provider mapping and an independent text-Embedding service |
 | `AgentOS-memory` | MemoryService and long-term memory backends |
 | `AgentOS-tool` | ToolCallback, MCP, built-in tools, Sandbox, and notifications |
 | `AgentOS-storage` | PostgreSQL, JPA, Flyway, audit, and ShedLock |

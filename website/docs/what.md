@@ -75,7 +75,7 @@ AgentOS 可以作为 Dify、Coze 等上层编排平台的运行时后端；也�
 |---|---|
 | Agent | 一个 `.AgentOS/agents/<name>/` 目录定义的业务智能体 |
 | Profile | 从 `AGENT.md` frontmatter 派生出的运行配置 |
-| Provider | 对聊天模型的统一命名和配置 |
+| Provider | 对模型服务连接的统一命名和配置；聊天模型由 Profile 提供 |
 | Turn | 一条用户消息到最终响应的一次处理 |
 | Session | 保存会话消息、轮次和租约的上下文容器 |
 | Tool | Agent 可以调用的能力，统一表达为 Spring AI `ToolCallback` |
@@ -89,7 +89,7 @@ AgentOS 可以作为 Dify、Coze 等上层编排平台的运行时后端；也�
 
 | 能力 | 设计方案 | 当前状态 |
 |---|---|---|
-| LLM 接入 | Spring AI 2.0 `ChatModel` + Provider 显式映射 | 设计完成，主链路待实现 |
+| LLM 接入 | Spring AI 2.0 `ChatModel` + Provider 显式映射 | Provider 层已实现（US-1），离线测试通过，真实模型冒烟待验证；尚未接入 ReAct 主链路 |
 | ReAct 循环 | AgentOS 自研循环 + Spring AI 官方工具组件 | 设计完成，待实现 |
 | 三层记忆 | PostgreSQL 会话、Markdown/PostgreSQL 长期记忆、pgvector 语义路 | 设计完成，待实现 |
 | Tool 体系 | 9 个内置 Tool、MCP、`@Tool` Bean、治理装饰器 | 设计完成，待实现 |

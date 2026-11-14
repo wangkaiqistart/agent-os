@@ -63,7 +63,7 @@ Do not treat these commands as supported by the current skeleton. Read [What is 
 
 The development environment will use a project-provided PostgreSQL instance, a primary model endpoint, and a separate Embedding service. Keep secrets in a local `.env` file and never commit it; the root `.env.example` is the safe template.
 
-The main path uses the `primary` Provider, backed in the test environment by an OpenAI-compatible `gpt-5.6-luna` endpoint. Embeddings are independent and use Alibaba Cloud Model Studio `text-embedding-v4`, with 1024 dimensions by default. See [Models and configuration](/en/docs/models).
+The main path uses the `primary` Provider, backed in the test environment by an OpenAI-compatible `gpt-5.6-luna` endpoint. Embeddings are independent and use Alibaba Cloud Model Studio `text-embedding-v4`, with 1024 dimensions by default. See [Models and configuration](/en/docs/models). Write both `AGENTOS_LLM_BASE_URL` and `AGENTOS_EMBEDDING_BASE_URL` up to `/v1`; the code does not append it.
 
 ## Next steps {#next}
 

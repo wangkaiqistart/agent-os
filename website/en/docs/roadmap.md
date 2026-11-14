@@ -20,7 +20,7 @@ US-3 Memory  ──┐
 US-4 Tool    ──┘
 ```
 
-- **US-1**: explicit model Provider mapping, timeouts, and call metadata;
+- **US-1**: explicit model Provider mapping, bounded retries and deadlines, call metadata, streaming, image input, and text Embeddings. Code and offline tests are done; real-model smoke tests are still to be verified;
 - **US-2**: ReActLoop, PromptBuilder, Turns, tool execution, and a CLI demo;
 - **US-3**: conversational memory, long-term memory, and Memory Tools;
 - **US-4**: built-in Tools, MCP, Sandbox, and the governance wrapper;

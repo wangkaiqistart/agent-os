@@ -46,18 +46,18 @@ const gains = locale === 'en' ? [
 ] : [
   '多个 Agent 共用一个底座，新增一个 Agent 只要放一个目录',
   '就是一个 Spring Boot 应用，直接纳入现有 Java 运维与审计流程',
-  '每次模型调用、工具调用从第一天就写入审计表',
+  '每次模型调用、工具调用设计上从第一天就落入审计记录',
   '私有部署，数据不出企业，密钥只走环境变量'
 ]
 
 const caps = locale === 'en' ? [
-  { icon: '◎', title: 'LLM access', tag: 'Spring AI 2.0 ChatModel', desc: 'Map named Providers to ChatModels and switch between OpenAI-compatible, Anthropic, and Ollama endpoints.' },
+  { icon: '◎', title: 'LLM access', tag: 'Spring AI 2.0 ChatModel', desc: 'Map named Providers to ChatModels. OpenAI-compatible and DeepSeek connections are supported today; switching models does not change business code.' },
   { icon: '⟳', title: 'ReAct loop', tag: 'ToolCallingManager', desc: 'AgentOS drives the loop with Spring AI 2.0 components, two limits, four timeouts, and one sync/stream path.' },
   { icon: '◈', title: 'Three-layer memory', tag: 'PgVectorStore', desc: 'Truncate complete Turns, separate core and archival memory, and add semantic retrieval with Embeddings.' },
   { icon: '⬡', title: 'Tool system', tag: 'ToolCallback · MCP', desc: 'Nine target built-ins plus MCP, @Tool Beans, and zero-code extensions through one governed callback.' },
   { icon: '⇄', title: 'Web Service', tag: '10 target REST endpoints', desc: 'Sessions, invocations, configuration, memory, tools, and system state with 202 and 409 semantics.' }
 ] : [
-  { icon: '◎', title: '对接 LLM', tag: 'Spring AI 2.0 ChatModel', desc: 'provider name 显式映射到 ChatModel，OpenAI 兼容、Anthropic、Ollama 都能接，换模型不改业务。' },
+  { icon: '◎', title: '对接 LLM', tag: 'Spring AI 2.0 ChatModel', desc: 'provider name 显式映射到 ChatModel，目前支持 OpenAI 兼容和 DeepSeek 两类连接，换模型不改业务。' },
   { icon: '⟳', title: 'ReAct 循环', tag: 'ToolCallingManager', desc: '循环自己驱动，组件全部来自 Spring AI 2.0。两道上限、四层超时，同步与流式共用一套循环。' },
   { icon: '◈', title: '三层记忆', tag: 'PgVectorStore', desc: '会话按轮次截断，长期记忆分核心区与归档区，配置 Embedding 后走 pgvector 语义检索。' },
   { icon: '⬡', title: 'Tool 体系', tag: 'ToolCallback · MCP', desc: '9 个内置工具，MCP、@Tool Bean、零代码三档扩展，统一由 GovernedToolCallback 审计、超时、重试。' },

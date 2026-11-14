@@ -28,7 +28,7 @@ AgentOS 的目标是把多个业务 Agent 放在一个可治理的 Java 运行�
 
 ### 共享能力层 {#capabilities}
 
-- `ProviderService`：按 provider name 显式映射 `ChatModel` 和独立的 `EmbeddingModel`；
+- `ProviderService`：按 provider name 显式映射 `ChatModel`，负责有限重试、截止时间和调用记录；`EmbeddingService`：独立配置的文本向量化，不和任何聊天连接绑定；
 - `MemoryService`：统一会话记忆与长期记忆；
 - `ToolRegistry`：管理 `ToolCallback`，外层使用 `GovernedToolCallback` 做审计、超时、重试、截断和脱敏。
 
@@ -43,7 +43,7 @@ PostgreSQL 保存会话、轮次、消息、调度状态和两类审计记录；
 | 模块 | 职责 |
 |---|---|
 | `AgentOS-core` | 核心抽象、ReAct、Prompt、Turn、Scheduler 契约 |
-| `AgentOS-provider` | ChatModel / EmbeddingModel 的编程式 Provider 映射 |
+| `AgentOS-provider` | 聊天模型的编程式 Provider 映射，以及独立的文本向量化服务 |
 | `AgentOS-memory` | MemoryService 与长期记忆后端 |
 | `AgentOS-tool` | ToolCallback、MCP、内置工具、Sandbox、通知 |
 | `AgentOS-storage` | PostgreSQL、JPA、Flyway、审计和 ShedLock |

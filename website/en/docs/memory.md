@@ -39,7 +39,7 @@ Embeddings are configured independently from the main model. The test environmen
 - `memory_vectors`: long-term memory;
 - `tool_vectors`: tool-description search.
 
-Flyway owns vector tables and HNSW indexes. Startup makes one real Embedding call to validate dimensions. Model Studio accepts at most 10 inputs per request, so batching limits both token count and item count.
+Flyway owns vector tables and HNSW indexes. Once the application is ready, one real Embedding call validates dimensions in the background without blocking startup. Model Studio accepts at most 10 inputs per request, so batching limits both token count and item count.
 
 When Embeddings are not configured or unavailable, long-term memory falls back to keyword and time retrieval. A failed index update must not block the source write.
 

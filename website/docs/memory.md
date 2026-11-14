@@ -39,7 +39,7 @@ Embedding 与主链路模型独立配置。测试环境使用百炼 OpenAI 兼�
 - `memory_vectors`：长期记忆；
 - `tool_vectors`：工具描述搜索。
 
-Flyway 管理向量表和 HNSW 索引，启动时实际调用一次 Embedding 服务校验维度。百炼单次最多 10 条，因此写入策略除了 token 分批，还要限制每批条数。
+Flyway 管理向量表和 HNSW 索引；应用就绪后在后台实际调用一次 Embedding 服务校验维度，不阻塞启动。百炼单次最多 10 条，因此写入策略除了 token 分批，还要限制每批条数。
 
 未配置 Embedding 或 Embedding 服务不可用时，长期记忆退化为关键词和时间检索，写入本体不被索引失败阻断。
 
