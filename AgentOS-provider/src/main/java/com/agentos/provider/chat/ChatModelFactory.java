@@ -30,9 +30,15 @@ public final class ChatModelFactory {
     /**
      * 构建连接对应的模型对象。只创建 SDK 客户端，不发任何网络请求。
      *
+     * <p>Spring AI 2.0.2 的 {@code toolCallingManager(...)} 已标记为待移除，但这是该版本 Builder 暴露的
+     * 唯一注入入口。省略它时，{@code build()} 会内部创建新的 {@code DefaultToolCallingManager}，绕过 Spring
+     * 容器中的限流、异常处理和观测配置。因此当前版本必须继续调用，并把弃用压制限制在这个方法；升级 Spring AI
+     * 后应优先改用官方替代 API，并保留下面的回归测试。
+     *
      * @param connection 已绑定的连接配置
      * @return 未注册为 Bean 的模型对象
      */
+    @SuppressWarnings("deprecation")
     public OpenAiChatModel create(ProviderProperties.Connection connection) {
         OpenAiChatOptions connectionOptions =
                 OpenAiChatOptions.builder()
@@ -44,7 +50,7 @@ public final class ChatModelFactory {
                         .build();
         return OpenAiChatModel.builder()
                 .options(connectionOptions)
-                // 2.0.2 标记此方法将被移除，但不传时 build() 会自建 DefaultToolCallingManager，违反约束 2。
+                // 2.0.2 唯一可用的注入入口；不能删，否则 build() 会自建 DefaultToolCallingManager。
                 .toolCallingManager(toolCallingManager)
                 .observationRegistry(observationRegistry)
                 .build();

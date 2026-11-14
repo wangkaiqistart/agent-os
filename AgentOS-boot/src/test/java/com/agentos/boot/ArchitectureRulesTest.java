@@ -25,6 +25,9 @@ import org.junit.jupiter.api.Test;
  * <p>放在 AgentOS-boot：它依赖所有模块，能看到全部生产代码。违反任一条，{@code mvn verify} 失败。
  * 规则都带 {@code allowEmptyShould(true)}：骨架阶段还没有对应的类，不能因为"没东西可查"而失败。
  * 正因为允许为空，{@link #importsEveryModule()} 必须先确认扫描范围覆盖了其他模块，否则所有规则会静默通过。
+ *
+ * <p>ArchUnit 不是运行接口的测试，而是读取编译后的类文件，检查“哪些类依赖了哪些类”。
+ * 它适合守住模块边界和禁止某些 API 的架构规则。
  */
 class ArchitectureRulesTest {
 
@@ -39,6 +42,7 @@ class ArchitectureRulesTest {
     static void importClasses() {
         // 不能加 DO_NOT_INCLUDE_JARS：mvn verify 时兄弟模块以 target/*.jar 在 classpath 上，
         // 排除 jar 后只剩 boot 自己的类。第三方 jar 由 importPackages("com.agentos") 过滤掉。
+        // 只导入生产代码，并按 com.agentos 过滤第三方依赖。
         classes =
                 new ClassFileImporter()
                         .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
@@ -48,6 +52,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("扫描范围覆盖其他模块（防止规则空转）")
     void importsEveryModule() {
+        // 如果扫描范围错了，下面的规则可能因为没有候选类而“假通过”。
         assertThat(classes.contain("com.agentos.cli.AgentOSCli")).as("cli 模块").isTrue();
         assertThat(classes.contain("com.agentos.boot.AgentOSApplication")).as("boot 模块").isTrue();
     }
@@ -55,6 +60,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("约束 1：主链路不用 ToolCallingAdvisor")
     void noToolCallingAdvisor() {
+        // 主链路必须由项目自己的 ReActLoop 驱动，不能偷偷启用 Advisor 的第二套循环。
         noClasses()
                 .should()
                 .dependOnClassesThat()
@@ -68,6 +74,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("约束 1、2：ChatClient 辅助调用不传 tools")
     void chatClientWithoutTools() {
+        // ChatClient 只允许做没有工具的辅助调用，工具执行只能有一个入口。
         noClasses()
                 .should()
                 .callMethodWhere(
@@ -81,6 +88,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("约束 2：不自建 ToolCallingManager")
     void noSelfBuiltToolCallingManager() {
+        // 必须使用 Spring 自动配置提供的 ToolCallingManager，才能保留限流、观测和异常处理。
         noClasses()
                 .should()
                 .callMethod(TOOL_CALLING_MANAGER, "builder")
@@ -96,6 +104,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("约束 2：只有 ToolExecutor 调用 executeToolCalls")
     void onlyToolExecutorExecutesTools() {
+        // 任何其他类直接调用 executeToolCalls 都会绕过统一治理层。
         noClasses()
                 .that()
                 .doNotHaveSimpleName("ToolExecutor")
@@ -111,6 +120,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("约束 7：不用 ThreadLocal 传上下文，MDC 只写不读")
     void noThreadLocalContext() {
+        // ThreadLocal 容易在线程复用时串请求；业务上下文应显式放进 ToolContext。
         noClasses()
                 .should()
                 .dependOnClassesThat()
@@ -129,6 +139,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("约束 17：不使用 SecurityManager")
     void noSecurityManager() {
+        // JDK 21 不再依赖 SecurityManager，项目使用应用层 Sandbox 白名单。
         noClasses()
                 .should()
                 .dependOnClassesThat()
@@ -141,6 +152,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("依赖倒置：core 不依赖实现模块")
     void coreDependsOnNoImplementation() {
+        // core 只能定义抽象，不能反向依赖 provider、web、storage 等实现模块。
         noClasses()
                 .that()
                 .resideInAPackage("com.agentos.core..")
@@ -163,6 +175,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("REST 接口只出现在 web 模块")
     void restControllersOnlyInWeb() {
+        // REST 入口集中在 web，避免在 core 或 provider 中混入 HTTP 细节。
         classes()
                 .that()
                 .areAnnotatedWith("org.springframework.web.bind.annotation.RestController")
@@ -177,6 +190,7 @@ class ArchitectureRulesTest {
     @Test
     @DisplayName("编码规范：构造器注入、SLF4J、不直接写 System.out（CLI 除外）")
     void generalCodingRules() {
+        // 统一使用构造器注入和 SLF4J；只有 CLI 可以直接接触标准输出流。
         NO_CLASSES_SHOULD_USE_FIELD_INJECTION.allowEmptyShould(true).check(classes);
         NO_CLASSES_SHOULD_USE_JAVA_UTIL_LOGGING.allowEmptyShould(true).check(classes);
         noClasses()

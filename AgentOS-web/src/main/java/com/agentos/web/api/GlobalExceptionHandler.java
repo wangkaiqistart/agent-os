@@ -31,6 +31,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(AgentOSException.class)
     public ResponseEntity<ApiResponse<Void>> handleAgentOS(AgentOSException ex) {
+        // 业务层已经给出稳定的 ErrorCode，这里只负责把它翻译成 HTTP 状态码。
         HttpStatus status = toHttpStatus(ex.getErrorCode());
         if (status.is5xxServerError()) {
             log.error("请求失败：{}", ex.getErrorCode(), ex);
@@ -43,12 +44,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleUnexpected(Exception ex) {
+        // 未知异常的细节只写服务端日志，不能把数据库、路径或密钥信息返回给客户端。
         log.error("未处理的异常", ex);
         return ResponseEntity.internalServerError()
                 .body(ApiResponse.error(ErrorCode.INTERNAL_ERROR, "内部错误"));
     }
 
-    /** 错误码到 HTTP 状态码的唯一映射处。switch 不写 default，新增错误码时编译失败。 */
+    /**
+     * 错误码到 HTTP 状态码的唯一映射处。
+     *
+     * <p>这里不写 default：Java 的穷尽 switch 会在新增 ErrorCode 后提醒开发者补充映射。
+     */
     static HttpStatus toHttpStatus(ErrorCode code) {
         return switch (code) {
             case INVALID_ARGUMENT -> HttpStatus.BAD_REQUEST;
@@ -59,7 +65,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         };
     }
 
-    /** Spring MVC 内置异常最终都经过这里，改写成统一信封，状态码保持不变。 */
+    /**
+     * Spring MVC 内置异常最终都经过这里，改写成统一信封，状态码保持不变。
+     *
+     * <p>例如 JSON 解析失败、参数校验失败、找不到路径和 HTTP 方法不支持，
+     * 都不是业务代码主动抛出的 AgentOSException，所以要覆盖父类的处理入口。
+     */
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(
             Exception ex,
@@ -83,11 +94,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static String describe(Exception ex, HttpStatusCode statusCode) {
         if (ex instanceof MethodArgumentNotValidException invalid) {
+            // 参数校验异常包含多个字段错误；把它们合并成调用方能直接修正的文字。
             return invalid.getBindingResult().getFieldErrors().stream()
                     .map(error -> error.getField() + " " + error.getDefaultMessage())
                     .collect(Collectors.joining("; "));
         }
-        // 其他内置异常的消息可能带内部类名，只返回标准原因短语
+        // 其他内置异常的 message 可能带内部类名或实现细节，只返回 HTTP 标准短语。
         HttpStatus status = HttpStatus.resolve(statusCode.value());
         return status != null ? status.getReasonPhrase() : "请求失败";
     }

@@ -1,6 +1,10 @@
 package com.agentos.core.provider;
 
-/** Provider 调用记录输出，可在 US-2 替换为 llm_calls 持久化实现。 */
+/**
+ * Provider 调用记录输出，可在 US-2 替换为 llm_calls 持久化实现。
+ *
+ * <p>这是一个扩展点：ProviderService 只负责生成记录，不关心记录最终写日志、写数据库还是发到别的系统。
+ */
 @FunctionalInterface
 public interface LlmCallRecorder {
 

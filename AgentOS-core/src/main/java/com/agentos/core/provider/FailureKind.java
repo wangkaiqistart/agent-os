@@ -1,6 +1,11 @@
 package com.agentos.core.provider;
 
-/** Provider 调用失败分类；只有前三类允许由 ProviderService 追加一次重试。 */
+/**
+ * Provider 调用失败分类；只有前三类允许由 ProviderService 追加一次重试。
+ *
+ * <p>分类的目的不是美化日志，而是决定“能不能安全重试”：限流、临时服务错误、连接抖动通常可以重试；
+ * 身份认证、参数错误和协议解析错误即使重发也不会变好。
+ */
 public enum FailureKind {
     /** 429 或等价的限流失败。 */
     RATE_LIMITED,

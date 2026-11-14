@@ -5,6 +5,8 @@ package com.agentos.core.error;
  *
  * <p>core 不依赖 HTTP：错误码到 HTTP 状态码的映射只在 {@code AgentOS-web} 的 {@code GlobalExceptionHandler} 里做，
  * CLI、定时任务等入口拿到的是同一个错误码。新增错误码时，web 层的 {@code switch} 会编译失败，提醒补映射。
+ *
+ * <p>这体现了“核心层不依赖具体入口”的设计：核心层只表达业务含义，HTTP 只是其中一种展示方式。
  */
 public enum ErrorCode {
     /** 参数错误（400）。 */

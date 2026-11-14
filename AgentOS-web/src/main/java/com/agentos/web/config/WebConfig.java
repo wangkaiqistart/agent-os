@@ -14,6 +14,8 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
+        // 只对 /api/** 开放跨域；allowedOriginPatterns("*") 是当前核心阶段的调试配置。
+        // 正式环境应改成明确的前端域名白名单。
         registry.addMapping("/api/**").allowedOriginPatterns("*").allowedMethods("*");
     }
 }
