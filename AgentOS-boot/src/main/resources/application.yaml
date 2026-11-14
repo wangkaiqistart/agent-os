@@ -102,6 +102,8 @@ agentos:
       base-url: ${AGENTOS_LLM_BASE_URL}
       api-key: ${AGENTOS_LLM_API_KEY}
       timeout: 120s
+      retry-min-remaining: 15s
+      retry-max-wait: 120s
     deepseek:                              # DeepSeek 官方接口；key 为空时该连接标记为不可用，不影响启动
       type: deepseek
       base-url: ${AGENTOS_DEEPSEEK_BASE_URL:https://api.deepseek.com}
@@ -109,7 +111,7 @@ agentos:
       timeout: 60s
   embedding:
     enabled: ${AGENTOS_EMBEDDING_ENABLED:true}
-    base-url: ${AGENTOS_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+    base-url: ${AGENTOS_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     api-key: ${AGENTOS_EMBEDDING_API_KEY:}
     model: ${AGENTOS_EMBEDDING_MODEL:text-embedding-v4}
     dimensions: ${AGENTOS_EMBEDDING_DIMENSIONS:1024}

@@ -273,7 +273,7 @@ agentos:
 | 项 | 取值 | 说明 |
 |----|------|------|
 | 接口 | 百炼 OpenAI 兼容模式 `https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings` | 只是 HTTP 调用，不引入任何阿里云 SDK 或 Spring AI Alibaba 依赖 |
-| `base-url` | `https://dashscope.aliyuncs.com/compatible-mode` | OpenAI 模块会再拼接 `/v1/embeddings`；若写成 `.../compatible-mode/v1` 会变成 `/v1/v1/embeddings`。搭骨架时抓一次请求确认最终地址 |
+| `base-url` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Spring AI OpenAI 模块不会自动补 `/v1`，最终请求为 `<base-url>/embeddings`，见 research R2 |
 | 模型 | `text-embedding-v4` | 百炼官方对纯文本检索、RAG 的推荐模型 |
 | 维度 | 1024 | 官方默认值，可选 64–2048；在 `vector` 类型 HNSW 索引 2000 维上限以内。请求里显式传 `dimensions=1024` |
 | 单次请求 | 最多 10 条，单条最多 8192 token | 默认的 `TokenCountBatchingStrategy` 只按 token 分批，可能一次塞超过 10 条，所以要声明一个同时限制"每批最多 10 条"的 `BatchingStrategy` Bean；`TokenTextSplitter` 的 `chunkSize` 远小于 8192，单条不会超限 |
@@ -286,7 +286,7 @@ agentos:
 
 | 项 | 取值 | 说明 |
 |----|------|------|
-| `base-url` | `${AGENTOS_LLM_BASE_URL}`，测试环境为中转服务的根地址（不带 `/v1`） | OpenAI 模块会拼接 `/v1/chat/completions`，搭骨架时抓一次请求确认最终地址 |
+| `base-url` | `${AGENTOS_LLM_BASE_URL}`，必须写到 `/v1` | Spring AI OpenAI 模块不会自动补 `/v1`，最终请求为 `<base-url>/chat/completions`，见 research R2 |
 | `model` | `${AGENTOS_LLM_MODEL}`，测试环境为 `gpt-5.6-luna` | |
 | `temperature` | 不设置 | GPT-5 系列推理模型通常只接受默认温度，传了会报错。`AGENT.md` 没写 `temperature` 时，`ProviderService` 构建请求选项就不带这个字段，不要填默认值 |
 | 推理强度 | `reasoning-effort: low`（默认），`AGENT.md` 的 `provider.reasoning_effort` 可覆盖 | 映射到 `OpenAiChatOptions` 的推理强度选项（字段名以所用版本为准）。强度越高，单次调用越慢、token 越多：`max` 档要相应调大 Provider `timeout` 和 `turn_timeout` |
@@ -991,7 +991,7 @@ spring:
 agentos:
   embedding:
     enabled: ${AGENTOS_EMBEDDING_ENABLED:true}
-    base-url: ${AGENTOS_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+    base-url: ${AGENTOS_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     api-key: ${AGENTOS_EMBEDDING_API_KEY:}
     model: ${AGENTOS_EMBEDDING_MODEL:text-embedding-v4}
     dimensions: ${AGENTOS_EMBEDDING_DIMENSIONS:1024}

@@ -52,7 +52,7 @@ def check_placeholders(env):
 
 
 def check_llm(env):
-    url = env['AGENTOS_LLM_BASE_URL'].rstrip('/') + '/v1/chat/completions'
+    url = env['AGENTOS_LLM_BASE_URL'].rstrip('/') + '/chat/completions'
     key, model = env['AGENTOS_LLM_API_KEY'], env['AGENTOS_LLM_MODEL']
     tools = [{"type": "function", "function": {
         "name": "get_weather", "description": "查询城市天气",
@@ -106,7 +106,7 @@ def check_llm(env):
 
 
 def check_embedding(env):
-    url = env['AGENTOS_EMBEDDING_BASE_URL'].rstrip('/') + '/v1/embeddings'
+    url = env['AGENTOS_EMBEDDING_BASE_URL'].rstrip('/') + '/embeddings'
     key, model = env['AGENTOS_EMBEDDING_API_KEY'], env['AGENTOS_EMBEDDING_MODEL']
     dim = int(env['AGENTOS_EMBEDDING_DIMENSIONS'])
 

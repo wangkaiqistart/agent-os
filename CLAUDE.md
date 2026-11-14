@@ -68,9 +68,9 @@ AgentOS 是 Java 实现的企业级 **Agent OS**：私有部署的 Agent 统一�
 | 变量 | 用途 |
 |------|------|
 | `AGENTOS_DB_URL` / `AGENTOS_DB_USERNAME` / `AGENTOS_DB_PASSWORD` | PostgreSQL 连接 |
-| `AGENTOS_LLM_BASE_URL` / `AGENTOS_LLM_API_KEY` / `AGENTOS_LLM_MODEL` | 主链路模型 provider `primary`（主链路与辅助调用共用）。测试环境是推理模型：**不发送 `temperature`**，用 `reasoning_effort` 和 `max_completion_tokens`，超时 120 秒；中转接口的工具调用、流式工具调用、用量统计、`json_schema` 支持要实测 |
+| `AGENTOS_LLM_BASE_URL` / `AGENTOS_LLM_API_KEY` / `AGENTOS_LLM_MODEL` | 主链路模型 provider `primary`（主链路与辅助调用共用）。测试环境是推理模型：**不发送 `temperature`**，用 `reasoning_effort` 和 `max_completion_tokens`，超时 120 秒；base-url 写到 `/v1`；中转接口的工具调用、流式工具调用、用量统计、`json_schema` 支持要实测 |
 | `AGENTOS_DEEPSEEK_BASE_URL` / `AGENTOS_DEEPSEEK_API_KEY` / `AGENTOS_DEEPSEEK_MODEL` | provider `deepseek`（DeepSeek 官方接口，测试模型 `deepseek-flash`），与 `primary` 同级，Agent 在 Profile 里按名称选用。key 为空时该连接不可用，不影响启动 |
-| `AGENTOS_EMBEDDING_BASE_URL` / `AGENTOS_EMBEDDING_API_KEY` / `AGENTOS_EMBEDDING_MODEL` / `AGENTOS_EMBEDDING_DIMENSIONS` | 测试专用的 Embedding 服务：阿里云百炼兼容模式 `text-embedding-v4`，1024 维；base-url 写 `https://dashscope.aliyuncs.com/compatible-mode`（不带 `/v1`）；单次请求最多 10 条，`BatchingStrategy` 要限条数 |
+| `AGENTOS_EMBEDDING_BASE_URL` / `AGENTOS_EMBEDDING_API_KEY` / `AGENTOS_EMBEDDING_MODEL` / `AGENTOS_EMBEDDING_DIMENSIONS` | 测试专用的 Embedding 服务：阿里云百炼兼容模式 `text-embedding-v4`，1024 维；base-url 写到 `https://dashscope.aliyuncs.com/compatible-mode/v1`；单次请求最多 10 条，`BatchingStrategy` 要限条数 |
 
 变量模板见仓库根目录的 `.env.example`。
 

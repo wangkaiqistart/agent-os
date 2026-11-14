@@ -13,6 +13,17 @@
     <description>核心能力一：ProviderService，provider name 到 ChatModel 的显式映射，以及全局唯一的 EmbeddingModel</description>
 
     <dependencies>
+        <!-- Provider 测试需要官方 ToolCallingManager 自动配置与可断言的 ObservationRegistry -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-autoconfigure-model-tool</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-observation-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>com.agentos</groupId>
             <artifactId>AgentOS-core</artifactId>
@@ -21,18 +32,6 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-openai</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-deepseek</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-anthropic</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-ollama</artifactId>
         </dependency>
     </dependencies>
 </project>
