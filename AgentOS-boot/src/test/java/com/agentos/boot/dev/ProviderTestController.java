@@ -1,4 +1,4 @@
-package com.agentos.web.dev;
+package com.agentos.boot.dev;
 
 import com.agentos.core.error.AgentOSException;
 import com.agentos.core.provider.LlmCallRecord;
