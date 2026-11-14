@@ -36,8 +36,8 @@ spring:
         transcription: none
       moderation: none
     retry:
-      # 只影响基于 RetryTemplate 的模型实现（如 DeepSeek，2.0.2 默认 10 次）；OpenAI 实现走 SDK 自带重试，
-      # 由 ProviderService 构建时设 maxRetries(0)。重试归 ProviderService，见 3.1
+      # 当前聊天和 Embedding 都用 spring-ai-openai，请求走 OpenAI Java SDK，SDK 自带重试不读这里；
+      # 由模型工厂构建时设 maxRetries(0) 关闭。重试归 ProviderService，见 3.1
       max-attempts: 1
     mcp:
       client:
@@ -99,8 +99,8 @@ agentos:
   providers:
     primary:                               # OpenAI 兼容中转，测试环境模型 gpt-5.6-luna（推理模型，较慢）
       type: openai
-      base-url: ${AGENTOS_LLM_BASE_URL}
-      api-key: ${AGENTOS_LLM_API_KEY}
+      base-url: ${AGENTOS_LLM_BASE_URL:}     # 写到 /v1；缺省为空，由启动校验报出连接名和变量名
+      api-key: ${AGENTOS_LLM_API_KEY:}       # 缺省为空，由启动校验报出连接名和变量名
       timeout: 120s
       retry-min-remaining: 15s
       retry-max-wait: 120s
@@ -117,6 +117,7 @@ agentos:
     dimensions: ${AGENTOS_EMBEDDING_DIMENSIONS:1024}
     max-batch-size: 10                     # 百炼单次最多 10 条，见 3.4
     timeout: 30s
+    startup-check: async                   # async（默认，就绪后后台校验）或 sync（启动时校验）
   web:
     sync-wait: 60s
   shutdown:

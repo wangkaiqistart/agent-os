@@ -139,6 +139,7 @@ npm run build                               # 产物在 website/.vitepress/dist
 
 ## 工作方式
 
+- 本项目禁用 SDLC 技能、`sdlc-cli` 和 `.sdlc` 执行记录流程；直接依据本仓库的 Spec-Kit 文档和 Maven 质量门推进，不删除已有历史记录。
 - 用中文回复，代码注释用中文。
 - 主体开发按 US-1（Provider）→ US-2（ReAct）→ US-3（Memory）∥ US-4（Tool）→ US-5（Web Service）推进，每个 user story 完成后要有阶段 Demo；最终验收是三个 Demo（每日天气、每日科技日报、每日 GitHub 日报）加评估测试。
 - 只做当前任务范围内的事。多租户、SSO、Tool Policy、SSE 端点、容器沙箱等扩展功能不要提前实现，但保留接口扩展点（如 `TurnSink`、`Sandbox`）。

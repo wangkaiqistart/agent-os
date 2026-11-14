@@ -10,7 +10,7 @@
     </parent>
 
     <artifactId>AgentOS-provider</artifactId>
-    <description>核心能力一：ProviderService，provider name 到 ChatModel 的显式映射，以及全局唯一的 EmbeddingModel</description>
+    <description>核心能力一：ProviderService 按 provider name 显式映射连接；ChatModel 与 EmbeddingModel 只作为 ProviderService / EmbeddingService 门面的内部模型构建，不注册为全局 Bean</description>
 
     <dependencies>
         <!-- Provider 测试需要官方 ToolCallingManager 自动配置与可断言的 ObservationRegistry -->

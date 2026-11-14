@@ -62,4 +62,4 @@ mvn -B verify -Pllm -pl AgentOS-provider -am
 
 - `AgentOS-provider/pom.xml` 只剩 `spring-ai-openai` 一个模型依赖。
 - 代码里有指向 US-2 的 TODO：`LoggingLlmCallRecorder` 将由写 `llm_calls` 的实现替换。
-- `.AgentOS/logs/agentos.log` 里的 `llm_call` 事件是一行 JSON，字段与 [data-model.md](data-model.md) 的 `LlmCallRecord` 一致。
+- `llm_call` 事件写成一行 ECS JSON，字段与 [data-model.md](data-model.md) 的 `LlmCallRecord` 一致：由 `AgentOS-boot` 的 `LlmCallJsonLogTest` 写到 JUnit 临时目录的日志文件并逐字段断言（含 null 与 0），`mvn -B verify` 即会运行。US-1 还没有调用方写 `.AgentOS/logs/agentos.log`，不要去那里找。

@@ -55,6 +55,9 @@
         <spotbugs.version>4.10.5</spotbugs.version>
         <findsecbugs.version>1.14.0</findsecbugs.version>
         <archunit.version>1.5.1</archunit.version>
+        <!-- Surefire 标签筛选（JUnit @Tag）：默认只跑离线测试，排除 llm；-Pllm 改为只跑 llm -->
+        <agentos.test.groups></agentos.test.groups>
+        <agentos.test.excludedGroups>llm</agentos.test.excludedGroups>
     </properties>
 
     <dependencyManagement>
@@ -143,21 +146,11 @@
     <profiles>
         <profile>
             <id>llm</id>
+            <!-- 只覆盖筛选属性，不再在 profile 里写 Surefire 配置：空的 <excludedGroups/> 元素会被 Maven 合并成父级的 llm -->
             <properties>
-                <skip.llm.tests>false</skip.llm.tests>
+                <agentos.test.groups>llm</agentos.test.groups>
+                <agentos.test.excludedGroups></agentos.test.excludedGroups>
             </properties>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-surefire-plugin</artifactId>
-                        <configuration>
-                            <groups>llm</groups>
-                            <excludedGroups></excludedGroups>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
         </profile>
     </profiles>
 
@@ -173,12 +166,13 @@
     <!-- 工程基线：所有检查都绑定在 verify 阶段，`mvn verify` 失败 = 违反规范。子模块自动继承 -->
     <build>
         <plugins>
-            <!-- 默认跳过真实模型冒烟；-Pllm 显式启用 llm 标签。 -->
+            <!-- 默认跳过真实模型冒烟；-Pllm 显式启用 llm 标签。取值来自上面的 agentos.test.* 属性 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <excludedGroups>llm</excludedGroups>
+                    <groups>${agentos.test.groups}</groups>
+                    <excludedGroups>${agentos.test.excludedGroups}</excludedGroups>
                 </configuration>
             </plugin>
             <!-- 依赖与环境禁令：版本由 spring-boot-starter-parent 管理 -->
