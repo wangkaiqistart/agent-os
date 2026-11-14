@@ -40,6 +40,9 @@ public final class StubModelServer implements AutoCloseable {
     /** close 时等待处理线程退出的上限。 */
     private static final long TERMINATION_TIMEOUT_SECONDS = 5;
 
+    /** 切断流时，响应头比实际内容多声明的字节数。 */
+    private static final long DROP_PADDING_BYTES = 4096;
+
     /** JDK 自带的轻量 HTTP 服务，不需要启动外部进程或 Docker。 */
     private final HttpServer server;
 
@@ -204,6 +207,10 @@ public final class StubModelServer implements AutoCloseable {
             output.write(payload);
             return;
         }
+        if (response.mode() == Mode.SSE_DROP) {
+            dropMidStream(exchange, response);
+            return;
+        }
         // SSE：长度 0 启用分块传输，每写一块就 flush，客户端可以逐段读到。
         exchange.sendResponseHeaders(response.status(), 0);
         List<String> chunks = response.chunks();
@@ -217,6 +224,25 @@ public final class StubModelServer implements AutoCloseable {
                 // 测试放行前停在这里，用来证明前面的分片已经单独送达。
                 response.release().await();
             }
+        }
+    }
+
+    /**
+     * 模拟流在中途被切断。
+     *
+     * <p>声明的长度比实际写出的多 {@value #DROP_PADDING_BYTES} 字节：写完分片后关闭交换时，JDK 的 HttpServer 发现
+     * 字节不足，会直接断开连接，客户端读到的是一个没有正常结束的流。
+     */
+    private void dropMidStream(HttpExchange exchange, StubResponse response) throws IOException {
+        long written = 0;
+        for (String chunk : response.chunks()) {
+            written += chunk.getBytes(StandardCharsets.UTF_8).length;
+        }
+        exchange.sendResponseHeaders(response.status(), written + DROP_PADDING_BYTES);
+        OutputStream output = exchange.getResponseBody();
+        for (String chunk : response.chunks()) {
+            output.write(chunk.getBytes(StandardCharsets.UTF_8));
+            output.flush();
         }
     }
 
@@ -264,7 +290,9 @@ public final class StubModelServer implements AutoCloseable {
         /** 分块传输，每个分片单独 flush。 */
         SSE,
         /** 不写任何响应，挂起到 close。 */
-        HANG
+        HANG,
+        /** 发出分片后连接被切断：响应头声明的长度比实际写出的多，客户端读到提前结束的流。 */
+        SSE_DROP
     }
 
     /**
@@ -308,6 +336,19 @@ public final class StubModelServer implements AutoCloseable {
         public static StubResponse sse(int status, List<String> chunks) {
             return new StubResponse(
                     Mode.SSE,
+                    status,
+                    Map.of("Content-Type", List.of("text/event-stream")),
+                    chunks,
+                    Duration.ZERO,
+                    Duration.ZERO,
+                    0,
+                    null);
+        }
+
+        /** SSE 响应发完分片后连接被切断，用来模拟流在中途断开。 */
+        public static StubResponse sseThenDrop(int status, List<String> chunks) {
+            return new StubResponse(
+                    Mode.SSE_DROP,
                     status,
                     Map.of("Content-Type", List.of("text/event-stream")),
                     chunks,

@@ -4,9 +4,14 @@ import com.agentos.core.error.AgentOSException;
 import com.agentos.core.error.ErrorCode;
 import com.agentos.core.provider.Profile;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.content.Media;
+import org.springframework.ai.content.MediaContent;
 
 /**
  * 外呼前校验：把 Profile 解析成"具体连接 + 模型名"。
@@ -54,6 +59,39 @@ public final class RequestValidator {
             throw new AgentOSException(ErrorCode.INVALID_ARGUMENT, "Profile 缺少聊天模型");
         }
         return new Resolved(connection, profile.model());
+    }
+
+    /**
+     * 检查消息里的媒体并统计图片数量（FR-036、FR-037）。
+     *
+     * <p>只有用户消息可以带图片，且只接受 {@code image/*}。音频、视频、文件等其他媒体，以及非用户消息携带的
+     * 任何媒体，都在外呼前失败：不静默丢弃，也不原样转发。错误信息只写媒体类型，不写数据和网址。
+     *
+     * @return 全部消息里的图片数量，供调用记录使用
+     * @throws AgentOSException 出现不支持的媒体
+     */
+    public static int countImages(List<Message> messages) {
+        int images = 0;
+        for (Message message : messages) {
+            if (!(message instanceof MediaContent content) || content.getMedia().isEmpty()) {
+                continue;
+            }
+            if (!(message instanceof UserMessage)) {
+                throw new AgentOSException(
+                        ErrorCode.INVALID_ARGUMENT, "只有用户消息可以携带图片，当前是 " + message.getMessageType());
+            }
+            for (Media media : content.getMedia()) {
+                // 不用 MimeType.toString()：它会带上 charset 等参数，错误信息只要类型本身。
+                String type = media.getMimeType().getType();
+                if (!"image".equals(type)) {
+                    throw new AgentOSException(
+                            ErrorCode.INVALID_ARGUMENT,
+                            "不支持的媒体类型：" + type + "/" + media.getMimeType().getSubtype());
+                }
+                images++;
+            }
+        }
+        return images;
     }
 
     private static String unavailableMessage(ProviderConnection connection) {

@@ -292,6 +292,23 @@ class StubModelServerTest {
     }
 
     @Test
+    @DisplayName("sseThenDrop：已发的分片能读到，之后流以异常结束而不是正常结束")
+    void sseThenDropCutsTheStreamAfterTheChunks() throws Exception {
+        String c1 = "data: 一\n\n";
+        server.enqueue(StubResponse.sseThenDrop(200, List.of(c1)));
+
+        HttpResponse<InputStream> response =
+                client.sendAsync(request("/s").build(), HttpResponse.BodyHandlers.ofInputStream())
+                        .get(WAIT_SECONDS, TimeUnit.SECONDS);
+
+        try (InputStream in = response.body()) {
+            assertThat(text(readWithin(in, utf8(c1).length))).isEqualTo(c1);
+            // 声明的长度比实际写出的多，读完已有字节后继续读会遇到提前结束的连接。
+            assertThatThrownBy(() -> readAll(in)).isInstanceOf(RuntimeException.class);
+        }
+    }
+
+    @Test
     @DisplayName("close 释放端口与线程，可重复调用")
     void closeReleasesResourcesAndIsIdempotent() throws Exception {
         String baseUrl = server.baseUrl();
