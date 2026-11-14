@@ -15,6 +15,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.ai.model.tool.autoconfigure.ToolCallingAutoConfiguration;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -49,6 +50,12 @@ class LlmCallJsonLogTest {
                         .web(WebApplicationType.NONE)
                         .run(
                                 "--spring.config.location=" + configDir.toUri(),
+                                // 启动时会校验默认连接，所以给一个不会发请求的替身连接
+                                "--agentos.providers.primary.type=openai",
+                                "--agentos.providers.primary.base-url=http://127.0.0.1:1/v1",
+                                "--agentos.providers.primary.api-key=stub-key",
+                                "--agentos.providers.primary.timeout=5s",
+                                "--agentos.providers.primary.retry-min-remaining=1s",
                                 "--logging.file.name=" + logFile,
                                 "--logging.structured.format.file=ecs",
                                 "--spring.main.banner-mode=off")) {
@@ -179,8 +186,11 @@ class LlmCallJsonLogTest {
                 0L);
     }
 
-    /** 只导入 Provider 自动配置，拿到默认 Recorder；不启用其他自动配置。 */
+    /**
+     * 导入 Provider 自动配置拿默认 Recorder，另加官方 ToolCallingManager 自动配置，
+     * 因为 ProviderService 的装配需要它；不启用其他自动配置。
+     */
     @Configuration(proxyBeanMethods = false)
-    @ImportAutoConfiguration(ProviderAutoConfiguration.class)
+    @ImportAutoConfiguration({ProviderAutoConfiguration.class, ToolCallingAutoConfiguration.class})
     static class RecorderOnlyConfig {}
 }

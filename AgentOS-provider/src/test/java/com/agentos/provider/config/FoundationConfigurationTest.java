@@ -17,14 +17,19 @@ import org.springframework.stereotype.Component;
 /**
  * ProviderAutoConfiguration 骨架：默认 Recorder、可替换 Recorder、配置绑定、不做包扫描。
  *
- * <p>只装配配置和 Recorder，不构建模型、不发请求，也不做 Phase3 的连接校验。
+ * <p>只检查装配和绑定，不发请求。启动时会校验连接，所以每个上下文都带一个合法的默认连接；
+ * 连接校验本身由 StartupValidationTest 覆盖。
  */
 class FoundationConfigurationTest {
 
     private final ApplicationContextRunner runner =
             new ApplicationContextRunner()
                     .withConfiguration(AutoConfigurations.of(ProviderAutoConfiguration.class))
-                    .withUserConfiguration(TestSpringAiConfiguration.class);
+                    .withUserConfiguration(TestSpringAiConfiguration.class)
+                    .withPropertyValues(
+                            "agentos.providers.primary.type=openai",
+                            "agentos.providers.primary.base-url=http://stub.local/v1",
+                            "agentos.providers.primary.api-key=stub-key");
 
     @Test
     @DisplayName("没有自定义 Recorder 时注册 LoggingLlmCallRecorder")
@@ -68,6 +73,8 @@ class FoundationConfigurationTest {
                         "agentos.providers.primary.api-key=stub-key",
                         "agentos.providers.primary.timeout=45s",
                         "agentos.providers.deepseek.type=deepseek",
+                        "agentos.providers.deepseek.base-url=http://stub.local/v1",
+                        "agentos.providers.deepseek.api-key=stub-key",
                         "agentos.providers.deepseek.timeout=45s",
                         "agentos.providers.deepseek.retry-min-remaining=5s",
                         "agentos.providers.deepseek.retry-max-wait=90s",

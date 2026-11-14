@@ -7,6 +7,7 @@ import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.nam
 import static com.tngtech.archunit.core.domain.properties.HasOwner.Predicates.With.owner;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
 import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_STREAMS;
 import static com.tngtech.archunit.library.GeneralCodingRules.NO_CLASSES_SHOULD_USE_FIELD_INJECTION;
 import static com.tngtech.archunit.library.GeneralCodingRules.NO_CLASSES_SHOULD_USE_JAVA_UTIL_LOGGING;
@@ -168,6 +169,38 @@ class ArchitectureRulesTest {
                         "com.agentos.cli..",
                         "com.agentos.boot..")
                 .because("契约放 core，实现放具体模块")
+                .allowEmptyShould(true)
+                .check(classes);
+    }
+
+    @Test
+    @DisplayName("FR-004：只有 provider 模块依赖 Spring AI OpenAI 实现")
+    void onlyProviderDependsOnSpringAiOpenAi() {
+        // 其他模块只通过 core 的 ProviderService 调模型，不能直接拿 OpenAI 实现类。
+        noClasses()
+                .that()
+                .resideOutsideOfPackage("com.agentos.provider..")
+                .should()
+                .dependOnClassesThat()
+                .resideInAPackage("org.springframework.ai.openai..")
+                .because("模型实现被封装在 provider 模块内，调用方只依赖 core 契约")
+                .allowEmptyShould(true)
+                .check(classes);
+    }
+
+    @Test
+    @DisplayName("FR-004、FR-030：任何 @Bean 方法都不能返回 ChatModel 或 EmbeddingModel")
+    void noChatOrEmbeddingModelBeans() {
+        // 一旦注册成 Bean，就有人会靠扫描容器里的 ChatModel 区分 Provider，
+        // 也会激活 Spring AI 的向量库等自动配置。
+        noMethods()
+                .that()
+                .areAnnotatedWith("org.springframework.context.annotation.Bean")
+                .should()
+                .haveRawReturnType(assignableTo("org.springframework.ai.chat.model.ChatModel"))
+                .orShould()
+                .haveRawReturnType(assignableTo("org.springframework.ai.embedding.EmbeddingModel"))
+                .because("ChatModel 只存在于 ProviderService 内部的连接映射里")
                 .allowEmptyShould(true)
                 .check(classes);
     }
