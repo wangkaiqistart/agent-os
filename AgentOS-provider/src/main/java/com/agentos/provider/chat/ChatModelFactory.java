@@ -38,7 +38,7 @@ public final class ChatModelFactory {
      * @param connection 已绑定的连接配置
      * @return 未注册为 Bean 的模型对象
      */
-    @SuppressWarnings("deprecation")
+    @SuppressWarnings({"removal"})
     public OpenAiChatModel create(ProviderProperties.Connection connection) {
         OpenAiChatOptions connectionOptions =
                 OpenAiChatOptions.builder()
