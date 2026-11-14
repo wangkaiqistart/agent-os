@@ -89,7 +89,7 @@ The table describes the 1.0 design target; it does not mean every capability is 
 
 | Capability | Design | Current status |
 |---|---|---|
-| LLM access | Spring AI 2.0 `ChatModel` with explicit Provider mapping | Provider layer implemented (US-1) with offline tests passing; real-model smoke tests pending; not yet wired into the ReAct loop |
+| LLM access | Spring AI 2.0 `ChatModel` with explicit Provider mapping | Provider layer implemented (US-1) with offline and real-model smoke tests passing (2026-11-14); not yet wired into the ReAct loop |
 | ReAct loop | An AgentOS-owned loop using Spring AI components | Design complete; pending |
 | Three-layer memory | PostgreSQL sessions, Markdown/PostgreSQL long-term memory, pgvector semantic retrieval | Design complete; pending |
 | Tool system | 9 built-in Tools, MCP, `@Tool` Beans, and a governance wrapper | Design complete; pending |

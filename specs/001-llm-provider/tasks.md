@@ -203,7 +203,8 @@ description: "US-1 对接 LLM（Provider 抽象）的实施任务"
 - [X] T052 [P] 同步技术方案：3.2 / 3.5 改为"聊天模型由 Profile 提供、连接不配模型"；3.4 / 3.5 / 8.8 改为"base-url 写到 `/v1`"并删除"模块会自己拼 `/v1`"；8.8 把 `DEEPSEEK_API_KEY` 改为 `AGENTOS_DEEPSEEK_API_KEY`；9.2 的 `llm_calls` 增加 `attempt`、`image_count`、`output_cap_honored` 三列；补充 `retry-min-remaining` 与向量化后台校验（spec Assumptions、research R2、R6、R12） in docs/TechnicalSolution.md
 - [X] T053 运行 `mvn spotless:apply` 后执行 `mvn -B verify`，Spotless、Checkstyle、SpotBugs、enforcer、ArchUnit 和全部离线测试必须通过；失败时修代码，不放宽规则或加排除项 in pom.xml
 - [X] T054 按 quickstart.md「人工确认」逐项检查：`AgentOS-provider/pom.xml` 只剩 `spring-ai-openai` 一个模型依赖；`LoggingLlmCallRecorder` 有指向 US-2 的 TODO；通过 boot 的结构化日志测试确认 `llm_call` 事件是一行 JSON，字段与 data-model.md 的 `LlmCallRecord` 一致（不把未配置的本地 `.AgentOS/logs` 当作强制产物） in specs/001-llm-provider/quickstart.md
-- [X] T055 仅提醒用户（不修改 `.env`）：把本机 `AGENTOS_LLM_BASE_URL`、`AGENTOS_EMBEDDING_BASE_URL` 按 contracts 写到 `/v1`，然后运行 `set -a; source .env; set +a; mvn -B verify -Pllm -pl AgentOS-provider -am`，确认 3 个冒烟测试的结果符合 quickstart.md 第 2 节 in specs/001-llm-provider/quickstart.md
+- [X] T055 仅提醒用户（不修改 `.env`）：把本机 `AGENTOS_LLM_BASE_URL`、`AGENTOS_EMBEDDING_BASE_URL` 按 contracts 写到 `/v1`，然后运行 `set -a; source .env; set +a; mvn -B verify -Pllm -pl AgentOS-provider -am`，确认冒烟测试的结果符合 quickstart.md 第 2 节 in specs/001-llm-provider/quickstart.md
+  - 2026-11-14 实测：`PrimarySmokeTest` 3 个、`DeepSeekSmokeTest` 4 个、`EmbeddingSmokeTest` 1 个、`ImageSmokeTest` 2 个，共 10 个用例全部通过。首次运行时 DeepSeek 账户余额不足（HTTP 402），充值后重跑通过
 
 ---
 

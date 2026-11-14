@@ -61,6 +61,13 @@ mvn -B verify -Pllm -pl AgentOS-provider -am
 | `EmbeddingSmokeTest` | 后台校验完成后状态为 READY；返回 1024 维向量 |
 | `ImageSmokeTest` | 一张纯红色图片，`primary` 和 `deepseek` 各一个用例，回答里包含"红"或 red；记录里 `imageCount` 为 1 |
 
+**实测结果（2026-11-14）**：上面 4 个测试类共 10 个用例全部通过，覆盖 SC-010、SC-015、SC-017 的真实模型部分。
+
+**冒烟测试没有断言的内容**：
+
+- 流式调用在真实服务上返回的缓存 token 取值。读取逻辑由离线测试 `StreamingTest` 覆盖，真实服务有没有在流式里返回缓存数，需要单独看一次调用记录。
+- 流式调用的限流余量：Spring AI 的流式拿不到响应头，记录里永远是 null（research R8）。
+
 ## 3. 人工确认
 
 - `AgentOS-provider/pom.xml` 只剩 `spring-ai-openai` 一个模型依赖。
