@@ -24,7 +24,7 @@ Phase 0 用本地 HTTP 替身和真实服务做了实测（见 [research.md](res
 
 **Storage**: 无。调用记录写结构化日志；`llm_calls` 落库在 US-2
 
-**Testing**: JUnit Jupiter 6、AssertJ、Spring `ApplicationContextRunner`；本地 HTTP 替身用 JDK 内置 `com.sun.net.httpserver.HttpServer`（不新增依赖）；ArchUnit；真实模型冒烟 `@Tag("llm")` + `@EnabledIfEnvironmentVariable`
+**Testing**: JUnit Jupiter 6、AssertJ、Spring `ApplicationContextRunner`（静态配置验证）；后台 Embedding 生命周期用非 Web `SpringApplicationBuilder` / 可控事件；本地 HTTP 替身用 JDK 内置 `com.sun.net.httpserver.HttpServer`（不新增依赖）；ArchUnit；真实模型冒烟 `@Tag("llm")` + `@EnabledIfEnvironmentVariable`
 
 **Target Platform**: JVM 21，私有部署的 Linux / macOS
 
@@ -32,7 +32,7 @@ Phase 0 用本地 HTTP 替身和真实服务做了实测（见 [research.md](res
 
 **Performance Goals**: Provider 自身开销相对模型耗时可忽略；spec 未设吞吐目标
 
-**Constraints**: 单次请求超时 = min(连接超时, 本轮剩余时间)；每次调用最多追加 1 次重试，剩余时间不少于 `retry-min-remaining`（默认 15 秒）才重试；日志不含凭证、Prompt、工具参数、图片；启用向量化时应用就绪后在后台多一次向量化请求，启动耗时不受向量化服务影响
+**Constraints**: 单次请求超时 = min(连接超时, 本轮剩余时间)；每次调用最多追加 1 次重试，剩余时间不少于 `retry-min-remaining`（默认 15 秒）才重试；无 deadline 时 Retry-After 等待不超过 `retry-max-wait`（默认等于 timeout）；日志不含凭证、Prompt、工具参数、图片；启用向量化时应用就绪后在后台多一次向量化请求，启动耗时不受向量化服务影响
 
 **Scale/Scope**: 2 种连接类型 + 1 个向量化连接；core 新增约 10 个类型，provider 约 12 个类，约 12 个测试类
 
@@ -50,7 +50,7 @@ Phase 0 用本地 HTTP 替身和真实服务做了实测（见 [research.md](res
 | VI 存储与审计 | `llm_calls` 本 story 只写日志、代码标 TODO，US-2 落库（用户已确认，宪章要求的是核心阶段内完成）；调用记录字段覆盖技术方案 9.2，失败调用也记录；写入前脱敏 | 通过（延后项已登记） |
 | VII 每个 user story 有 Demo | 本 story 无用户入口，阶段 Demo 1 与 US-2 一起演示（AiProgrammingGuide 4.1） | 通过 |
 | VIII Agent 目录不是 Tool | 不涉及；Profile 由调用方直接构造，从 AGENT.md 派生在 US-2 | 不适用 |
-| 技术约束：密钥 | key 全部 `${ENV_VAR}` 占位；日志、异常信息、调用记录不含 key（SDK 异常 message 不进记录） | 通过 |
+| 技术约束：密钥 | key 全部 `${ENV_VAR}` 占位；日志、异常信息、调用记录不含 key（SDK 异常 message 不进记录） | 通过（US-1 暂由 Spring 占位符解析 + ProviderAutoConfiguration 完成结构/必填校验；代码标 `TODO(US-5): 迁入 ConfigLoader`，不修改宪章） |
 | 技术约束：不用 ThreadLocal | 截止时间、关联标识经 `ProviderRequest` 显式传入；取消用线程中断 | 通过 |
 | 技术约束：测试 | 自动化测试只用本地替身，不连共享库、不调真实模型；冒烟测试 `@Tag("llm")` 按环境变量开启 | 通过 |
 | 质量门 | `mvn -B verify` 全绿；新增 ArchUnit 规则：只有 `com.agentos.provider` 可依赖 `org.springframework.ai.openai`；任何 `@Bean` 方法不得返回 `ChatModel` | 通过 |
@@ -92,7 +92,7 @@ AgentOS-core/src/main/java/com/agentos/core/
     ├── CallMode.java / FailureKind.java
     └── embedding/
         ├── EmbeddingService.java  # 向量化门面：embed / status / dimensions
-        └── EmbeddingStatus.java   # DISABLED / READY / UNAVAILABLE + 原因
+        └── EmbeddingStatus.java   # DISABLED / CHECKING / READY / UNAVAILABLE / MISCONFIGURED + 原因
 
 AgentOS-provider/src/main/java/com/agentos/provider/
 ├── config/
@@ -147,7 +147,7 @@ AgentOS-boot/src/test/java/com/agentos/boot/ArchitectureRulesTest.java   # 追�
 | FR-027、FR-028 验证 | `StubModelServer` 离线测试（FR-027，research R14）；`smoke/` 下 `@Tag("llm")` 冒烟测试（FR-028） |
 | FR-029 ~ FR-035 向量化 | `EmbeddingProperties`（含 `startup-check`）、`EmbeddingService`、`DefaultEmbeddingService` 状态机、`EmbeddingProbe`（research R11、R12） |
 | FR-036 ~ FR-038 图片输入 | `RequestValidator` 放行 `image/*`、拒绝其他媒体（FR-036、FR-037，research R10）；服务拒绝图片按 INVALID_REQUEST 不重试（FR-038） |
-| SC-001 ~ SC-019 | 逐条对应 [quickstart.md](quickstart.md) 的测试表；SC-010 由 `PrimarySmokeTest`、`DeepSeekSmokeTest` 验证 |
+| SC-001 ~ SC-021 | 逐条对应 [quickstart.md](quickstart.md) 的测试表；SC-010 由 `PrimarySmokeTest`、`DeepSeekSmokeTest` 验证；SC-020/SC-021 由后台校验与重试预算测试验证 |
 
 ## Complexity Tracking
 
@@ -162,6 +162,7 @@ AgentOS-boot/src/test/java/com/agentos/boot/ArchitectureRulesTest.java   # 追�
 
 ## 风险与后续
 
+- **ConfigLoader 边界（US-1 临时方案）**：宪章要求由 ConfigLoader 解析和校验 `${ENV_VAR}`。US-1 不提前引入完整 ConfigLoader；Spring Boot 负责占位符解析，ProviderAutoConfiguration 负责 Provider 结构和必填校验，代码标记 `TODO(US-5): 迁入 ConfigLoader`。US-5 实现正式 ConfigLoader 时迁移，并保持错误语义不变。
 - **中转接口会附加隐藏的系统提示**：实测一次很短的请求 prompt_tokens 为 4397，其中缓存命中 4224；之前一次音频测试的回答像是编程助手的口吻。US-2 的 Agent 指令可能被它干扰，需要在阶段 Demo 1 观察。
 - **中转接口不遵守输出上限**：按 spec 打告警、在记录上标出；花费靠 US-2 的迭代上限和整轮超时控制。
 - **`llm_calls` 字段**：技术方案 9.2 还没有尝试序号、上限是否生效、图片数量三列，US-2 建表时补齐（以 [data-model.md](data-model.md) 为准）。

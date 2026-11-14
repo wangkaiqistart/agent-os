@@ -8,16 +8,18 @@
 
 处理顺序：
 
-1. **外呼前校验**，任一失败抛 `AgentOSException(INVALID_ARGUMENT)`，不发请求、不产生调用记录：
+1. **外呼前校验**，参数或配置失败抛 `AgentOSException(INVALID_ARGUMENT)`，不发请求、不产生调用记录：
    - 解析连接：`profile.provider` 为空时取默认连接；名称不存在 → "未知的 provider：<名称>"。
    - 连接不可用（key 为空）→ "provider 不可用：<名称>，缺少环境变量 <变量名>"。
    - `profile.model` 为空或空白 → "Profile 缺少聊天模型"。
    - 消息里有非图片媒体 → "不支持的媒体类型：<MIME>"。
-   - 已过截止时间 → 按超时处理，抛 `ProviderCallException`，`calls` 为空。
+   - Profile 使用当前连接不支持的参数 → `INVALID_ARGUMENT`，不发请求。
+
+   已过截止时间是运行时超时例外：不发请求、不产生调用记录，抛 `ProviderCallException(PROVIDER_UNAVAILABLE)`，`calls` 为空。
 2. **组装请求**：只写 Profile 设置过的生成参数；输出上限按连接类型映射；工具与 `toolContext` 原样放入请求选项；单次超时 = min(连接超时, 截止时间 − 当前时间)。
 3. **发出第 1 次请求**，结束后立即调用 `LlmCallRecorder.record(...)`。
-4. **失败时**按 research R6 分类：可重试且满足 FR-018（等待 `Retry-After` 后剩余时间 ≥ 连接的 `retry-min-remaining`，没有截止时间时直接满足）则发第 2 次请求，超时取 min(连接超时, 剩余时间)，并记录；否则抛 `ProviderCallException`，附带全部记录。
-5. **成功时**：没有候选结果按 PROTOCOL 失败处理（不重试）；Profile 设了输出上限且 completionTokens 超过上限时，记录 `outputCapHonored=false` 并告警；返回 `ProviderResult`。
+4. **失败时**按 research R6 分类：先计算等待 `Retry-After` 后的预计剩余时间；可重试且预计剩余时间 ≥ 连接的 `retry-min-remaining` 时才等待并发第 2 次请求，超时取 min(连接超时, 剩余时间)，并记录；预计等待已超过剩余预算、预算不足或不可重试时不等待、不重试，直接抛 `ProviderCallException`，附带全部记录。没有 deadline 时，`Retry-After` 等待不得超过连接配置的 `retry-max-wait`（默认等于 `timeout`），最多重试 1 次；`retry-max-wait` 小于等待值时不等待、不重试。Retry-After 缺失、负数或非法格式时按 500ms 处理。
+5. **成功时**：没有候选结果按 PROTOCOL 失败处理（不重试）；Profile 设了输出上限且 completionTokens 超过上限时，ProviderService 计算 `outputCapHonored=false` 并发出 WARN，记录输出只保存该字段；返回 `ProviderResult`。
 
 保证：
 
@@ -58,7 +60,8 @@
 | 情况 | 异常 | 错误码 | 有调用记录 |
 |------|------|--------|-----------|
 | 未知 provider、连接不可用、缺模型、不支持的媒体 | `AgentOSException` | `INVALID_ARGUMENT` | 否 |
-| 所有尝试都失败 | `ProviderCallException` | `PROVIDER_UNAVAILABLE` | 是（1 ~ 2 条） |
+| 所有已发出的尝试都失败 | `ProviderCallException` | `PROVIDER_UNAVAILABLE` | 是（1 ~ 2 条） |
+| 调用前截止时间已过 | `ProviderCallException` | `PROVIDER_UNAVAILABLE` | 否（0 条） |
 | 向量化未启用 / 校验中 / 不可用 / 配置错误 | `AgentOSException` | `PROVIDER_UNAVAILABLE` | 否 |
 
 `GlobalExceptionHandler.toHttpStatus` 已有这两个错误码的映射（400 / 503），不需要新增。

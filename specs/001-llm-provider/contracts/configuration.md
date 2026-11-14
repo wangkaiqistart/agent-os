@@ -10,10 +10,11 @@ agentos:
   providers:
     primary:
       type: openai
-      base-url: ${AGENTOS_LLM_BASE_URL}          # 写到 /v1，例如 https://<中转>/v1
+      base-url: ${AGENTOS_LLM_BASE_URL:}         # 写到 /v1，例如 https://<中转>/v1；缺省时由启动校验给出明确错误
       api-key: ${AGENTOS_LLM_API_KEY:}           # 缺省为空，由启动校验给出明确错误
       timeout: 120s
       retry-min-remaining: 15s                   # 可省略，默认 15s；剩余时间少于它就不重试
+      retry-max-wait: 120s                       # 无 deadline 时 Retry-After 等待上限，默认等于 timeout
     deepseek:
       type: deepseek
       base-url: ${AGENTOS_DEEPSEEK_BASE_URL:https://api.deepseek.com}
@@ -41,6 +42,7 @@ agentos:
 | 某连接 `type` 不是 `openai` / `deepseek` | 启动失败 | 连接名、类型、"暂不支持" |
 | 某连接 `timeout` 不是正数 | 启动失败 | 连接名 |
 | 某连接 `retry-min-remaining` 不是正数，或大于 `timeout` | 启动失败 | 连接名、两个值 |
+| 某连接 `retry-max-wait` 不是正数，或小于 `retry-min-remaining` | 启动失败 | 连接名、两个值 |
 | 某连接 `base-url` 为空 | 启动失败 | 连接名 |
 | 非默认连接 `api-key` 为空 | 标记为不可用，启动继续，打一条 INFO | 连接名 |
 | `embedding.enabled=false` 或 `api-key` 为空 | 向量化为 DISABLED，不创建模型 | — |

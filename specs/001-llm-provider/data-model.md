@@ -88,7 +88,7 @@ ProviderResult stream(ProviderRequest request, Consumer<String> textSink)
 void record(LlmCallRecord record)
 ```
 
-每次尝试结束时由 `ProviderService` 调用，在把结果或异常交给调用方之前。US-1 的实现 `LoggingLlmCallRecorder` 写一条 INFO 级结构化日志（事件名 `llm_call`）；`outputCapHonored == false` 时另写一条 WARN。US-2 提供写 `llm_calls` 的实现后，provider 的默认实现自动让位（`@ConditionalOnMissingBean`）。记录输出抛出的异常不能吞掉，也不能触发重发请求。
+每次尝试结束时由 `ProviderService` 调用，在把结果或异常交给调用方之前。US-1 的实现 `LoggingLlmCallRecorder` 写一条 INFO 级结构化日志（事件名 `llm_call`）；`outputCapHonored == false` 的 WARN 由 `ProviderService` 发出，与记录输出实现无关，US-2 替换为数据库记录器后仍然保留。记录输出抛出的异常不能吞掉，也不能触发重发请求。
 
 ## ProviderConnection（provider，内部）
 
@@ -98,6 +98,7 @@ void record(LlmCallRecord record)
 | `type` | `ConnectionType`：`OPENAI` → 输出上限发 `max_completion_tokens`；`DEEPSEEK` → 发 `max_tokens` |
 | `timeout` | 连接超时，正数 |
 | `retryMinRemaining` | 重试最少剩余时间，默认 15 秒，正数且不大于 `timeout`；等待 `Retry-After` 后剩余时间少于它就不重试 |
+| `retryMaxWait` | 无 deadline 时的 Retry-After 等待上限，默认等于 `timeout`，正数且不小于 `retryMinRemaining` |
 | `available` | key 非空为 true |
 | `chatModel` | `OpenAiChatModel`，不可用时为空；不注册为 Bean |
 

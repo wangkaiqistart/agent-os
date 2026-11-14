@@ -29,7 +29,7 @@ mvn -B verify
 | 最终请求路径为 `/v1/chat/completions`、`/v1/embeddings` | `RequestMappingTest`、`EmbeddingServiceTest` | FR-027 |
 | 429 + `Retry-After: 1` 后成功：2 次请求、间隔 ≥ 1 秒 | `RetryPolicyTest` | US2-1 |
 | 503 两次：2 次请求后 `PROVIDER_UNAVAILABLE`；401 / 400：1 次请求 | `RetryPolicyTest` | US2-2、US2-3、SC-003 |
-| 等待后剩余时间少于 `retry-min-remaining` 时不重试，不少于时重试且重试超时缩短到剩余时间；120 秒连接超时、30 秒剩余时在约 30 秒失败（测试按比例缩短时间） | `DeadlineTest` | US2-4 ~ US2-6、SC-004、SC-021 |
+| 预计等待后剩余时间少于 `retry-min-remaining` 时不等待不重试；Retry-After 超过剩余预算时立即失败；预算足够时重试且超时缩短到剩余时间；120 秒连接超时、30 秒剩余时在约 30 秒失败（测试按比例缩短时间） | `DeadlineTest` | US2-4 ~ US2-6、SC-004、SC-021 |
 | 429 后成功产生 2 条记录；缺用量与限流头时为空不为 0；缓存 token 原样记录 | `CallRecordTest` | US3-1 ~ US3-3、SC-005、SC-006 |
 | 输出超过上限时记录 `outputCapHonored=false` 并告警 | `CallRecordTest` | SC-016 |
 | 日志中无 key、Prompt、工具参数、图片数据与网址 | `RedactionTest` | US3-4、SC-007、SC-019 |
