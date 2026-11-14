@@ -40,7 +40,9 @@ mvn -B verify
 | `async`：替身延迟响应时启动不等待；校验中的调用等待结果；维度不一致标记 `MISCONFIGURED` 并拒绝调用；不可达、欠费后台退避重新校验并恢复，401 不重新校验 | `EmbeddingStartupTest` | US5-4、US5-5、US5-7、SC-012、SC-020 |
 | `sync`：维度不一致拒绝启动 | `EmbeddingStartupTest` | US5-4、SC-012 |
 | 校验通过后某次调用返回维度不一致：调用失败、不返回向量、转为 `MISCONFIGURED` | `EmbeddingServiceTest` | US5-8、SC-012 |
-| `retry-min-remaining` 非正数或大于 `timeout`、`startup-check` 取值非法时启动失败 | `StartupValidationTest` | FR-003、FR-029 |
+| `retry-min-remaining` 非正数或大于 `timeout`、`retry-max-wait` 非正数或小于 `retry-min-remaining` 时启动失败 | `StartupValidationTest` | FR-003 |
+| 向量化的 `dimensions`、`max-batch-size`、`startup-check`、`base-url` 非法时启动失败，错误含字段名和取值 | `EmbeddingStartupTest` | FR-029 |
+| 图片数量写进每条记录（成功与失败都有）；服务拒绝图片（400）按参数错误失败、不重试 | `ImageInputTest` | US6-4、FR-038 |
 | 只有 provider 包依赖 Spring AI OpenAI；`@Bean` 不返回 `ChatModel` | `ArchitectureRulesTest` | FR-004、FR-030 |
 
 ## 2. 真实模型冒烟（单独开启）
@@ -54,9 +56,10 @@ mvn -B verify -Pllm -pl AgentOS-provider -am
 
 | 测试 | 检查 |
 |------|------|
-| `PrimarySmokeTest` | 同步和流式都返回非空文本；记录里实际模型、token 用量有值；纯红色图片回答"红色"。输出上限只检查请求字段，不检查结束原因（中转接口不遵守，research 与 spec SC-015） |
-| `DeepSeekSmokeTest` | 同步和流式都返回结果；设置很小的输出上限时结束原因为 `LENGTH`；纯红色图片回答"红色" |
-| `EmbeddingSmokeTest` | 返回 1024 维向量；后台校验完成后状态为 READY |
+| `PrimarySmokeTest` | 同步和流式都返回非空文本；流式聚合出的工具调用完整、工具未被执行；记录里实际模型、token 用量有值。输出上限只检查请求字段，不检查结束原因（中转接口不遵守，research 与 spec SC-015） |
+| `DeepSeekSmokeTest` | 同步和流式都返回结果；流式聚合出的工具调用完整；设置很小的输出上限时结束原因为 `LENGTH` |
+| `EmbeddingSmokeTest` | 后台校验完成后状态为 READY；返回 1024 维向量 |
+| `ImageSmokeTest` | 一张纯红色图片，`primary` 和 `deepseek` 各一个用例，回答里包含"红"或 red；记录里 `imageCount` 为 1 |
 
 ## 3. 人工确认
 

@@ -189,12 +189,13 @@ LLM 调用的复杂度都被 **Spring AI 2.0** 的 `ChatModel` 抽象吸收掉�
 
 **超时与重试。** 每个 Provider 配置 `timeout`（默认 60 秒），作为单次模型调用的 HTTP 读超时。重试由 `ProviderService` 自己控制，不交给模型实现内置的重试：Spring AI 的模型实现默认带重试和指数退避（1.x 默认最多 10 次，2.0 的默认值以官方文档为准），会让一次调用拖过整轮预算。构建 `ChatModel` 时显式传入不重试的配置，`ProviderService` 的规则是：
 
-- 只对 429、5xx 和连接错误重试，最多 1 次；
-- 剩余整轮时间不足一个 `timeout` 时不重试；
+- 只对 429、500 / 502 / 503 / 504 和临时连接错误（含读超时）重试，最多 1 次；501、505 等表示服务端不支持，鉴权、参数、未知模型错误一律不重试；
+- 有 `Retry-After` 时先算"等完它之后本轮还剩多久"，小于连接配置的 `retry-min-remaining`（默认 15 秒，必须为正数且不大于 `timeout`）就不等待、不重试；够了才等，等完用单调时钟复核截止时间，再以 min(`timeout`, 剩余时间) 作为第二次请求的超时。`Retry-After` 缺失、为负数或无法解析时等 500 毫秒；
+- 没有截止时间时，`Retry-After` 超过 `retry-max-wait`（默认等于 `timeout`）也不重试，避免无限期阻塞调用线程；
 - 流式调用已经向 `TurnSink` 推送过分片后不重试，避免调用方收到重复内容；
 - 仍失败则本轮以 Provider 故障结束（HTTP 503）。核心阶段不做 fallback。
 
-**Provider 配置模块。** 通过 `application.yaml` 的 AgentOS 自有前缀（如 `agentos.providers.<name>.*`）声明每个 Provider 的类型（`openai` 兼容 / `deepseek` / `anthropic` / `ollama`）、base URL、API key（`${ENV_VAR}` 占位）和默认模型；`ProviderService` 据此编程式构建对应的 `ChatModel` 实例。不依赖 `spring.ai.<provider>.*` 的单实例自动配置。
+**Provider 配置模块。** 通过 `application.yaml` 的 AgentOS 自有前缀（如 `agentos.providers.<name>.*`）声明每个 Provider 的类型（核心阶段支持 `openai` 兼容和 `deepseek`，`anthropic`、`ollama` 暂不支持，配置了会启动失败）、base URL、API key（`${ENV_VAR}` 占位）、`timeout`、`retry-min-remaining` 和 `retry-max-wait`。**连接不配置聊天模型**：模型和生成参数（推理强度、输出上限、温度）由 Agent 的 Profile 提供，所以同一个连接可以被多个 Agent 用不同的模型调用；`ProviderService` 据此编程式构建对应的 `ChatModel` 实例。不依赖 `spring.ai.<provider>.*` 的单实例自动配置。
 
 **调用元数据采集。** 每次调用后从 `ChatResponse.getMetadata()`（`ChatResponseMetadata`）读取并写入 `llm_calls`（字段见 9.2）：
 
@@ -213,6 +214,8 @@ AgentOS 的做法是维护一份显式的 **provider name 到 `ChatModel` 的映
 
 具体是在 Provider 配置里为每个 Provider 声明唯一的 provider name（`primary`、`deepseek`、`kimi` 等），`ProviderService` 启动时按配置逐个构建 `ChatModel` 并以 name 为键放入映射表，Profile 通过 provider name 引用。这样多 Provider 并存时不会有歧义。"**显式映射、不靠类型扫描**"这个原则要守住，否则多 Provider 跑不起来。
 
+连接和 Profile 的分工：连接只管"连到哪里、凭证、超时"；聊天模型名和生成参数在 Profile 里。`provider` 名称未知、连接不可用（key 为空）、Profile 缺少模型，都在发出网络请求之前失败并指明原因，不会静默改用别的连接或模型。`openai` 与 `deepseek` 两种类型都用 `OpenAiChatModel`，不用 `spring-ai-deepseek`：它的消息内容只有字符串，图片会丢。
+
 ```yaml
 # application.yaml 示意（键名研发阶段定）
 agentos:
@@ -220,26 +223,23 @@ agentos:
   providers:
     primary:                        # 主链路模型，测试环境见 3.5
       type: openai                  # OpenAI 兼容协议
-      base-url: ${AGENTOS_LLM_BASE_URL}
+      base-url: ${AGENTOS_LLM_BASE_URL}   # 写到 /v1，代码不会自动补
       api-key: ${AGENTOS_LLM_API_KEY}
-      model: ${AGENTOS_LLM_MODEL}
-      reasoning-effort: low         # 推理模型才有，见 3.5
       timeout: 120s                 # 单次模型调用超时；推理模型耗时更长
-    deepseek:                       # 可选，例如作为评估模型
-      type: openai
-      base-url: https://api.deepseek.com
-      api-key: ${DEEPSEEK_API_KEY:}
-      model: deepseek-flash         # 以 DeepSeek 官方文档当前的模型名为准
+      retry-min-remaining: 15s      # 等完 Retry-After 后本轮剩余不足它就不重试
+      retry-max-wait: 120s          # 没有截止时间时 Retry-After 的等待上限
+    deepseek:                       # 可选，例如作为评估模型；key 为空时标记为不可用，不影响启动
+      type: deepseek                # 与 openai 共用同一套实现，只在输出上限字段上不同
+      base-url: ${AGENTOS_DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      api-key: ${AGENTOS_DEEPSEEK_API_KEY:}
       timeout: 60s
     kimi:
       type: openai
-      base-url: https://api.moonshot.cn
+      base-url: https://api.moonshot.cn/v1
       api-key: ${MOONSHOT_API_KEY}
-      model: <按账号可用型号填写>
-    local:
-      type: ollama
-      base-url: http://localhost:11434
-      model: <本地模型名>
+    # local:                        # type: ollama 核心阶段暂不支持，配置了会启动失败，扩展阶段再加
+    #   type: ollama
+    #   base-url: http://localhost:11434
 ```
 
 ### 3.3 关键设计点
@@ -261,10 +261,12 @@ agentos:
     model: ${AGENTOS_EMBEDDING_MODEL}
     dimensions: ${AGENTOS_EMBEDDING_DIMENSIONS} # 必须与向量表的维度一致
     timeout: 30s
+    max-batch-size: 10                          # 百炼单次最多 10 条
+    startup-check: async                        # async（默认）或 sync
 ```
 
-- **构建方式。** `ProviderService` 按 `agentos.embedding.*` 编程式构建一个 `OpenAiEmbeddingModel`，作为容器里唯一的 `EmbeddingModel` Bean。很多 OpenAI 兼容服务的地址本身已经带 `/v1`，而 OpenAI 模块会再拼接 Embedding 路径，接入时核对实际请求路径，必要时显式配置 Embedding 路径。
-- **维度是表结构的一部分。** `vector(N)` 列的 N 在建表时确定，由 Flyway 占位符 `${embeddingDimensions}` 取 `agentos.embedding.dimensions`，构建 `PgVectorStore` 时也显式传入 `.dimensions(...)`。启动时用一次 `embed("ping")` 的结果长度与配置比对，不一致就拒绝启动；不调用 `dimensions()`，因为它的默认实现本身也会远程调用，失败时 `PgVectorStore` 还会回退成 1536。`vector` 类型的 HNSW 索引上限 2000 维；换模型或改维度要重建向量表并重新向量化。
+- **构建方式。** `ProviderService` 按 `agentos.embedding.*` 编程式构建一个 `OpenAiEmbeddingModel`，作为容器里唯一的 `EmbeddingModel` Bean。`base-url` 写到 `/v1`（百炼是 `.../compatible-mode/v1`），SDK 不会自动补，最终请求为 `<base-url>/embeddings`，见 research R2。不注册 `EmbeddingModel` Bean：`DefaultEmbeddingService` 内部至多持有一个，未启用或 key 为空时一个都不创建；调用方通过 `EmbeddingService` 使用，它自己按 `max-batch-size` 分批、每批最多重试 1 次、检查每个向量的长度。
+- **维度是表结构的一部分。** `vector(N)` 列的 N 在建表时确定，由 Flyway 占位符 `${embeddingDimensions}` 取 `agentos.embedding.dimensions`，构建 `PgVectorStore` 时也显式传入 `.dimensions(...)`。启用后用一次 `embed("ping")` 的结果长度与配置比对。默认 `startup-check: async`：应用就绪后在后台校验，不阻塞启动；校验完成前发起的调用最多等一个校验超时。维度不一致标记为配置错误并拒绝向量化调用（不拒绝启动，避免多实例反复崩溃重启）；服务不可达、鉴权失败或欠费标记为不可用，除鉴权失败外在后台按 1 → 2 → 4 … 分钟退避重新校验（最长 30 分钟），恢复后无需重启。需要"维度错误就拒绝启动"的环境配置 `startup-check: sync`。校验通过后每次调用仍检查返回向量长度，不一致时本次调用失败、不返回任何向量并转为配置错误；不调用 `dimensions()`，因为它的默认实现本身也会远程调用，失败时 `PgVectorStore` 还会回退成 1536。`vector` 类型的 HNSW 索引上限 2000 维；换模型或改维度要重建向量表并重新向量化。
 - **未启用时。** `enabled=false` 或缺少 key 时不创建 `EmbeddingModel` 和 `PgVectorStore`：`recall_memory` 只走关键词和时间两路，`retrieve_knowledge` 只走关键词路，工具搜索不能选 `VectorToolIndex`。向量表的迁移脚本放在单独的 `db/migration-vector/` 目录，只有启用时才加入 `spring.flyway.locations`。
 - **批量写入。** `PgVectorStore` 写入时用 `BatchingStrategy`（默认 `TokenCountBatchingStrategy`）分批调用 Embedding 接口。服务对单次请求的条数或 token 有限制时，声明自定义的 `BatchingStrategy` Bean。
 
@@ -298,7 +300,7 @@ agentos:
 
 - **数据经过第三方中转。** 测试环境的 prompt 和工具结果会发到这个中转服务，不要用真实业务数据或密钥做测试。生产部署按"数据不出企业"的定位，改成企业自己的模型服务。
 - **兼容性要实测。** 中转接口是否完整支持工具调用、流式输出里的工具调用、`stream_options` 里的用量统计、限流响应头、`json_schema` 结构化输出，都要在搭骨架时各跑一次确认。`useProviderStructuredOutput()`（11.3）在确认支持之前保持关闭。
-- **评估模型。** 评估器默认也用 `primary`，存在"自己评自己"的偏差。配置了 `DEEPSEEK_API_KEY` 时，评估器改用 `deepseek`，与被测模型分开（见 12.4）。
+- **评估模型。** 评估器默认也用 `primary`，存在"自己评自己"的偏差。配置了 `AGENTOS_DEEPSEEK_API_KEY` 时，评估器改用 `deepseek`，与被测模型分开（见 12.4）。
 
 ---
 
@@ -954,7 +956,7 @@ session list
 | `AGENTOS_DB_URL` | PostgreSQL JDBC URL，如 `jdbc:postgresql://host:5432/agentos` | 是 |
 | `AGENTOS_DB_USERNAME` / `AGENTOS_DB_PASSWORD` | 数据库账号密码 | 是 |
 | `AGENTOS_LLM_BASE_URL` / `AGENTOS_LLM_API_KEY` / `AGENTOS_LLM_MODEL` | 主链路模型 `primary` 的地址、key、模型名（主链路与辅助调用共用，见 3.5） | 是 |
-| `DEEPSEEK_API_KEY` | 可选的 `deepseek` provider，配置后作为独立的评估模型 | 否 |
+| `AGENTOS_DEEPSEEK_BASE_URL` / `AGENTOS_DEEPSEEK_API_KEY` / `AGENTOS_DEEPSEEK_MODEL` | 可选的 `deepseek` provider，配置后作为独立的评估模型；key 为空时该连接不可用，不影响启动 | 否 |
 | `AGENTOS_EMBEDDING_BASE_URL` / `AGENTOS_EMBEDDING_API_KEY` / `AGENTOS_EMBEDDING_MODEL` | Embedding 服务地址、key、模型名（见 3.4） | 启用向量检索时 |
 | `AGENTOS_EMBEDDING_DIMENSIONS` | Embedding 向量维度，同时用于 Flyway 建表 | 启用向量检索时 |
 | `MOONSHOT_API_KEY` 等 | 其他 Provider 的 key，按需 | 否 |
@@ -975,12 +977,8 @@ spring:
       embeddingDimensions: ${AGENTOS_EMBEDDING_DIMENSIONS:1024}
   ai:
     model:
+      chat: none                                # 聊天模型只由 ProviderService 按 agentos.providers 构建，见 3.2
       embedding: none                           # Embedding 只走 agentos.embedding，见 3.4
-    openai:                                     # Starter 自动配置的辅助模型，与 primary 相同
-      base-url: ${AGENTOS_LLM_BASE_URL}
-      api-key: ${AGENTOS_LLM_API_KEY}
-      chat:
-        model: ${AGENTOS_LLM_MODEL}
     mcp:
       client:
         enabled: false                          # MCP 客户端由 McpClientService 编程式创建，见 6.4
@@ -997,7 +995,7 @@ agentos:
     dimensions: ${AGENTOS_EMBEDDING_DIMENSIONS:1024}
 ```
 
-默认值对应测试环境选用的百炼 `text-embedding-v4`（见 3.4）。换模型时 `AGENTOS_EMBEDDING_DIMENSIONS` 必须改成该模型的实际维度，启动时会用一次真实调用校验。变量模板见仓库根目录的 `.env.example`。
+默认值对应测试环境选用的百炼 `text-embedding-v4`（见 3.4）。换模型时 `AGENTOS_EMBEDDING_DIMENSIONS` 必须改成该模型的实际维度，应用就绪后会用一次真实调用在后台校验（见 3.4）。`AGENTOS_LLM_BASE_URL`、`AGENTOS_EMBEDDING_BASE_URL` 都要写到 `/v1`。变量模板见仓库根目录的 `.env.example`。
 
 **本地开发与测试环境。** 项目开始时由项目方提供 PostgreSQL 访问地址、账号密码、一个测试专用的主链路模型接口（地址、key、模型名，见 3.5），以及一套测试专用的 Embedding 服务（地址、key、模型名，见 3.4），写进本地 `.env` 或 CI 的密钥配置，**不提交到仓库**。
 
@@ -1184,9 +1182,12 @@ volumes:
 | `response_id` | `ChatResponseMetadata.getId()` |
 | `finish_reason` | 结束原因 |
 | `mode` | `call` / `stream` |
+| `attempt` | 本次逻辑调用中的第几次实际请求，1 或 2；重试单独一行 |
+| `image_count` | 请求里附带的图片数量；图片数据和网址不落库 |
 | `prompt_tokens` / `completion_tokens` / `total_tokens` | `Usage` 标准指标 |
 | `cache_read_tokens` / `cache_write_tokens` | `Usage.getCacheReadInputTokens()` / `getCacheWriteInputTokens()`；不支持时为 NULL |
 | `tool_call_count` | 该响应请求的工具调用数 |
+| `output_cap_honored` | Profile 设了输出上限且服务端返回了输出 token 数时，实际输出是否没超过上限；否则为 NULL。中转接口可能忽略上限，`false` 时同时打 WARN |
 | `requests_remaining` / `tokens_remaining` | `RateLimit` 余量；`EmptyRateLimit` 时为 NULL |
 | `success` / `error_message` | 调用是否成功 |
 | `duration_ms` | 调用耗时 |

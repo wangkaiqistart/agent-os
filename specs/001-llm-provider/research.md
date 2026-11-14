@@ -56,7 +56,7 @@
 
 ## R7 错误信息脱敏
 
-- **Decision**: 调用记录的错误摘要只由 `FailureKind`、HTTP 状态码、经过安全过滤的 SDK `type()` / `code()` 组成。不调用 SDK 异常的 `getMessage()`，也不记录原始响应体或原始异常 cause。`type()` / `code()` 只保留 `[A-Za-z0-9_.-]`，最长 64 字符；缺失或不符合规则时使用固定占位符。
+- **Decision**: 调用记录的错误摘要只由 `FailureKind`、HTTP 状态码、经过安全过滤的 SDK `type()` / `code()` 组成。不调用 SDK 异常的 `getMessage()`，也不记录原始响应体或原始异常 cause。`type()` / `code()` 只保留 `[A-Za-z0-9_.]`，最长 64 字符；缺失或不符合规则时使用固定占位符。**不含连字符**（2026-11-14 修订）：RedactionTest 实测，服务端把 `sk-...` 密钥回显进 `type` / `code` 时，含连字符的白名单会原样放过；常见错误码（`rate_limit_exceeded`、`invalid_api_key`、`Arrearage`）都没有连字符。代价是带连字符的合法错误码会显示为占位符，只影响排查便利性。
 - **Rationale**: 替身返回 401，错误体里放了 `sk-SECRET`，`UnauthorizedException.getMessage()` 原样包含它；服务端错误体的 type/code 也属于不可信输入，必须限字符、限长并与 SDK 原始异常隔离。
 
 ## R8 用量与限流

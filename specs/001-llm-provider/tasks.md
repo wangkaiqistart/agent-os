@@ -106,13 +106,13 @@ description: "US-1 对接 LLM（Provider 抽象）的实施任务"
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T032 [P] [US2] 编写 `RetryPolicyTest`：429 + `Retry-After: 1` 后成功 → 2 次请求、间隔 ≥ 1 秒、拿到成功结果（US2-1）；503 两次 → 2 次请求后 `ProviderCallException`（US2-2）；401、400、501 → 只 1 次请求（US2-3、SC-003）；连接被拒（替身已关闭）→ 按 CONNECTION 重试 1 次；无 `Retry-After` 时等待约 500 毫秒；没有截止时间时可重试失败一律重试 1 次；调用线程被中断 → 不重试、记 CANCELLED、中断标志被恢复 in provider-test/chat/RetryPolicyTest.java
-- [ ] T033 [P] [US2] 编写 `DeadlineTest`（时间按比例缩短，例如连接超时 6 秒、最少剩余 2 秒）：预计等待 `Retry-After` 后剩余时间小于 `retry-min-remaining` → 不等待、不重试、立即失败（US2-4、SC-021）；`Retry-After` 大于本轮剩余时间 → 不等待、不重试且总耗时不超过预算（SC-004）；剩余时间够门槛但不够一个连接超时 → 发出第 2 次请求，其超时缩短到剩余时间，替身不响应时在截止时间失败（US2-6、SC-021）；连接超时 6 秒、剩余 1.5 秒、替身不响应 → 约 1.5 秒失败（US2-5）；所有场景总耗时 ≤ 剩余时间 + 1 秒（SC-004）；调用前截止时间已过 → `ProviderCallException`，`calls` 为空、请求数为 0 in provider-test/chat/DeadlineTest.java
+- [X] T032 [P] [US2] 编写 `RetryPolicyTest`：429 + `Retry-After: 1` 后成功 → 2 次请求、间隔 ≥ 1 秒、拿到成功结果（US2-1）；503 两次 → 2 次请求后 `ProviderCallException`（US2-2）；401、400、501 → 只 1 次请求（US2-3、SC-003）；连接被拒（替身已关闭）→ 按 CONNECTION 重试 1 次；无 `Retry-After` 时等待约 500 毫秒；没有截止时间时可重试失败一律重试 1 次；调用线程被中断 → 不重试、记 CANCELLED、中断标志被恢复 in provider-test/chat/RetryPolicyTest.java
+- [X] T033 [P] [US2] 编写 `DeadlineTest`（时间按比例缩短，例如连接超时 6 秒、最少剩余 2 秒）：预计等待 `Retry-After` 后剩余时间小于 `retry-min-remaining` → 不等待、不重试、立即失败（US2-4、SC-021）；`Retry-After` 大于本轮剩余时间 → 不等待、不重试且总耗时不超过预算（SC-004）；剩余时间够门槛但不够一个连接超时 → 发出第 2 次请求，其超时缩短到剩余时间，替身不响应时在截止时间失败（US2-6、SC-021）；连接超时 6 秒、剩余 1.5 秒、替身不响应 → 约 1.5 秒失败（US2-5）；所有场景总耗时 ≤ 剩余时间 + 1 秒（SC-004）；调用前截止时间已过 → `ProviderCallException`，`calls` 为空、请求数为 0 in provider-test/chat/DeadlineTest.java
 
 ### Implementation for User Story 2
 
-- [ ] T034 [P] [US2] 新建 `FailureClassifier`：按 research R6 的表把 SDK 异常映射为 `FailureKind`（`RateLimitException`→RATE_LIMITED；`InternalServerException` 且状态码 500/502/503/504→可重试的 SERVER_ERROR，其他 5xx 不可重试；线程未中断的 `OpenAIIoException`→CONNECTION；401/403→AUTH；400/404/422→INVALID_REQUEST；线程中断→CANCELLED）；从 `Retry-After` 按秒解析，缺失/负数/非法格式用 500ms，HTTP-date 暂不支持；无 deadline 时 Retry-After 超过连接的 `retry-max-wait` 应直接放弃重试；不调用 `getMessage()`；新增安全摘要方法：type/code 只接受 `[A-Za-z0-9_.-]` 且最多 64 字符，不符合时使用固定占位，Connection/Protocol/Cancelled 没有状态字段时使用固定模板 in provider/chat/FailureClassifier.java
-- [ ] T035 [US2] 在 `DefaultProviderService.call` 加入重试：首次失败交 `FailureClassifier` 分类；先计算“等待 Retry-After 后的预计剩余时间”，若小于 `retryMinRemaining` 或 Retry-After 会超过剩余预算则不等待、不重试，立即失败；无 deadline 时若 Retry-After 超过连接的 `retry-max-wait` 也不等待；Retry-After 缺失、负数或非法格式按 500ms 兜底；预算足够才等待，等待后用单调时钟复核 deadline，再以 min(连接超时, 剩余时间) 发第 2 次请求；最多 2 次请求；失败时抛 `ProviderCallException`，附带全部记录；等待或请求中被中断时记 CANCELLED、不重试、恢复中断标志；不把原始 SDK 异常作为 cause（spec FR-017 ~ FR-021，依赖 T028、T034） in provider/chat/DefaultProviderService.java
+- [X] T034 [P] [US2] 新建 `FailureClassifier`：按 research R6 的表把 SDK 异常映射为 `FailureKind`（`RateLimitException`→RATE_LIMITED；`InternalServerException` 且状态码 500/502/503/504→可重试的 SERVER_ERROR，其他 5xx 不可重试；线程未中断的 `OpenAIIoException`→CONNECTION；401/403→AUTH；400/404/422→INVALID_REQUEST；线程中断→CANCELLED）；从 `Retry-After` 按秒解析，缺失/负数/非法格式用 500ms，HTTP-date 暂不支持；无 deadline 时 Retry-After 超过连接的 `retry-max-wait` 应直接放弃重试；不调用 `getMessage()`；新增安全摘要方法：type/code 只接受 `[A-Za-z0-9_.]` 且最多 64 字符（不含连字符，见 research R7），不符合时使用固定占位，Connection/Protocol/Cancelled 没有状态字段时使用固定模板 in provider/chat/FailureClassifier.java
+- [X] T035 [US2] 在 `DefaultProviderService.call` 加入重试：首次失败交 `FailureClassifier` 分类；先计算“等待 Retry-After 后的预计剩余时间”，若小于 `retryMinRemaining` 或 Retry-After 会超过剩余预算则不等待、不重试，立即失败；无 deadline 时若 Retry-After 超过连接的 `retry-max-wait` 也不等待；Retry-After 缺失、负数或非法格式按 500ms 兜底；预算足够才等待，等待后用单调时钟复核 deadline，再以 min(连接超时, 剩余时间) 发第 2 次请求；最多 2 次请求；失败时抛 `ProviderCallException`，附带全部记录；等待或请求中被中断时记 CANCELLED、不重试、恢复中断标志；不把原始 SDK 异常作为 cause（spec FR-017 ~ FR-021，依赖 T028、T034） in provider/chat/DefaultProviderService.java
 
 **Checkpoint**: 重试与截止时间测试全部通过，US1 的测试仍然通过
 
@@ -126,13 +126,13 @@ description: "US-1 对接 LLM（Provider 抽象）的实施任务"
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T036 [P] [US3] 编写 `CallRecordTest`（用一个收集型 `LlmCallRecorder`）：429 后成功 → 2 条记录，第 1 条 `success=false` 且带 `failureKind`、`httpStatus`、`errorSummary`，第 2 条带用量（US3-1、SC-005）；响应无 usage → 三项 token 为 null，不是 0；无缓存字段、无限流头 → 缓存 token 与限流余量为 null（US3-2、SC-006）；带 `cached_tokens` → `cacheReadTokens` 等于该值、`cacheWriteTokens` 为 null（US3-3）；带 `x-ratelimit-remaining-*` → 限流余量有值；传入 `CallCorrelation` 时原样带上，不传时为 null（US3-5）；完整断言 `provider`、`requestedModel`、`responseModel`、`responseId`、`mode`、`attempt`、`finishReason`、`toolCallCount`、`durationMs`；Profile 设了上限且 completionTokens 超过上限 → `outputCapHonored=false` 且 ProviderService 发出 WARN（收集型 Recorder 不影响告警），未超过 → `true`，Profile 没设上限 → null（SC-016）；记录条数等于替身收到的请求数；容器的 `ObservationRegistry` 收到了模型调用观测（FR-026） in provider-test/chat/CallRecordTest.java
-- [ ] T037 [P] [US3] 编写 `RedactionTest`：用 Logback 的 `ListAppender` 捕获全部日志，替身在 401 错误体的 `error.type`、`error.code` 和 5xx body 中放 `sk-SECRET-TEST`，并覆盖连接异常与 cause chain；请求带 API key、完整对话和工具参数；断言日志、记录的 `errorSummary`、`ProviderCallException.getMessage()`、异常 cause/堆栈中都找不到 key 原文、Prompt 原文和工具参数（US3-4、SC-007） in provider-test/chat/RedactionTest.java
+- [X] T036 [P] [US3] 编写 `CallRecordTest`（用一个收集型 `LlmCallRecorder`）：429 后成功 → 2 条记录，第 1 条 `success=false` 且带 `failureKind`、`httpStatus`、`errorSummary`，第 2 条带用量（US3-1、SC-005）；响应无 usage → 三项 token 为 null，不是 0；无缓存字段、无限流头 → 缓存 token 与限流余量为 null（US3-2、SC-006）；带 `cached_tokens` → `cacheReadTokens` 等于该值、`cacheWriteTokens` 为 null（US3-3）；带 `x-ratelimit-remaining-*` → 限流余量有值；传入 `CallCorrelation` 时原样带上，不传时为 null（US3-5）；完整断言 `provider`、`requestedModel`、`responseModel`、`responseId`、`mode`、`attempt`、`finishReason`、`toolCallCount`、`durationMs`；Profile 设了上限且 completionTokens 超过上限 → `outputCapHonored=false` 且 ProviderService 发出 WARN（收集型 Recorder 不影响告警），未超过 → `true`，Profile 没设上限 → null（SC-016）；记录条数等于替身收到的请求数；容器的 `ObservationRegistry` 收到了模型调用观测（FR-026） in provider-test/chat/CallRecordTest.java
+- [X] T037 [P] [US3] 编写 `RedactionTest`：用 Logback 的 `ListAppender` 捕获全部日志，替身在 401 错误体的 `error.type`、`error.code` 和 5xx body 中放 `sk-SECRET-TEST`，并覆盖连接异常与 cause chain；请求带 API key、完整对话和工具参数；断言日志、记录的 `errorSummary`、`ProviderCallException.getMessage()`、异常 cause/堆栈中都找不到 key 原文、Prompt 原文和工具参数（US3-4、SC-007） in provider-test/chat/RedactionTest.java
 
 ### Implementation for User Story 3
 
-- [ ] T038 [P] [US3] 在 `FailureClassifier` 增加错误摘要方法：只由 `FailureKind`、HTTP 状态码、SDK 的 `type()` / `code()` 拼成，不含原始响应体（research R7） in provider/chat/FailureClassifier.java
-- [ ] T039 [US3] 在 `DefaultProviderService` 补齐记录字段：`EmptyUsage` 时三项 token 为 null，否则原样取值；`getCacheReadInputTokens()` / `getCacheWriteInputTokens()` 原样记录；`EmptyRateLimit` 时限流余量为 null，`OpenAiRateLimit` 时取 `getRequestsRemaining()` / `getTokensRemaining()`；计算 `outputCapHonored`；失败记录填 `failureKind`、`httpStatus`、安全 `errorSummary`；当 `outputCapHonored=false` 时由 ProviderService 发 WARN（不放在 Recorder）；`recorder.record` 抛出的异常向上抛、不重发请求；异常 cause 不携带原始 SDK 异常（research R8，依赖 T035、T038） in provider/chat/DefaultProviderService.java
+- [X] T038 [P] [US3] 在 `FailureClassifier` 增加错误摘要方法：只由 `FailureKind`、HTTP 状态码、SDK 的 `type()` / `code()` 拼成，不含原始响应体（research R7） in provider/chat/FailureClassifier.java
+- [X] T039 [US3] 在 `DefaultProviderService` 补齐记录字段：`EmptyUsage` 时三项 token 为 null，否则原样取值；`getCacheReadInputTokens()` / `getCacheWriteInputTokens()` 原样记录；`EmptyRateLimit` 时限流余量为 null，`OpenAiRateLimit` 时取 `getRequestsRemaining()` / `getTokensRemaining()`；计算 `outputCapHonored`；失败记录填 `failureKind`、`httpStatus`、安全 `errorSummary`；当 `outputCapHonored=false` 时由 ProviderService 发 WARN（不放在 Recorder）；`recorder.record` 抛出的异常向上抛、不重发请求；异常 cause 不携带原始 SDK 异常（research R8，依赖 T035、T038） in provider/chat/DefaultProviderService.java
 
 **Checkpoint**: 调用记录字段与 data-model.md 一致，日志不含敏感信息
 
@@ -146,12 +146,12 @@ description: "US-1 对接 LLM（Provider 抽象）的实施任务"
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T040 [P] [US4] 编写 `StreamingTest`：替身按 SSE 分 3 段发文本 → `textSink` 依次收到 3 段；工具调用参数拆成 3 个分片 → 聚合结果里参数完整，计数回调执行 0 次（US4-1、SC-009）；请求体带 `stream_options.include_usage`；首字节超时、已发分片后持续慢速越过 deadline → 在 deadline + 1 秒内取消订阅并失败，已发增量后不重试；未发增量前遇到 503 → 重试 1 次；正常流式只有 1 条记录、`mode=STREAM`、用量不重复累加；`textSink` 抛异常或线程中断 → 记为 CANCELLED、恢复中断标志（US4-2 ~ US4-4、SC-004） in provider-test/chat/StreamingTest.java
+- [X] T040 [P] [US4] 编写 `StreamingTest`：替身按 SSE 分 3 段发文本 → `textSink` 依次收到 3 段；工具调用参数拆成 3 个分片 → 聚合结果里参数完整，计数回调执行 0 次（US4-1、SC-009）；请求体带 `stream_options.include_usage`；首字节超时、已发分片后持续慢速越过 deadline → 在 deadline + 1 秒内取消订阅并失败，已发增量后不重试；未发增量前遇到 503 → 重试 1 次；正常流式只有 1 条记录、`mode=STREAM`、用量不重复累加；`textSink` 抛异常或线程中断 → 记为 CANCELLED、恢复中断标志（US4-2 ~ US4-4、SC-004） in provider-test/chat/StreamingTest.java
 
 ### Implementation for User Story 4
 
-- [ ] T041 [US4] 实现 `DefaultProviderService.stream`：复用 `call` 的校验、请求组装、重试与记录逻辑，请求总是设 `streamUsage(true)`；`chatModel.stream(prompt)` 外套 `MessageAggregator`，非空文本增量按序交给 `textSink`，用一个标志记录"是否已交出增量"；对聚合 Flux/订阅增加按剩余 deadline 的显式 timeout/cancel，不能只依赖 SDK read timeout；已交出后失败不重试；`textSink` 抛出的异常或线程中断视为调用方取消并恢复中断标志；返回聚合后的 `ChatResponse`（research R9，依赖 T039） in provider/chat/DefaultProviderService.java
-- [ ] T042 [P] [US4] 在两个冒烟测试中增加流式调用：返回非空文本，聚合结果里的工具调用完整（SC-010） in provider-test/smoke/PrimarySmokeTest.java、provider-test/smoke/DeepSeekSmokeTest.java
+- [X] T041 [US4] 实现 `DefaultProviderService.stream`：复用 `call` 的校验、请求组装、重试与记录逻辑，请求总是设 `streamUsage(true)`；`chatModel.stream(prompt)` 外套 `MessageAggregator`，非空文本增量按序交给 `textSink`，用一个标志记录"是否已交出增量"；对聚合 Flux/订阅增加按剩余 deadline 的显式 timeout/cancel，不能只依赖 SDK read timeout；已交出后失败不重试；`textSink` 抛出的异常或线程中断视为调用方取消并恢复中断标志；返回聚合后的 `ChatResponse`（research R9，依赖 T039） in provider/chat/DefaultProviderService.java
+- [X] T042 [P] [US4] 在两个冒烟测试中增加流式调用：返回非空文本，聚合结果里的工具调用完整（SC-010） in provider-test/smoke/PrimarySmokeTest.java、provider-test/smoke/DeepSeekSmokeTest.java
 
 **Checkpoint**: 同步与流式两条路径的结果等价
 
@@ -165,15 +165,15 @@ description: "US-1 对接 LLM（Provider 抽象）的实施任务"
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T043 [P] [US5] 编写 `EmbeddingServiceTest`：向量化 1 段文本 → 1 个 1024 维向量，请求路径为 `/v1/embeddings`、请求体显式带 `dimensions`（US5-1）；11 条、`max-batch-size=10` → 2 次请求、11 个向量、顺序与输入一致（US5-2、SC-013）；空列表 → 0 次请求；未启用或 key 为空 → 不创建 `OpenAiEmbeddingModel`，调用抛 `AgentOSException(PROVIDER_UNAVAILABLE, "向量化未启用")`（US5-3、SC-014）；校验通过后某次响应维度不一致 → 本次调用失败、不返回任何向量、状态转为 `MISCONFIGURED`（US5-8、SC-012）；503 重试 1 次、401 不重试（FR-034）；`embedding_call` 日志含模型、条数、请求次数、token、成功与否、耗时，不含原文与向量值（FR-035） in provider-test/embedding/EmbeddingServiceTest.java
-- [ ] T044 [P] [US5] 编写 `EmbeddingStartupTest`：使用非 Web `SpringApplicationBuilder` 或可控事件触发器，不使用只刷新上下文的 `ApplicationContextRunner` 测量 ApplicationReadyEvent；`async` 时替身延迟 5 秒响应，上下文启动不等待，状态为 `CHECKING`（US5-7、SC-020）；`CHECKING` 期间的调用等到校验结果后成功；校验超时仍未完成 → 调用报"向量化校验中"；维度不一致 → `MISCONFIGURED` + ERROR 日志写明配置值和实际值，之后调用报"向量化配置错误"（US5-4）；不可达、401、错误码含 `Arrearage` → `UNAVAILABLE`，reason 分别为"不可达 / 鉴权失败 / 欠费"，并打 WARN（US5-5）；不可达或欠费后替身恢复 → 后台重新校验后变为 `READY`（使用可注入的退避策略/时钟，测试间隔缩短为毫秒级）；401 后不重新校验；`sync` 时维度不一致 → 启动失败，`sync` 时不可达 → 启动成功且为 `UNAVAILABLE`；`dimensions`、`max-batch-size` 非正数或 `startup-check` 取值非法 → 启动失败；上下文关闭后重新校验任务停止 in provider-test/embedding/EmbeddingStartupTest.java
+- [X] T043 [P] [US5] 编写 `EmbeddingServiceTest`：向量化 1 段文本 → 1 个 1024 维向量，请求路径为 `/v1/embeddings`、请求体显式带 `dimensions`（US5-1）；11 条、`max-batch-size=10` → 2 次请求、11 个向量、顺序与输入一致（US5-2、SC-013）；空列表 → 0 次请求；未启用或 key 为空 → 不创建 `OpenAiEmbeddingModel`，调用抛 `AgentOSException(PROVIDER_UNAVAILABLE, "向量化未启用")`（US5-3、SC-014）；校验通过后某次响应维度不一致 → 本次调用失败、不返回任何向量、状态转为 `MISCONFIGURED`（US5-8、SC-012）；503 重试 1 次、401 不重试（FR-034）；`embedding_call` 日志含模型、条数、请求次数、token、成功与否、耗时，不含原文与向量值（FR-035） in provider-test/embedding/EmbeddingServiceTest.java
+- [X] T044 [P] [US5] 编写 `EmbeddingStartupTest`：使用非 Web `SpringApplicationBuilder` 或可控事件触发器，不使用只刷新上下文的 `ApplicationContextRunner` 测量 ApplicationReadyEvent；`async` 时替身延迟 5 秒响应，上下文启动不等待，状态为 `CHECKING`（US5-7、SC-020）；`CHECKING` 期间的调用等到校验结果后成功；校验超时仍未完成 → 调用报"向量化校验中"；维度不一致 → `MISCONFIGURED` + ERROR 日志写明配置值和实际值，之后调用报"向量化配置错误"（US5-4）；不可达、401、错误码含 `Arrearage` → `UNAVAILABLE`，reason 分别为"不可达 / 鉴权失败 / 欠费"，并打 WARN（US5-5）；不可达或欠费后替身恢复 → 后台重新校验后变为 `READY`（使用可注入的退避策略/时钟，测试间隔缩短为毫秒级）；401 后不重新校验；`sync` 时维度不一致 → 启动失败，`sync` 时不可达 → 启动成功且为 `UNAVAILABLE`；`dimensions`、`max-batch-size` 非正数或 `startup-check` 取值非法 → 启动失败；上下文关闭后重新校验任务停止 in provider-test/embedding/EmbeddingStartupTest.java
 
 ### Implementation for User Story 5
 
-- [ ] T045 [P] [US5] 新建 `EmbeddingProbe`：向量化一次 `"ping"`，超时取 min(向量化超时, 10 秒)；比对返回长度与 `dimensions`；按 research R12 分类失败（IO 异常→不可达、401/403→鉴权失败、错误码含 `Arrearage`→欠费、其余→其他）；只返回校验结果，不修改状态 in provider/embedding/EmbeddingProbe.java
-- [ ] T046 [US5] 新建 `DefaultEmbeddingService implements EmbeddingService`：内部至多持有一个 `OpenAiEmbeddingModel`（`maxRetries(0)`、显式维度、传入 `ObservationRegistry`，不注册 Bean）；状态存 `AtomicReference<EmbeddingStatus>`，状态转换必须防止过期探测把 `MISCONFIGURED` 覆盖回 `READY`；`embed` 按 `maxBatchSize` 顺序分批、每批用 `FailureClassifier` 最多重试 1 次、检查每个向量长度；各状态下的行为照 contracts/provider-service.md 的表实现，`CHECKING` 时用校验任务的 `CompletableFuture` 最多等一个校验超时；写 `embedding_call` 结构化日志，错误摘要复用安全摘要规则（依赖 T034、T045） in provider/embedding/DefaultEmbeddingService.java
-- [ ] T047 [US5] 在 `ProviderAutoConfiguration` 注册 `EmbeddingService` 并接入启动校验：校验 `EmbeddingProperties`；`async` 时监听 `ApplicationReadyEvent`，在虚拟线程上运行 `EmbeddingProbe`；`sync` 时在初始化阶段运行，维度不一致抛异常拒绝启动；`UNAVAILABLE` 且原因不是鉴权失败时按 1 → 2 → 4 … 分钟退避重新校验（最长 30 分钟），退避策略/时钟通过构造器或包级测试入口可替换，应用关闭时停止；代码标 `TODO(US-5): 迁入 ConfigLoader`，US-1 临时由 Spring placeholder + 本模块校验；测试用注入的退避策略/时钟将间隔缩短，且通过可控的 ApplicationReadyEvent 触发器验证生命周期（依赖 T029、T046） in provider/config/ProviderAutoConfiguration.java
-- [ ] T048 [P] [US5] 编写冒烟测试 `EmbeddingSmokeTest`（`@Tag("llm")`，按 `AGENTOS_EMBEDDING_API_KEY` 判断）：后台校验完成后状态为 `READY`，向量化返回 1024 维向量 in provider-test/smoke/EmbeddingSmokeTest.java
+- [X] T045 [P] [US5] 新建 `EmbeddingProbe`：向量化一次 `"ping"`，超时取 min(向量化超时, 10 秒)；比对返回长度与 `dimensions`；按 research R12 分类失败（IO 异常→不可达、401/403→鉴权失败、错误码含 `Arrearage`→欠费、其余→其他）；只返回校验结果，不修改状态 in provider/embedding/EmbeddingProbe.java
+- [X] T046 [US5] 新建 `DefaultEmbeddingService implements EmbeddingService`：内部至多持有一个 `OpenAiEmbeddingModel`（`maxRetries(0)`、显式维度、传入 `ObservationRegistry`，不注册 Bean）；状态存 `AtomicReference<EmbeddingStatus>`，状态转换必须防止过期探测把 `MISCONFIGURED` 覆盖回 `READY`；`embed` 按 `maxBatchSize` 顺序分批、每批用 `FailureClassifier` 最多重试 1 次、检查每个向量长度；各状态下的行为照 contracts/provider-service.md 的表实现，`CHECKING` 时用校验任务的 `CompletableFuture` 最多等一个校验超时；写 `embedding_call` 结构化日志，错误摘要复用安全摘要规则（依赖 T034、T045） in provider/embedding/DefaultEmbeddingService.java
+- [X] T047 [US5] 在 `ProviderAutoConfiguration` 注册 `EmbeddingService` 并接入启动校验：校验 `EmbeddingProperties`；`async` 时监听 `ApplicationReadyEvent`，在虚拟线程上运行 `EmbeddingProbe`；`sync` 时在初始化阶段运行，维度不一致抛异常拒绝启动；`UNAVAILABLE` 且原因不是鉴权失败时按 1 → 2 → 4 … 分钟退避重新校验（最长 30 分钟），退避策略/时钟通过构造器或包级测试入口可替换，应用关闭时停止；代码标 `TODO(US-5): 迁入 ConfigLoader`，US-1 临时由 Spring placeholder + 本模块校验；测试用注入的退避策略/时钟将间隔缩短，且通过可控的 ApplicationReadyEvent 触发器验证生命周期（依赖 T029、T046） in provider/config/ProviderAutoConfiguration.java
+- [X] T048 [P] [US5] 编写冒烟测试 `EmbeddingSmokeTest`（`@Tag("llm")`，按 `AGENTOS_EMBEDDING_API_KEY` 判断）：后台校验完成后状态为 `READY`，向量化返回 1024 维向量 in provider-test/smoke/EmbeddingSmokeTest.java
 
 **Checkpoint**: 向量化可用；未启用时实例数为 0；维度错误不会把错误向量交给调用方
 
@@ -187,12 +187,12 @@ description: "US-1 对接 LLM（Provider 抽象）的实施任务"
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T049 [P] [US6] 编写 `ImageInputTest`：一段文字 + 一张内嵌 PNG，分别经 `openai`、`deepseek` 连接调用 → 请求里都有 `data:image/png;base64,...`，且与文本顺序一致（US6-1、SC-017）；图片网址原样作为 `image_url` 发出，不预先下载（US6-2）；附带 `audio/*`、`video/*` 或其他非图片媒体 → `AgentOSException(INVALID_ARGUMENT, "不支持的媒体类型：<MIME>")`，请求数为 0（US6-3、SC-018）；记录的 `imageCount` 等于图片数，日志里找不到 base64 数据和网址（US6-4、SC-019）；服务对图片返回 400 → 按 INVALID_REQUEST 失败、不重试（FR-038） in provider-test/chat/ImageInputTest.java
+- [X] T049 [P] [US6] 编写 `ImageInputTest`：一段文字 + 一张内嵌 PNG，分别经 `openai`、`deepseek` 连接调用 → 请求里都有 `data:image/png;base64,...`，且与文本顺序一致（US6-1、SC-017）；图片网址原样作为 `image_url` 发出，不预先下载（US6-2）；附带 `audio/*`、`video/*` 或其他非图片媒体 → `AgentOSException(INVALID_ARGUMENT, "不支持的媒体类型：<MIME>")`，请求数为 0（US6-3、SC-018）；记录的 `imageCount` 等于图片数，日志里找不到 base64 数据和网址（US6-4、SC-019）；服务对图片返回 400 → 按 INVALID_REQUEST 失败、不重试（FR-038） in provider-test/chat/ImageInputTest.java
 
 ### Implementation for User Story 6
 
-- [ ] T050 [US6] 在 `RequestValidator` 检查媒体：`UserMessage` 只允许 `image/*`，其他媒体外呼前失败；对任何非 UserMessage 携带的媒体也必须失败，不能静默丢弃或转发；同时统计图片数量，供记录的 `imageCount` 使用（research R10） in provider/chat/RequestValidator.java
-- [ ] T051 [US6] 新建独立 `ImageSmokeTest`，不与 US4 并行修改 Primary/DeepSeek 冒烟测试：用纯红色图片询问颜色，回答包含"红色"（US6-5、SC-017） in provider-test/smoke/ImageSmokeTest.java
+- [X] T050 [US6] 在 `RequestValidator` 检查媒体：`UserMessage` 只允许 `image/*`，其他媒体外呼前失败；对任何非 UserMessage 携带的媒体也必须失败，不能静默丢弃或转发；同时统计图片数量，供记录的 `imageCount` 使用（research R10） in provider/chat/RequestValidator.java
+- [X] T051 [US6] 新建独立 `ImageSmokeTest`，不与 US4 并行修改 Primary/DeepSeek 冒烟测试：用纯红色图片询问颜色，回答包含"红色"（US6-5、SC-017） in provider-test/smoke/ImageSmokeTest.java
 
 **Checkpoint**: 6 个 user story 全部可独立验证
 
@@ -200,10 +200,10 @@ description: "US-1 对接 LLM（Provider 抽象）的实施任务"
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T052 [P] 同步技术方案：3.2 / 3.5 改为"聊天模型由 Profile 提供、连接不配模型"；3.4 / 3.5 / 8.8 改为"base-url 写到 `/v1`"并删除"模块会自己拼 `/v1`"；8.8 把 `DEEPSEEK_API_KEY` 改为 `AGENTOS_DEEPSEEK_API_KEY`；9.2 的 `llm_calls` 增加 `attempt`、`image_count`、`output_cap_honored` 三列；补充 `retry-min-remaining` 与向量化后台校验（spec Assumptions、research R2、R6、R12） in docs/TechnicalSolution.md
-- [ ] T053 运行 `mvn spotless:apply` 后执行 `mvn -B verify`，Spotless、Checkstyle、SpotBugs、enforcer、ArchUnit 和全部离线测试必须通过；失败时修代码，不放宽规则或加排除项 in pom.xml
-- [ ] T054 按 quickstart.md「人工确认」逐项检查：`AgentOS-provider/pom.xml` 只剩 `spring-ai-openai` 一个模型依赖；`LoggingLlmCallRecorder` 有指向 US-2 的 TODO；通过 boot 的结构化日志测试确认 `llm_call` 事件是一行 JSON，字段与 data-model.md 的 `LlmCallRecord` 一致（不把未配置的本地 `.AgentOS/logs` 当作强制产物） in specs/001-llm-provider/quickstart.md
-- [ ] T055 仅提醒用户（不修改 `.env`）：把本机 `AGENTOS_LLM_BASE_URL`、`AGENTOS_EMBEDDING_BASE_URL` 按 contracts 写到 `/v1`，然后运行 `set -a; source .env; set +a; mvn -B verify -Pllm -pl AgentOS-provider -am`，确认 3 个冒烟测试的结果符合 quickstart.md 第 2 节 in specs/001-llm-provider/quickstart.md
+- [X] T052 [P] 同步技术方案：3.2 / 3.5 改为"聊天模型由 Profile 提供、连接不配模型"；3.4 / 3.5 / 8.8 改为"base-url 写到 `/v1`"并删除"模块会自己拼 `/v1`"；8.8 把 `DEEPSEEK_API_KEY` 改为 `AGENTOS_DEEPSEEK_API_KEY`；9.2 的 `llm_calls` 增加 `attempt`、`image_count`、`output_cap_honored` 三列；补充 `retry-min-remaining` 与向量化后台校验（spec Assumptions、research R2、R6、R12） in docs/TechnicalSolution.md
+- [X] T053 运行 `mvn spotless:apply` 后执行 `mvn -B verify`，Spotless、Checkstyle、SpotBugs、enforcer、ArchUnit 和全部离线测试必须通过；失败时修代码，不放宽规则或加排除项 in pom.xml
+- [X] T054 按 quickstart.md「人工确认」逐项检查：`AgentOS-provider/pom.xml` 只剩 `spring-ai-openai` 一个模型依赖；`LoggingLlmCallRecorder` 有指向 US-2 的 TODO；通过 boot 的结构化日志测试确认 `llm_call` 事件是一行 JSON，字段与 data-model.md 的 `LlmCallRecord` 一致（不把未配置的本地 `.AgentOS/logs` 当作强制产物） in specs/001-llm-provider/quickstart.md
+- [X] T055 仅提醒用户（不修改 `.env`）：把本机 `AGENTOS_LLM_BASE_URL`、`AGENTOS_EMBEDDING_BASE_URL` 按 contracts 写到 `/v1`，然后运行 `set -a; source .env; set +a; mvn -B verify -Pllm -pl AgentOS-provider -am`，确认 3 个冒烟测试的结果符合 quickstart.md 第 2 节 in specs/001-llm-provider/quickstart.md
 
 ---
 
