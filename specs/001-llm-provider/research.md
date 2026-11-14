@@ -63,6 +63,9 @@
 
 - **Decision**: `EmptyUsage` 时 token 三项记为空；`getCacheReadInputTokens()` / `getCacheWriteInputTokens()` 原样记录（`null` 就是空）；`EmptyRateLimit` 时限流余量为空，`OpenAiRateLimit` 时取 `getRequestsRemaining()` / `getTokensRemaining()`。
 - **Rationale**: 替身确认：没有 usage 时得到 `EmptyUsage`，`getPromptTokens()` 返回 0 而不是 null，必须按类型判断（FR-023）；带 `cached_tokens` 时 `cacheRead` 有值、`cacheWrite` 为 null；带 `x-ratelimit-remaining-*` 头时得到 `OpenAiRateLimit`。真实服务：两家都没有限流头；DeepSeek 同步调用缓存 token 为 0，流式时为 null，按 FR-023 原样记录。
+- **流式的两个差别（2026-11-14 实测）**：
+  - 缓存 token：`MessageAggregator` 重建用量时只留 3 个整数，缓存读写会丢。`StreamCollector` 在聚合之前从原始分片里取，最后一个非空值为准：没带字段是 null，明确返回 0 就是 0。上一条写的"DeepSeek 流式缓存 token 为 null"当时是聚合器丢的，不是服务端没返回，以真实冒烟测试的结果为准。
+  - 限流余量：流式走 SDK 的 `createStreaming`，不暴露响应头，Spring AI 固定给 `EmptyRateLimit`，所以流式记录的限流余量永远是 null。这是框架限制，`StreamingTest.streamCannotSeeRateLimitHeaders` 记录了它，升级 Spring AI 后若该用例失败，说明框架支持了，应改成断言有值。
 
 ## R9 流式
 

@@ -30,6 +30,11 @@ final class StreamCollector {
 
     private volatile boolean usageReported;
 
+    /** 最后一个非空的缓存读取 token；分片没带这个字段时为 null，明确返回 0 就是 0。 */
+    private volatile Long cacheReadTokens;
+
+    private volatile Long cacheWriteTokens;
+
     StreamCollector(Consumer<String> sink) {
         this.sink = sink;
     }
@@ -47,6 +52,16 @@ final class StreamCollector {
      */
     boolean usageReported() {
         return usageReported;
+    }
+
+    /** 流式调用里服务端报告的缓存读取 token；没报告为 null。 */
+    Long cacheReadTokens() {
+        return cacheReadTokens;
+    }
+
+    /** 流式调用里服务端报告的缓存写入 token；没报告为 null。 */
+    Long cacheWriteTokens() {
+        return cacheWriteTokens;
     }
 
     /** 失败是不是输出端自己抛的异常：这是调用方取消，不是模型服务的问题。 */
@@ -83,6 +98,14 @@ final class StreamCollector {
         Usage usage = chunk.getMetadata().getUsage();
         if (usage == null || usage instanceof EmptyUsage) {
             return;
+        }
+        // 聚合器重建用量时只保留 3 个整数，缓存 token 会丢，所以要在聚合之前从原始分片里取。
+        // 没带该字段的分片是 null，不能盖掉已经拿到的值。
+        if (usage.getCacheReadInputTokens() != null) {
+            cacheReadTokens = usage.getCacheReadInputTokens();
+        }
+        if (usage.getCacheWriteInputTokens() != null) {
+            cacheWriteTokens = usage.getCacheWriteInputTokens();
         }
         // 实测流式下没带用量的分片也是 DefaultUsage，三项全为 0，不是 EmptyUsage，只能按数值判断。
         // 代价：服务端在流式里明确报"全 0"会被当成没报；真实调用里有输入就一定大于 0，可以接受。

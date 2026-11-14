@@ -177,7 +177,8 @@ public class DefaultProviderService implements ProviderService {
                                 durationMs,
                                 response,
                                 imageCount,
-                                mode == CallMode.CALL || collector.usageReported())
+                                mode == CallMode.CALL || collector.usageReported(),
+                                cacheTokens(mode, response, collector))
                         : failureRecord(
                                 request,
                                 resolved,
@@ -275,7 +276,8 @@ public class DefaultProviderService implements ProviderService {
             long durationMs,
             ChatResponse response,
             int imageCount,
-            boolean usageReported) {
+            boolean usageReported,
+            CacheTokens cache) {
         CallCorrelation correlation = request.correlation();
         ChatResponseMetadata metadata = response.getMetadata();
         // 调用方已确认 getResults() 非空；用 getFirst 而不是可能返回 null 的 getResult。
@@ -303,8 +305,8 @@ public class DefaultProviderService implements ProviderService {
                 hasUsage ? usage.getPromptTokens() : null,
                 hasUsage ? usage.getCompletionTokens() : null,
                 hasUsage ? usage.getTotalTokens() : null,
-                hasUsage ? usage.getCacheReadInputTokens() : null,
-                hasUsage ? usage.getCacheWriteInputTokens() : null,
+                hasUsage ? cache.read() : null,
+                hasUsage ? cache.write() : null,
                 rateLimit == null ? null : rateLimit.getRequestsRemaining(),
                 rateLimit == null ? null : rateLimit.getTokensRemaining(),
                 capCanBeChecked(request.profile().maxOutputTokens(), usage, hasUsage)
@@ -365,6 +367,25 @@ public class DefaultProviderService implements ProviderService {
     private static String emptyToNull(String value) {
         return value == null || value.isEmpty() ? null : value;
     }
+
+    /**
+     * 缓存 token 的来源：同步调用直接读响应里的用量；流式调用的聚合器会丢掉缓存字段，
+     * 所以改用收集器从原始分片里记下的值（FR-022、FR-023）。
+     */
+    private static CacheTokens cacheTokens(
+            CallMode mode, ChatResponse response, StreamCollector collector) {
+        if (mode == CallMode.STREAM) {
+            return new CacheTokens(collector.cacheReadTokens(), collector.cacheWriteTokens());
+        }
+        Usage usage = response.getMetadata().getUsage();
+        if (usage == null || usage instanceof EmptyUsage) {
+            return new CacheTokens(null, null);
+        }
+        return new CacheTokens(usage.getCacheReadInputTokens(), usage.getCacheWriteInputTokens());
+    }
+
+    /** 缓存读写 token，没有报告的为 null，不是 0。 */
+    private record CacheTokens(Long read, Long write) {}
 
     /** 一次尝试的结果：成功时 failure 为 null，失败时 response 可能为 null。 */
     private record Attempt(

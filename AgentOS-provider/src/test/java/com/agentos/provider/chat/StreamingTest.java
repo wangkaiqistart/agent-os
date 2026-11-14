@@ -188,6 +188,76 @@ class StreamingTest {
     }
 
     @Test
+    @DisplayName("流式用量带缓存命中数：缓存读取等于该值，缓存写入为 null（FR-022、FR-023）")
+    void streamRecordsCachedTokens() {
+        stub.enqueue(
+                StubResponse.sse(
+                        200,
+                        List.of(
+                                SseChunks.role(),
+                                SseChunks.text("a"),
+                                SseChunks.finish("stop"),
+                                SseChunks.usage(100, 5, 64),
+                                SseChunks.DONE)));
+
+        runner().run(context -> {
+            context.getBean(ProviderService.class).stream(request(), text -> {});
+
+            LlmCallRecord record = recorded.getFirst();
+            assertThat(record.cacheReadTokens()).isEqualTo(64L);
+            assertThat(record.cacheWriteTokens()).isNull();
+            assertThat(record.promptTokens()).isEqualTo(100);
+        });
+    }
+
+    @Test
+    @DisplayName("流式用量明确返回 cached_tokens=0：记为 0，不记为 null（FR-023）")
+    void streamRecordsExplicitZeroCachedTokens() {
+        stub.enqueue(
+                StubResponse.sse(
+                        200,
+                        List.of(
+                                SseChunks.role(),
+                                SseChunks.text("a"),
+                                SseChunks.finish("stop"),
+                                SseChunks.usage(10, 2, 0),
+                                SseChunks.DONE)));
+
+        runner().run(context -> {
+            context.getBean(ProviderService.class).stream(request(), text -> {});
+
+            assertThat(recorded.getFirst().cacheReadTokens()).isZero();
+        });
+    }
+
+    @Test
+    @DisplayName("已知限制：流式响应的限流头拿不到，记为 null 而不是 0（FR-023）")
+    void streamCannotSeeRateLimitHeaders() {
+        // Spring AI 2.0.2 的流式走 SDK 的 createStreaming，不暴露响应头，限流余量固定是 EmptyRateLimit。
+        // 服务端明明发了限流头，记录里仍然是 null。这个用例用来记录这个限制：
+        // 以后升级 Spring AI 后它如果失败，说明框架支持了，应该改成断言有值。
+        stub.enqueue(
+                StubResponse.sse(
+                                200,
+                                List.of(
+                                        SseChunks.role(),
+                                        SseChunks.text("a"),
+                                        SseChunks.finish("stop"),
+                                        SseChunks.usage(3, 1),
+                                        SseChunks.DONE))
+                        .withHeader("x-ratelimit-remaining-requests", "99")
+                        .withHeader("x-ratelimit-remaining-tokens", "12345"));
+
+        runner().run(context -> {
+            context.getBean(ProviderService.class).stream(request(), text -> {});
+
+            LlmCallRecord record = recorded.getFirst();
+            assertThat(record.requestsRemaining()).isNull();
+            assertThat(record.tokensRemaining()).isNull();
+        });
+    }
+
+    @Test
     @DisplayName("流式与同步等价：同样的内容，文本、结束原因、用量一致")
     void streamResultMatchesCallResult() {
         stub.enqueue(StubResponse.json(200, ChatBodies.OK))

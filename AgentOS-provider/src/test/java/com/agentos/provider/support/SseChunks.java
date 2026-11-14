@@ -73,6 +73,21 @@ public final class SseChunks {
                 + "}}\n\n";
     }
 
+    /** 用量分片，并带上缓存命中的输入 token 数（{@code prompt_tokens_details.cached_tokens}）。 */
+    public static String usage(int promptTokens, int completionTokens, int cachedTokens) {
+        return "data: "
+                + HEAD
+                + "\"choices\":[],\"usage\":{\"prompt_tokens\":"
+                + promptTokens
+                + ",\"completion_tokens\":"
+                + completionTokens
+                + ",\"total_tokens\":"
+                + (promptTokens + completionTokens)
+                + ",\"prompt_tokens_details\":{\"cached_tokens\":"
+                + cachedTokens
+                + "}}}\n\n";
+    }
+
     private static String choice(String delta, String finishReason) {
         return "\"choices\":[{\"index\":0,\"delta\":"
                 + delta
