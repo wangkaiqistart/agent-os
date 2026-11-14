@@ -9,7 +9,7 @@
 | 模块 | 说明 | 当前状态 |
 |---|---|---|
 | [AgentOS-core](./AgentOS-core.md) | 核心接口、异常、Provider 请求模型 | 有基础契约，主引擎尚未完成 |
-| [AgentOS-provider](./AgentOS-provider.md) | LLM Provider、Embedding、自动配置、模型工厂 | 有配置骨架、`ChatModelFactory` 和测试替身 |
+| [AgentOS-provider](./AgentOS-provider.md) | LLM Provider、Embedding、自动配置、模型工厂；含 US1 的运行方法 | US1 完成：按名称同步调用、启动校验；重试、流式、向量化待做 |
 | [AgentOS-web](./AgentOS-web.md) | REST 响应、异常处理、CORS | 有基础 Web 代码，Controller 尚未完成 |
 | [AgentOS-cli](./AgentOS-cli.md) | Picocli 命令入口 | 有根命令，子命令尚未完成 |
 | [AgentOS-boot](./AgentOS-boot.md) | Spring Boot 组装和启动 | 有启动类和配置 |

@@ -168,6 +168,20 @@ LlmCallRecord / LlmCallRecorder
 classDiagram
     class ProviderAutoConfiguration {
         +loggingLlmCallRecorder() LlmCallRecorder
+        +providerService(...) ProviderService
+    }
+
+    class ProviderConnectionAssembler {
+        +assemble() Map~String,ProviderConnection~
+    }
+
+    class RequestValidator {
+        +resolve(Profile) Resolved
+    }
+
+    class DefaultProviderService {
+        +call(ProviderRequest) ProviderResult
+        +stream(ProviderRequest, Consumer) ProviderResult
     }
 
     class ChatModelFactory {
@@ -233,6 +247,14 @@ classDiagram
     ProviderAutoConfiguration --> ProviderProperties : enables
     ProviderAutoConfiguration --> EmbeddingProperties : enables
     ProviderAutoConfiguration ..> LoggingLlmCallRecorder : creates default
+    ProviderAutoConfiguration ..> ProviderConnectionAssembler : validates and builds
+    ProviderAutoConfiguration ..> DefaultProviderService : registers as ProviderService
+    ProviderConnectionAssembler --> ChatModelFactory : creates models
+    ProviderConnectionAssembler ..> ProviderConnection : produces
+    DefaultProviderService ..|> ProviderService
+    DefaultProviderService --> RequestValidator : validates first
+    DefaultProviderService --> LlmCallRecorder : records each attempt
+    RequestValidator --> ProviderConnection : looks up by name
     ChatModelFactory --> ToolCallingManager : injects
     ChatModelFactory --> ObservationRegistry : injects
     ChatModelFactory --> ProviderProperties : reads Connection
@@ -251,8 +273,8 @@ application.yaml
 ProviderProperties / EmbeddingProperties
     ↓
 ProviderAutoConfiguration
-    ↓
-Spring 容器中的 Bean
+    ↓ ProviderConnectionAssembler 校验并建连接
+Spring 容器中的 ProviderService（只有它，没有 ChatModel Bean）
 ```
 
 ## 五、启动、CLI 与 Web 类图

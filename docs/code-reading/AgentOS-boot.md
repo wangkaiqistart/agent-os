@@ -27,8 +27,10 @@ flowchart TD
 
 | 测试 | 说明 |
 |---|---|
-| `ArchitectureRulesTest` | 检查模块依赖、工具调用入口、日志和注入约束 |
+| `ArchitectureRulesTest` | 检查模块依赖、工具调用入口、日志和注入约束；另有两条：只有 provider 模块依赖 `spring-ai-openai`，任何 `@Bean` 不得返回 `ChatModel` / `EmbeddingModel` |
 | `LoggingBaselineTest` | 检查基础文件日志包含 ECS JSON 和 MDC 字段 |
 | `ProviderConfigurationYamlTest` | 隔离解析 `application.yaml`，验证环境变量缺省值和 Spring AI 开关 |
-| `LlmCallJsonLogTest` | 从真实自动配置取得 Recorder，验证 27 个调用元数据字段写入 ECS JSON |
+| `LlmCallJsonLogTest` | 从真实自动配置取得 Recorder，验证 27 个调用元数据字段写入 ECS JSON。自动配置现在会校验默认连接，所以测试通过命令行参数给了一个不发请求的假 `primary`，并导入官方 `ToolCallingAutoConfiguration` |
+
+默认连接的 key 为空时应用会启动失败，所以以后在 boot 里写完整上下文的测试，都要自己提供假的 `agentos.providers.primary.*`。
 
