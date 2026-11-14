@@ -137,19 +137,29 @@ public final class StubModelServer implements AutoCloseable {
     @Override
     public void close() {
         // try-with-resources 会自动调用 close，确保测试结束后释放端口和线程。
-        // 先打开闸门，让“永不响应”的处理线程退出等待。
-        closed.countDown();
-        if (stopped.compareAndSet(false, true)) {
-            // 停止监听并关闭所有连接；客户端看到连接被断开，而不是一直等待。
-            server.stop(0);
-        }
-        // 中断仍停在延迟、SSE 闸门上的处理线程，再有界等待它们全部退出。
-        executor.shutdownNow();
+        // 先取走调用线程的中断标志：标志还在时，下面的 awaitTermination 会立刻抛异常，
+        // 有界等待就被整个跳过，处理线程可能还没退出 close 就返回了，漏到下一个测试里。
+        boolean wasInterrupted = Thread.interrupted();
         try {
-            executor.awaitTermination(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (InterruptedException interrupted) {
-            // 调用方线程被中断：恢复标志交给上层处理，不吞掉。
-            Thread.currentThread().interrupt();
+            // 先打开闸门，让“永不响应”的处理线程退出等待。
+            closed.countDown();
+            if (stopped.compareAndSet(false, true)) {
+                // 停止监听并关闭所有连接；客户端看到连接被断开，而不是一直等待。
+                server.stop(0);
+            }
+            // 中断仍停在延迟、SSE 闸门上的处理线程，再有界等待它们全部退出。
+            executor.shutdownNow();
+            try {
+                executor.awaitTermination(TERMINATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                // 等待期间又被中断：记下来，最后一并恢复。
+                wasInterrupted = true;
+            }
+        } finally {
+            // 不吞掉调用方的中断：进来时有、或者等待期间来了，出去时都要还给调用线程。
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 

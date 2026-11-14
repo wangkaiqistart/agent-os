@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -334,6 +335,23 @@ class StubModelServerTest {
         Thread.currentThread().interrupt();
         server.close();
         assertThat(Thread.interrupted()).isTrue();
+    }
+
+    @RepeatedTest(50)
+    @DisplayName("带着中断标志调用 close：仍然等到处理线程全部退出，并把中断标志还给调用线程")
+    void closeWaitsForInFlightHandlersEvenWhenInterrupted() {
+        server.enqueue(StubResponse.hang());
+        // 发出一个永远等不到响应的请求，让处理线程停在闸门上。
+        client.sendAsync(request("/x").build(), HttpResponse.BodyHandlers.discarding());
+        assertThat(server.awaitRequests(1, Duration.ofSeconds(WAIT_SECONDS))).isTrue();
+
+        Thread.currentThread().interrupt();
+        server.close();
+        // 先读标志再断言：Thread.interrupted() 同时清除它，避免影响后续测试。
+        boolean restored = Thread.interrupted();
+
+        assertThat(restored).isTrue();
+        assertThat(server.isTerminated()).isTrue();
     }
 
     private HttpRequest.Builder request(String path) {
