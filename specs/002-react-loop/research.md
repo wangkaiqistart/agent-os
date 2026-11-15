@@ -61,6 +61,9 @@
 - **依赖**：`testcontainers-postgresql` 与 `testcontainers-junit-jupiter` 2.0.5（Maven Central 上有，本地仓库里只有 `testcontainers-bom`，首次构建要下载）。不引入 `spring-boot-testcontainers`，用 `@DynamicPropertySource` 手动给连接属性，依赖更少。
 - **Rationale**: 本机 `Docker.app` 已安装，`docker version` 客户端是 29.9.2，但守护进程没有运行（`docker info` 连不上套接字）。所以并非"没有 Docker"，启动 Docker Desktop 后这些测试就能在本机跑。宪章禁止 H2 和 SQLite，也禁止对共享库做破坏性操作，不用它们替代。
 - **风险**：SQL 层的问题只有在有 Docker 时才会发现。CI 不允许跳过，就是为了守住这一条。
+- **Phase 1落实（2026-11-15）**：storage测试通过自定义JUnit ExecutionCondition先检查Docker，本地无Docker禁用db测试、CI无Docker报配置错误；随后才由官方Testcontainers扩展启动静态容器。PostgresIntegrationTest通过DynamicPropertySource提供容器连接，不加载.env。PostgresConnectivityTest仅执行SELECT 1，不提前实现迁移/JSON映射spike。
+- core的test-jar绑定process-test-classes，storage以test scope复用；官方工具自动配置仅加core/tool的test依赖。boot后续数据库测试使用boot自身小型夹具，暂不引入storage测试JAR，避免正式架构扫描混入测试JAR。测试依赖不传递，需要时boot单独声明Testcontainers；自动配置imports等到实际有配置类时登记，不提前创建不存在类的条目。
+- 本地Docker启动状态会变化；本次实施最初不可达，后续已经可达（Server 29.9.2），真实连通性测试首次需要拉取pgvector镜像。最终是否成功以quickstart的实际运行记录为准，不沿用研究时“未运行”的结论。
 
 ## R10 HTTP 工具与阶段 Demo 的天气数据源
 

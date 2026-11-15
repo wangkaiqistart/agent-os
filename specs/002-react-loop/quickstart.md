@@ -46,6 +46,19 @@ mvn -B verify
 
 Docker 在运行时，`@Tag("db")` 的测试会自动执行，首次要拉取 `pgvector/pgvector:pg17` 镜像。预期：迁移脚本能在空库上建出五张表，Hibernate 校验通过；`jsonb` 写入读回一致（research R7 的 spike）；`SessionManagerContractTest` 等契约测试对 JPA 实现通过；并发取租约只有一个成功。
 
+### 2.1 Phase 2/3 实测记录（2026-11-15）
+
+本轮在 Docker Desktop 29.9.2 可用的环境执行了：
+
+```bash
+mvn -B -ntp verify
+python3 scripts/check_db_test_reports.py
+```
+
+结果：全仓 `verify` 通过；Provider 220 个测试通过；storage 的 `pgvector/pgvector:pg17` 连通、Flyway V1 五表迁移和 Hibernate schema 校验通过；boot 的 `ReActApplicationTest` 通过本地 HTTP 模型替身完成一次纯文本 chat，并核对 1 个 session、1 个 turn、2 条消息、1 条 `llm_call` 和唯一落库 `LlmCallRecorder`。本次没有启动真实模型，也没有执行工具闭环、并发故障注入或真实天气 Demo；这些属于后续 Phase 4 及之后任务。
+
+随后补充的 Core/CLI/Channel 回归测试共 21 个通过，覆盖 Agent frontmatter 错误、Bootstrap 顺序与热加载、空助手失败、Provider 校验先于建会话、CLI 单消息假 launcher、空行/EOF/`/exit`；同时修复了 Bootstrap 映射顺序在不可变包装后不稳定的问题，并消除了内存契约测试的 JUnit 静态 `@Nested` 发现警告。
+
 ## 3. 阶段 Demo 1：查天气穿衣（手动）
 
 `.env` 里要有 `AGENTOS_DB_URL` 等数据库连接，以及 `AGENTOS_LLM_*`（`primary` 模型）。HTTP白名单通过下面合法的环境变量传入，不向.env追加带点的Spring属性（.env还需被shell source）。
