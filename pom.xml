@@ -77,6 +77,13 @@
                 <artifactId>AgentOS-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
+            <!-- classifier/type 是依赖管理坐标的一部分，测试 JAR 需要单独登记。 -->
+            <dependency>
+                <groupId>com.agentos</groupId>
+                <artifactId>AgentOS-core</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
             <dependency>
                 <groupId>com.agentos</groupId>
                 <artifactId>AgentOS-provider</artifactId>
