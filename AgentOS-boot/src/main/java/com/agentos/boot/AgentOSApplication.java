@@ -25,6 +25,6 @@ public class AgentOSApplication {
     public static void main(String[] args) {
         // System.exit 让命令执行结果成为进程退出码；例如 0 表示成功，非 0 表示失败。
         // 真正的命令解析在 AgentOSCli.execute 中完成。
-        System.exit(AgentOSCli.execute(args));
+        System.exit(AgentOSCli.execute(new SpringContextLauncher(), args));
     }
 }

@@ -94,6 +94,24 @@ management:
       application: AgentOS
 
 agentos:
+  workspace:
+    root: .AgentOS
+  turn:
+    lease-ttl: 150s
+    lease-grace: 30s
+    cleanup: 1s
+  audit:
+    max-retries: 2
+    backoff-first: 200ms
+    backoff-second: 500ms
+    attempt-timeout: 250ms
+  tools:
+    http:
+      allowed-domains: ${AGENTOS_TOOLS_HTTP_ALLOWEDDOMAINS:}
+      user-agent: AgentOS/0.1
+      max-redirects: 3
+      max-response-bytes: 1048576
+      timeout: 30s
   default-provider: primary                # Profile 未写 provider 时使用
   # 每个 provider 只配连接：类型、地址、凭证、超时。聊天模型和生成参数由 Agent 的 Profile 提供（spec 001 FR-001）
   providers:
