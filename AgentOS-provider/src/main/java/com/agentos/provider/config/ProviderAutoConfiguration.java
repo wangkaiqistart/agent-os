@@ -1,6 +1,7 @@
 package com.agentos.provider.config;
 
 import com.agentos.core.provider.LlmCallRecorder;
+import com.agentos.core.provider.ProviderCatalog;
 import com.agentos.core.provider.ProviderService;
 import com.agentos.core.provider.embedding.EmbeddingStatus;
 import com.agentos.provider.chat.ChatModelFactory;
@@ -70,8 +71,28 @@ public class ProviderAutoConfiguration {
                 new ProviderConnectionAssembler(
                                 properties, key -> rawProperty(environment, key), factory)
                         .assemble();
-        return new DefaultProviderService(
-                new RequestValidator(connections, properties.getDefaultProvider()), recorder);
+        RequestValidator validator =
+                new RequestValidator(connections, properties.getDefaultProvider());
+        return new DefaultProviderService(validator, recorder);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(ProviderCatalog.class)
+    ProviderCatalog providerCatalog(
+            ProviderProperties properties,
+            ConfigurableEnvironment environment,
+            ToolCallingManager toolCallingManager,
+            ObjectProvider<ObservationRegistry> observationRegistry) {
+        ChatModelFactory factory =
+                new ChatModelFactory(
+                        toolCallingManager,
+                        observationRegistry.getIfAvailable(() -> ObservationRegistry.NOOP));
+        Map<String, ProviderConnection> connections =
+                new ProviderConnectionAssembler(
+                                properties, key -> rawProperty(environment, key), factory)
+                        .assemble();
+        return new com.agentos.provider.chat.DefaultProviderCatalog(
+                new RequestValidator(connections, properties.getDefaultProvider()));
     }
 
     @Bean
