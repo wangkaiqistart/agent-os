@@ -243,7 +243,7 @@ identity:
 
 provider:
   name: string                  # Provider 名称（primary/deepseek/kimi 等），不写则用默认 provider
-  model: string                 # 模型名（可选，默认用 provider 配置的模型）
+  model: string                 # 模型名（必填；连接只配地址和凭证，不配聊天模型，见技术方案 3.2）
   temperature: float            # 温度参数（可选；推理模型通常不支持，不写就不发送）
   reasoning_effort: string      # 推理强度（可选，仅推理模型）：none / low / medium / high 等
 

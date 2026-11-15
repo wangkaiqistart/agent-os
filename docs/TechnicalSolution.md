@@ -108,7 +108,7 @@ AgentOS 的完整技术栈：
 | 本地推理 Ollama | `spring-ai-ollama` | `AgentOS-provider` | 构建 `OllamaChatModel`，数据不出企业 |
 | MCP Client | `spring-ai-starter-mcp-client` | `AgentOS-tool` | `McpSyncClient` + `SyncMcpToolCallbackProvider`，见 6.4 |
 | 工具注解与 Schema | `spring-ai-model`（随模型模块传递引入） | `AgentOS-core` / `AgentOS-tool` | `@Tool`、`@ToolParam`、`ToolCallbacks.from(...)`、`ToolCallingChatOptions` |
-| 工具执行自动配置 | `spring-ai-starter-model-openai`（同时带入 `ToolCallingManager`、`ToolExecutionExceptionProcessor`、`spring.ai.tools.*` 属性和 `ChatClient.Builder` 的自动配置） | `AgentOS-boot` | 注入 `ToolCallingManager`；Starter 自动配置的那个 `OpenAiChatModel` 指向 DeepSeek，作为辅助调用（生成草稿、评估器）的默认模型；它顺带配置的 Embedding 要关掉，见下文 |
+| 工具执行自动配置 | `spring-ai-starter-model-openai`（同时带入 `ToolCallingManager`、`ToolExecutionExceptionProcessor`、`spring.ai.tools.*` 属性和 `ChatClient.Builder` 的自动配置） | `AgentOS-boot` | 注入 `ToolCallingManager`；Starter 顺带的聊天、Embedding 等模型自动配置全部关闭（`spring.ai.model.*: none`），聊天模型只由 `ProviderService` 构建，见下文 |
 | 向量化 | `spring-ai-openai` 的 `OpenAiEmbeddingModel`（OpenAI 兼容的 Embedding 接口） | `AgentOS-provider` | 按 `agentos.embedding.*` 编程式构建，全局唯一，见 3.4 |
 | 向量存储 | `spring-ai-pgvector-store`（模块，不用 Starter） | `AgentOS-knowledge` / `AgentOS-memory` / `AgentOS-tool` | 编程式构建三个 `PgVectorStore`：`kb_vectors`、`memory_vectors`、`tool_vectors`，见 9.1 |
 | 文档读取 | `spring-ai-tika-document-reader`、`spring-ai-pdf-document-reader`、`spring-ai-markdown-document-reader` | `AgentOS-knowledge` | ETL 读取阶段，见 8.9 |
@@ -123,7 +123,7 @@ AgentOS 的完整技术栈：
 **模型模块与模型 Starter 分工。** Spring AI 的模型 Starter 按 `spring.ai.openai.*` 自动配置**一个** `ChatModel` Bean；DeepSeek、Kimi、通义兼容模式都走 OpenAI 协议，同一个 Starter 无法同时配出多个不同 `base-url` 的实例。因此：
 
 - `AgentOS-provider` 依赖模型模块（非 Starter），`ProviderService` 按 `agentos.providers.*` 逐个编程式构建 `ChatModel`，供 ReAct 主链路按 provider name 选择（见 3.2）。构建时把容器里的 `ObservationRegistry` 传给模型构建器，保留 Spring AI 的模型调用观测。
-- `AgentOS-boot` 依赖 `spring-ai-starter-model-openai`，目的是拿到工具执行相关的自动配置。它自动配置的单个 `OpenAiChatModel`（`spring.ai.openai.*` 与 `primary` 用同一组地址、key 和模型）只用于不带工具的辅助调用。
+- `AgentOS-boot` 依赖 `spring-ai-starter-model-openai`，目的是拿到工具执行相关的自动配置。Starter 自带的聊天、Embedding 等模型自动配置全部关闭（`spring.ai.model.*: none`），容器里没有 `ChatModel` Bean。
 - 不设置 `spring.ai.model.chat`，避免它影响其他提供方的自动注册。
 - **关闭 Starter 的 Embedding 自动配置**（`spring.ai.model.embedding=none`）。Starter 按 `spring.ai.openai.*` 自动配置的 `EmbeddingModel` 会指向主链路的聊天服务，那里不一定有 Embedding 接口，而且会和 3.4 节的 Embedding 模型并存、引起歧义。容器里只保留 3.4 节构建的那一个 `EmbeddingModel`。该属性名按 Spring AI 的 `spring.ai.model.<类型>` 约定写出，知识库未单独列出，搭骨架时确认。
 
