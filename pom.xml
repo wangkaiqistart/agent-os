@@ -45,7 +45,7 @@
         <spring-ai.version>2.0.2</spring-ai.version>
         <springdoc.version>3.2.0</springdoc.version>
         <picocli.version>4.7.7</picocli.version>
-        <shedlock.version>7.10.1</shedlock.version>
+        <shedlock.version>7.11.0</shedlock.version>
         <!-- 工程基线：质量门插件（版本 2026-11 从 Maven Central 核实） -->
         <spotless.version>3.11.0</spotless.version>
         <google-java-format.version>2.0.0</google-java-format.version>
