@@ -410,7 +410,7 @@ spring:
 
 | 层 | 配置 | 默认 | 超时后 |
 |----|------|------|-------|
-| 单次 LLM 调用 | `agentos.providers.<name>.timeout` | 60s | 本轮失败（Provider 故障，HTTP 503） |
+| 单次 LLM 调用 | `agentos.providers.<name>.timeout`，实际取它与剩余整轮时间的较小值 | 60s | 本轮失败（Provider 故障，HTTP 503） |
 | 单个工具 | 工具策略 `timeout`（见 6.1） | 30s | 作为错误结果反馈给模型，循环继续 |
 | 整轮 | `AGENT.md` 的 `settings.turn_timeout` | 300s | 抛 `TurnDeadlineExceededException`，轮次标记 `TIMED_OUT` |
 | HTTP 同步等待 | `agentos.web.sync-wait` | 60s | 返回 202 和 `turnId`，轮次在后台继续，见 7.4 |
@@ -421,7 +421,7 @@ HTTP 等待超时**不取消**轮次：工具可能已经产生副作用，中�
 
 - **取得租约**：开始轮次时用一条条件更新（`UPDATE sessions SET lease_owner=?, lease_until=? WHERE session_id=? AND (lease_until IS NULL OR lease_until < now())`），影响行数为 0 说明已有轮次在跑，返回 HTTP 409。
 - **续租**：每次迭代开始和每次工具调用前续租（`UPDATE ... SET lease_until=? WHERE session_id=? AND lease_owner=?`）。续租影响行数为 0 说明租约已被别人拿走，立即终止本轮并标记 `INTERRUPTED`，不再写任何消息。租约时长取"Provider `timeout`、最长工具超时两者的较大值加 30 秒余量"，覆盖相邻两次续租之间最长的一段操作。
-- **截止时间**：每次迭代开始时检查；单个工具的实际超时取"工具策略超时"和"剩余整轮时间"的较小值。单次 LLM 调用的 HTTP 超时是固定的，所以一轮最多超出截止时间一个 Provider `timeout`。
+- **截止时间**：每次迭代开始时检查；单个工具的实际超时取"工具策略超时"和"剩余整轮时间"的较小值。单次 LLM 调用的 HTTP 超时也取"Provider `timeout`"和"剩余整轮时间"的较小值（`ProviderService` 按 `ProviderRequest` 里的截止时间计算，见 3.1），所以一轮最多超出截止时间 1 秒的容差，不会超出一个 Provider `timeout`。
 - **释放**：结束轮次和释放租约在 `finally` 里执行；进程崩溃后租约到期自动失效，残留的 `RUNNING` 轮次由 `TurnReaper` 收尾（见下文）。
 
 这个做法在多实例下同样成立。
