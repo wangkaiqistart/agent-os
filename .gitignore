@@ -7,6 +7,14 @@
 
 # 构建产物
 target/
+*.class
+*.jar
+
+# Python 辅助脚本缓存与本机临时文件
+__pycache__/
+*.pyc
+.DS_Store
 
 # AgentOS 运行日志
 .AgentOS/logs/
+**/.AgentOS/logs/
