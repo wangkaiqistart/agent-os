@@ -22,8 +22,16 @@ public final class AgentOSCli {
 
     /** 解析并执行命令，返回退出码，不调用 {@code System.exit}。 */
     public static int execute(String... args) {
-        // new AgentOSCommand() 是命令定义对象；CommandLine 是 Picocli 的执行器。
-        // 返回 int 而不是在这里直接退出，方便启动模块和测试复用这段逻辑。
-        return new CommandLine(new AgentOSCommand()).execute(args);
+        return execute(null, args);
+    }
+
+    /**
+     * 由 boot 模块传入 Spring 上下文启动器；独立 CLI 保持无上下文行为，便于 init/help/version
+     * 在没有数据库和模型配置时运行。
+     */
+    public static int execute(ContextLauncher launcher, String... args) {
+        CommandLine commandLine = new CommandLine(new AgentOSCommand());
+        commandLine.addSubcommand("chat", new ChatCommand(launcher));
+        return commandLine.execute(args);
     }
 }

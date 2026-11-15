@@ -17,7 +17,8 @@ import picocli.CommandLine.Spec;
         name = "AgentOS",
         mixinStandardHelpOptions = true,
         versionProvider = VersionInfo.class,
-        description = "Java 原生、私有部署、可审计的企业级 Agent OS")
+        description = "Java 原生、私有部署、可审计的企业级 Agent OS",
+        subcommands = {InitCommand.class})
 public class AgentOSCommand implements Runnable {
 
     // Picocli 在执行命令前自动注入当前命令的描述对象。
