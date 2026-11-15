@@ -312,9 +312,9 @@ ReAct 循环是 AgentOS 最核心的一段代码。输入一条用户消息，�
 
 ReAct 是 **Reason** 加 **Act** 的简称。算法步骤：
 
-1. 开始一个**轮次**（turn，一条用户消息到最终响应）：取得会话租约，写 `agent_turns`
+1. 开始一个**轮次**（turn，一条用户消息到最终响应）：通过startTurn短事务原子取得租约、写agent_turns和初始用户消息
 2. 组装 Prompt（system prompt 加 Bootstrap 加 Skill 元数据加 Memory 加最近 N 轮历史加本条用户消息），可用 Tool 列表放进请求选项
-3. 检查整轮截止时间，调用 LLM Provider 获取响应，写 `llm_calls`
+3. 检查整轮截止时间，调用Provider获取响应；Provider每次尝试结束调用记录器写llm_calls，循环不重复写
 4. 如果响应**没有** Tool 调用，保存助手消息，返回最终响应
 5. 如果**有** Tool 调用，交给注入的 `ToolCallingManager` 执行，把新增的助手消息和工具结果追加到 `session_messages`
 6. 用 `ToolCallingManager` 返回的完整历史继续下一次迭代
@@ -323,45 +323,36 @@ ReAct 是 **Reason** 加 **Act** 的简称。算法步骤：
 映射到 Spring AI 2.0 的 API，主循环的形状如下（示意，不是最终代码）：
 
 ```java
-TurnContext turn = turns.start(session, trigger, profile);           // agent_turns + 会话租约 + 截止时间
-ToolCallingChatOptions options = ToolCallingChatOptions.builder()
-        .model(profile.model())
-        .temperature(profile.temperature())                         // null 时不发送，推理模型不接受自定义温度
-        .toolCallbacks(toolRegistry.forProfile(profile))             // GovernedToolCallback 列表
-        .toolContext(Map.of(TurnContext.KEY, turn))                  // 只给工具用，不发给模型
-        .build();
-
-Prompt prompt = new Prompt(promptBuilder.build(session, profile, userMessage), options);
-sessionMessages.append(turn, userMessage);
+TurnContext turn = turns.startTurn(sessionKey, trigger, profile, userMessage); // 原子事务：会话、回收、租约、轮次、用户消息
+List<Message> history = promptBuilder.build(turn, userMessage);
 
 for (int i = 1; i <= profile.maxIterations(); i++) {
-    turn.beginIteration(i);
+    turn = turn.forIteration(i);                                    // 不可变上下文副本
     turn.checkDeadline();                                            // 超时抛 TurnDeadlineExceededException
     turns.renewLease(turn);                                          // 续租失败抛 LeaseLostException
-    ChatResponse response;
-    try {
-        response = providerService.call(profile, prompt, sink);     // call，或 stream + MessageAggregator
-    } catch (RuntimeException e) {
-        llmCalls.recordFailure(turn, e);                             // 超时、5xx 也写一行 success=false
-        throw e;
-    }
-    llmCalls.record(turn, response);
+    ProviderRequest request = new ProviderRequest(
+            profile.modelProfile(), history, toolCatalog.allowedCallbacks(profile),
+            Map.of(TurnContext.KEY, turn), turn.deadline(),
+            new CallCorrelation(turn.sessionId(), turn.turnId(), i));
+    ProviderResult called = providerService.call(request);           // Provider自己逐次写审计，循环不重复写
+    ChatResponse response = called.response();
+    turn.checkDeadlineAndLease();                                   // 返回后、消息追加前再次检查
     if (!response.hasToolCalls()) {
-        sessionMessages.append(turn, response.getResult().getOutput());
+        sessionMessages.appendIfOwner(turn, response.getResults().getFirst().getOutput());
         return turns.complete(turn, response);
     }
-    ToolExecutionResult result = toolExecutor.execute(prompt, response);  // 内部是注入的 ToolCallingManager
-    List<Message> history = result.conversationHistory();
-    sessionMessages.append(turn, history.subList(prompt.getInstructions().size(), history.size()));
+    ToolExecutionResult result = toolExecutor.execute(turn, history, request.tools(), response);  // 内部是注入的 ToolCallingManager
+    List<Message> nextHistory = result.conversationHistory();
+    sessionMessages.appendIfOwner(turn, nextHistory.subList(history.size(), nextHistory.size()));
     if (result.returnDirect()) {
         return turns.completeDirect(turn, ToolExecutionResult.buildGenerations(result));
     }
-    prompt = new Prompt(history, options);
+    history = nextHistory;
 }
 return turns.stopAtMaxIterations(turn);
 ```
 
-`ChatModel` 不执行工具，`ToolCallingManager` 是唯一的执行入口。循环抛出的异常由 `AgentService` 转换成轮次状态（`FAILED` / `TIMED_OUT` / `INTERRUPTED`），结束轮次和释放租约都在 `finally` 里执行。`result.conversationHistory()` 包含原有消息、助手的工具调用请求和工具响应，下一次迭代直接用它；其中超出原 prompt 的部分就是本次迭代新增的消息。`returnDirect` 只有在本次调用的工具**全部**声明了直接返回时才为 `true`。
+`ChatModel` 不执行工具，`ToolCallingManager` 是唯一的执行入口。循环抛出的异常由 `AgentService` 转换成轮次状态（`FAILED` / `TIMED_OUT` / `INTERRUPTED`），轮次收尾在finally调用原子finishAndRelease；条件更新未命中先查证，若旧轮次已被接管收尾且必要审计/工具/旧lease均已确认，则返回数据库已有终态与CONFIRMED，不覆盖、不清新owner；无法确认时才按共享清理预算返回UNCONFIRMED。startTurn提交未知按预生成turnId查证：已提交且有效继续、已提交但失效收尾、确认原事务结束且未提交报启动失败、仍未知返回本地FAILED+turnId+UNCONFIRMED，不把暂时查无行当回滚、不重放startTurn。`result.conversationHistory()` 包含原有消息、助手的工具调用请求和工具响应，下一次迭代直接用它；其中超出原 prompt 的部分就是本次迭代新增的消息。`returnDirect` 只有在本次调用的工具**全部**声明了直接返回时才为 `true`。
 
 ![ReAct 循环：Reason → Act → Observe，循环直到无工具调用或达到最大轮数](../website/public/images/docs-react-loop-detail.svg)
 
@@ -380,7 +371,7 @@ return turns.stopAtMaxIterations(turn);
 
 **`ToolExecutor` 模块。** 一层很薄的封装：调用注入的 `ToolCallingManager.executeToolCalls(prompt, response)`，按名称找到 `ToolCallback` 执行，返回 `ToolExecutionResult`。审计、超时、重试不写在这里，而在每个 `ToolCallback` 外层的 `GovernedToolCallback` 里（见 6.1），这样无论哪条路径执行工具都会被记录。工具调用次数超限时，`DefaultToolCallingManager` 按 `spring.ai.tools.limits.on-limit-exceeded` 处理（见 4.3）。
 
-**`AgentService` 模块。** 三种触发源共用的统一入口，也是一次处理的编排者：`process(sessionKey, message, trigger)` 内部依次做——找到或创建活跃会话、取得会话租约并开始轮次（`TurnContext`）、调 `ReActLoop.run` 跑完循环、结束轮次并释放租约。**不使用 ThreadLocal**：工具需要知道"当前是哪个 Agent、哪个会话"时，从 Spring AI 的 `ToolContext` 读取 `TurnContext`（`@Tool` 方法声明一个 `ToolContext` 参数即可，Spring AI 不会把它发给模型）。`ToolContext` 随 `ToolCallingChatOptions` 传递，所以即使以后并行执行工具、工具跑在新的虚拟线程上，上下文也不会丢。
+**`AgentService` 模块。** 三种触发源共用的统一入口，也是一次处理的编排者：`process(request)` 委托 `process(request, TurnSink.NOOP)`，带输出端的 `process(request, sink)` 是唯一执行链路（sink非空，输入请求不包含回调）；内部依次做——找到或创建活跃会话、取得会话租约并开始轮次（`TurnContext`）、调 `ReActLoop.run` 跑完循环、结束轮次并释放租约。**不使用 ThreadLocal**：工具需要知道"当前是哪个 Agent、哪个会话"时，从 Spring AI 的 `ToolContext` 读取 `TurnContext`（`@Tool` 方法声明一个 `ToolContext` 参数即可，Spring AI 不会把它发给模型）。`ToolContext` 随 `ToolCallingChatOptions` 传递，所以即使以后并行执行工具、工具跑在新的虚拟线程上，上下文也不会丢。
 
 **`TurnContext`。** 一次轮次的运行态：`sessionId`、`turnId`、`profile`、`trigger`（`cli` / `web` / `scheduler` / IM 渠道）、当前迭代序号、截止时间。由 `AgentService` 创建，经 `ToolContext` 传到工具和 `GovernedToolCallback`。
 
@@ -410,7 +401,7 @@ spring:
 
 | 层 | 配置 | 默认 | 超时后 |
 |----|------|------|-------|
-| 单次 LLM 调用 | `agentos.providers.<name>.timeout`，实际取它与剩余整轮时间的较小值 | 60s | 本轮失败（Provider 故障，HTTP 503） |
+| 单次 LLM 调用 | `agentos.providers.<name>.timeout`，实际取它与剩余整轮时间的较小值 | 60s | 连接自身超时为FAILED；受剩余整轮预算压短并到deadline时为TIMED_OUT；不能一律当Provider故障 |
 | 单个工具 | 工具策略 `timeout`（见 6.1） | 30s | 作为错误结果反馈给模型，循环继续 |
 | 整轮 | `AGENT.md` 的 `settings.turn_timeout` | 300s | 抛 `TurnDeadlineExceededException`，轮次标记 `TIMED_OUT` |
 | HTTP 同步等待 | `agentos.web.sync-wait` | 60s | 返回 202 和 `turnId`，轮次在后台继续，见 7.4 |
@@ -419,16 +410,16 @@ HTTP 等待超时**不取消**轮次：工具可能已经产生副作用，中�
 
 **会话串行。** 同一会话同一时间只跑一个轮次，消息顺序依赖这一点。
 
-- **取得租约**：开始轮次时用一条条件更新（`UPDATE sessions SET lease_owner=?, lease_until=? WHERE session_id=? AND (lease_until IS NULL OR lease_until < now())`），影响行数为 0 说明已有轮次在跑，返回 HTTP 409。
-- **续租**：每次迭代开始和每次工具调用前续租（`UPDATE ... SET lease_until=? WHERE session_id=? AND lease_owner=?`）。续租影响行数为 0 说明租约已被别人拿走，立即终止本轮并标记 `INTERRUPTED`，不再写任何消息。租约时长取"Provider `timeout`、最长工具超时两者的较大值加 30 秒余量"，覆盖相邻两次续租之间最长的一段操作。
-- **截止时间**：每次迭代开始时检查；单个工具的实际超时取"工具策略超时"和"剩余整轮时间"的较小值。单次 LLM 调用的 HTTP 超时也取"Provider `timeout`"和"剩余整轮时间"的较小值（`ProviderService` 按 `ProviderRequest` 里的截止时间计算，见 3.1），所以一轮最多超出截止时间 1 秒的容差，不会超出一个 Provider `timeout`。
+- **取得租约**：先取得会话所需行锁，再取db_now=clock_timestamp()，本次操作共用该值；不能用事务开始时固定的now()判断取锁后的租约。用条件更新（`UPDATE sessions SET lease_owner=:owner, lease_until=:db_now+:effective_ttl WHERE session_id=:id AND (lease_until IS NULL OR lease_until < :db_now)`），影响行数为 0 说明已有轮次在跑，返回 HTTP 409。
+- **续租**：每次迭代开始和每次工具调用前续租（`UPDATE sessions SET lease_until=:db_now+:effective_ttl WHERE session_id=:id AND lease_owner=:owner AND lease_until>:db_now`）。续租影响行数为 0 说明租约已被别人拿走，立即终止本轮并标记 `INTERRUPTED`，不再写任何消息。租约到期时间使用取锁后的db_now=clock_timestamp()计算，至少覆盖本轮deadline加30秒，配置lease-ttl（默认150秒）仅作最短TTL：实际取max(lease-ttl,剩余整轮预算+30s)。这覆盖Provider内部的等待和重试，不按一次请求timeout估算；续租要求owner匹配且原lease未过期，过期owner不得复活；消息追加在同一短事务校验owner与轮次RUNNING。无后台心跳，强杀后的回收等待可能达到本轮剩余时间加30秒。
+- **截止时间**：每次迭代开始时检查；单个工具的实际超时取"工具策略超时"和"剩余整轮时间"的较小值。单次 LLM 调用的 HTTP 超时也取"Provider `timeout`"和"剩余整轮时间"的较小值（`ProviderService` 按 `ProviderRequest` 里的截止时间计算，见 3.1），从建轮次到返回结果最多超出截止时间1秒，包含收尾等待；deadline后不再开始新外呼；此前在途调用的最终模型审计/工具终态、轮次终态、工具收尾和释放租约共用这1秒，最终审计仅有界写入及提交查证、不重新退避重放。数据库I/O也有界，业务超时与持久化确认分开：正常超时且必要审计与收尾确认是TIMED_OUT+CONFIRMED，未确认提交才返回UNCONFIRMED，不假称数据库终态已成功更新。数据库deadline由取锁后的db_now=clock_timestamp()+本地剩余时长计算，本地单调预算不因连接/SQL或网络往返重新计时。
 - **释放**：结束轮次和释放租约在 `finally` 里执行；进程崩溃后租约到期自动失效，残留的 `RUNNING` 轮次由 `TurnReaper` 收尾（见下文）。
 
 这个做法在多实例下同样成立。
 
 **残留轮次与优雅关闭。**
 
-- **`TurnReaper`**：启动时执行一次，之后每分钟执行一次（用 ShedLock 保证多实例下只有一个在跑），把超过 `deadline_at` 且租约已过期、仍是 `RUNNING` 的轮次标为 `INTERRUPTED`，清掉对应会话的租约。拿到 202 的调用方轮询时就能看到终态，不会无限等待。
+- **`TurnReaper`**：启动时执行一次，之后每分钟执行一次（用 ShedLock 保证多实例下只有一个在跑），把没有匹配owner有效租约、仍为RUNNING的轮次标为INTERRUPTED，不要求deadline_at已过；过期会话接管时也在同一事务执行回收。独立收尾终态轮次遗留的in_progress工具记录为interrupted，不改父轮次终态，不清新owner或有效租约。US-2只做启动与接管回收，周期扫描与ShedLock调度在US-5接入。拿到 202 的调用方轮询时就能看到终态，不会无限等待。
 - **后台执行器**：202 之后在后台继续的轮次跑在 AgentOS 自己的虚拟线程执行器 `TurnExecutor` 上。Spring Boot 的优雅关闭只管 HTTP 请求，不管这类后台任务，所以应用关闭时 `TurnExecutor` 先停止接收新轮次（新请求返回 503），再等待在途轮次结束，最多等 `agentos.shutdown.turn-grace`（默认 60 秒）；没等完的留给下次启动时的 `TurnReaper`。
 
 **核心阶段不做：** Tool 调用并行（一次响应里多个 Tool 调用由 `DefaultToolCallingManager` 按顺序执行）、Agent 间任务委托、SSE 端点（循环已支持流式，见 4.4）。这些放扩展阶段。
@@ -449,7 +440,7 @@ new MessageAggregator().aggregate(
 ChatResponse response = aggregated.get();
 ```
 
-`TurnSink` 接口定义 `onDelta`、`onToolCall`、`onToolResult`、`onComplete`、`onError` 几个事件，放在 `AgentOS-core`。扩展阶段的 SSE 端点只需要实现一个基于 `SseEmitter` 的 `TurnSink`，循环本身不改。`blockLast()` 不能放在 WebFlux 事件循环线程上，AgentOS 的 Web 层是 Spring MVC 加虚拟线程，没有这个问题；流式需要 Reactor，所以 `AgentOS-boot` 引入 `spring-boot-starter-webflux`，但 Web 服务器仍然是 Spring MVC。
+`TurnSink` 接口定义 `onDelta`、`onToolCall`、`onToolResult`、`onComplete`、`onError` 几个事件，放在 `AgentOS-core`。过程回调失败在终态确认前按取消收尾；最终complete/error在持久化处理结束后、sink仍可用且hardStop预算未耗尽时最多尝试一次，回调在受管任务中有界等待，阻塞/异常仅记录通知失败、不改已确认业务终态或persistenceStatus、不再补另一终结事件。无剩余预算或先前过程回调尚未退出时跳过通知并记录未送达，不能并发重入sink或延长返回时限。扩展阶段的 SSE 端点只需要实现一个基于 `SseEmitter` 的 `TurnSink`，循环本身不改。`blockLast()` 不能放在 WebFlux 事件循环线程上，AgentOS 的 Web 层是 Spring MVC 加虚拟线程，没有这个问题；流式需要 Reactor，所以 `AgentOS-boot` 引入 `spring-boot-starter-webflux`，但 Web 服务器仍然是 Spring MVC。
 
 ---
 
@@ -552,10 +543,10 @@ AgentOS 的所有工具都是 Spring AI 的 `ToolCallback`：`getToolDefinition(
 
 1. 从 `ToolContext` 取出 `TurnContext`，检查整轮截止时间并续租会话租约（见 4.3）
 2. 调用 MCP 来源的工具时，传给原回调的 `ToolContext` 去掉 AgentOS 内部的键（见 6.4）
-3. 在虚拟线程上执行原回调，最多等待"工具策略 `timeout`"与"剩余整轮时间"中的较小值
+3. 先把脱敏参数写成in_progress工具记录并确认，再在虚拟线程执行原回调，最多等待"工具策略 `timeout`"与"剩余整轮时间"中的较小值
 4. 幂等工具遇到可重试失败（I/O 异常、超时、HTTP 5xx / 429）时指数退避重试，最多 3 次，总时长不超过整轮截止时间；非幂等工具不重试
 5. 结果超过 `max_result_chars` 时截断，末尾注明"结果已截断，原长 N 字符"
-6. 脱敏后写一行 `tool_invocations`（含重试次数、结果状态、原始长度）
+6. 脱敏后更新原tool_invocations记录的终态（含重试次数、结果状态、原始长度）；崩溃或致命中止遗留的in_progress由正常finally或恢复清理改interrupted
 7. 失败时抛 `ToolExecutionException`，交给异常处理器（见下文）
 
 Sandbox 检查不放在装饰器里，而在内置工具内部：只有工具自己知道要访问的路径、命令或 URL（见 6.7）。MCP 工具在独立进程里执行，不经过 AgentOS 的 Sandbox，靠 MCP server 自身配置和 `McpToolFilter` 约束暴露范围。
@@ -592,12 +583,12 @@ HTTP 客户端的异常信息经常带完整 URL，所以 `error_message` 也要
 **失败如何反馈给模型。** 工具抛出的异常经 Spring AI 包装为 `ToolExecutionException`，交给 AgentOS 声明的 `ToolExecutionExceptionProcessor` Bean（基于 `DefaultToolExecutionExceptionProcessor`）：
 
 - Sandbox 拒绝、工具超时、业务错误：转成错误消息作为工具结果返回模型，模型可以换工具或向用户解释。消息里写明工具名、失败原因、是否值得重试。
-- `TurnDeadlineExceededException`：放进重抛名单，直接结束本轮。
+- TurnDeadlineExceededException、LeaseLostException、AuditWriteException放进重抛名单，直接结束本轮；租约丢失和审计失败不能当普通工具错误继续。
 - `spring.ai.tools.throw-exception-on-error` 保持默认的 `false`。
 
-`tool_invocations` 由 `GovernedToolCallback` 在抛出前写入，所以不论异常最终怎么处理，审计记录都完整。
+tool_invocations由GovernedToolCallback先记后做、结束更新。只对审计瞬时写故障作有限重试，稳定写入ID/唯一键保证提交结果未知时不双记；不重发模型或重复执行工具。持续数据库故障停止轮次、写安全ERROR并报告持久化未确认，不能保证缺失模型用量自动补齐；数据库恢复后按失效租约和终态孤儿工具记录回收，不把日志视为落库成功。
 
-**次数超限的调用。** `on-limit-exceeded=RETURN_ERROR_RESPONSE` 时，`DefaultToolCallingManager` 跳过超限的调用，不会进入 `GovernedToolCallback`。`ToolExecutor` 对比响应里请求的调用与实际执行的调用，为被跳过的调用补写 `tool_invocations`（状态 `limit_skipped`）。
+**次数超限的调用。** `on-limit-exceeded=RETURN_ERROR_RESPONSE` 时，`DefaultToolCallingManager` 跳过超限的调用，不会进入 `GovernedToolCallback`。`ToolExecutor` 对比响应里请求的调用与实际执行的调用，仅在Manager正常返回时为因次数上限跳过者补写tool_invocations（limit_skipped）；中途致命中止的后续请求不冒充超限。
 
 **观测。** Spring AI 用 Micrometer 以 `spring.ai.tool` 为名称记录每次工具调用（工具名、耗时、链路追踪上下文）。工具参数和结果导出到 Span 默认关闭，AgentOS 保持关闭，因为它们可能包含文件内容、webhook 地址等敏感数据。审计以 `tool_invocations` 为准，观测数据用于监控。
 
@@ -1163,25 +1154,29 @@ volumes:
 | `result_text` | 返回给模型的结果文本（已截断、已脱敏） |
 | `result_chars` | 结果的原始长度 |
 | `result_truncated` | 是否被 `max_result_chars` 截断 |
-| `status` | `success` / `failed` / `timeout` / `sandbox_denied` / `limit_skipped` |
+| `status` | `in_progress` / `success` / `failed` / `timeout` / `sandbox_denied` / `limit_skipped` / `interrupted` |
 | `error_message` | 错误信息（可空） |
 | `idempotent` | 执行时的工具策略 |
 | `attempts` | 实际执行次数（含重试） |
 | `duration_ms` | 执行耗时 |
-| `created_at` | 调用时间 |
+| `created_at` | 执行前写in_progress的时间 |
+| `updated_at` | 最后更新终态的时间 |
+
+工具记录唯一约束 `(turn_id, iteration, tool_call_id)`；begin重试命中时校验相同payload后返回已有行。工具调用ID为空或本响应重复时整批执行前判协议失败，不生成假ID。
 
 **`llm_calls` 实体字段：**
 
 | 字段 | 说明 |
 |------|------|
 | `id` | 主键 |
+| `write_id` | UUID NOT NULL UNIQUE；记录器每次record入口生成一次，数据库重试复用，防止不确定提交重复记账 |
 | `session_id` / `turn_id` / `iteration` | 定位到某一轮的某次迭代 |
 | `provider` | Provider 名称 |
 | `requested_model` | 请求的模型名 |
 | `response_model` | `ChatResponseMetadata.getModel()`，提供方实际使用的模型 |
 | `response_id` | `ChatResponseMetadata.getId()` |
 | `finish_reason` | 结束原因 |
-| `mode` | `call` / `stream` |
+| `mode` | `CALL` / `STREAM`，与CallMode及数据库CHECK一致 |
 | `attempt` | 本次逻辑调用中的第几次实际请求，1 或 2；重试单独一行 |
 | `image_count` | 请求里附带的图片数量；图片数据和网址不落库 |
 | `prompt_tokens` / `completion_tokens` / `total_tokens` | `Usage` 标准指标 |
@@ -1189,7 +1184,8 @@ volumes:
 | `tool_call_count` | 该响应请求的工具调用数 |
 | `output_cap_honored` | Profile 设了输出上限且服务端返回了输出 token 数时，实际输出是否没超过上限；否则为 NULL。中转接口可能忽略上限，`false` 时同时打 WARN |
 | `requests_remaining` / `tokens_remaining` | `RateLimit` 余量；`EmptyRateLimit` 时为 NULL |
-| `success` / `error_message` | 调用是否成功 |
+| `success` / `error_message` | 调用是否成功与脱敏错误摘要 |
+| `failure_kind` / `http_status` | 失败分类与HTTP状态码；成功时为空 |
 | `duration_ms` | 调用耗时 |
 | `created_at` | 调用时间 |
 

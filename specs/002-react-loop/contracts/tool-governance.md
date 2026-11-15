@@ -32,12 +32,12 @@
 
 ## GovernedToolCallback：每次调用的顺序
 
-1. `TurnGuard.checkpoint`：整轮截止时间与续租（FR-005、FR-029）。失败时工具还没开始，没有记录。
-2. 从账本取同名队首的调用 ID（research R5）。
+1. `TurnGuard.checkpoint`：整轮截止时间与续租（FR-005、FR-029）。失败时工具未开始，不计入实际工具执行；终止整批且不把后续请求记成limit_skipped。
+2. 模型响应后先由ToolExecutor校验整批调用ID非空且不重复，再建账本；从账本取同名队首ID（research R5）。
 3. 参数先脱敏，写一条状态为 `in_progress` 的工具调用记录。写入失败按 FR-031 重试，仍失败抛 `AuditWriteException`，**这个工具不会被执行**。
 4. 在虚拟线程上执行，最多等"工具策略超时"与"剩余整轮时间"中较小的值。
 5. 结果超过 `max_result_chars` 就截断，末尾注明"结果已截断，原长 N 字符"。
-6. 结果脱敏，把记录更新为终态。更新失败重试，仍失败抛 `AuditWriteException`，给使用者的说明注明该操作可能已经执行。
+6. 结果脱敏，把记录更新为终态。更新仅针对同一行、同一终态/payload可幂等确认；失败只在共享预算内重试，仍失败抛AuditWriteException，给使用者说明操作可能已经执行及持久化未确认。
 7. 失败时抛 `ToolExecutionException`，由处理器决定（research R3）。
 
 | 情形 | 记录状态 | 给模型的结果 |
@@ -50,7 +50,7 @@
 | 名单外或不存在的工具 | `failed` | "本 Agent 没有名为 X 的工具" |
 | 参数不是合法 JSON | `failed` | 同上，原因写"参数不是合法 JSON" |
 | 超时，原因是整轮剩余时间更短 | `timeout` | 不反馈给模型：重抛 `TurnDeadlineExceededException`，本轮 `TIMED_OUT`（FR-019） |
-| 租约丢失、审计写入失败 | 保持 `in_progress`，由启动收尾改为 `interrupted` | 不反馈给模型：重抛，结束本轮 |
+| 租约丢失、审计写入失败 | begin未确认不执行；已存在的in_progress由finally尽力改interrupted，数据库恢复后启动/接管独立清理终态父轮次遗留行 | 不反馈给模型：重抛、停止本轮，写入未确认返回UNCONFIRMED |
 
 ## 脱敏（Redactor）
 
@@ -62,5 +62,13 @@
 ## 次数上限与跳过的记录
 
 - 配置沿用 `spring.ai.tools.limits.*`：`max-calls-per-tool-default: 10`、`max-total-tool-calls: 30`、`on-limit-exceeded: RETURN_ERROR_RESPONSE`。
-- 超限的调用不会进入回调。`ToolExecutor` 在管理器返回后，把账本里剩下的调用 ID 逐个写成 `limit_skipped` 记录（FR-016）。
+- 超限的调用不会进入回调。`ToolExecutor` 仅在管理器正常返回后，把账本里因次数上限剩下的ID逐个写成limit_skipped；中途致命异常未开始的后续调用不在实际执行审计分母，也不记作超限。超限记录写入也受共享执行预算约束（FR-016）。
 - 交给管理器的 prompt 要带本轮累计的历史，次数才是跨迭代累计的（research R4）。
+
+## 故障与时间预算
+
+治理、HTTP重定向/body读取和审计都使用同一个TurnExecutionBudget；真正callback只有begin确认后且deadline/owner仍有效才执行。ToolContext内部键固定在core：TURN_CONTEXT、TOOL_CALL_LEDGER、TURN_BUDGET，工具不靠MDC/ThreadLocal取得上下文。
+
+整个HTTP操作（含跳转、连接、body）共享一次较小预算，不因收到分片或跳转重新计时。审计退避和清理详见configuration；deadline后不再开始工具或写工具begin；在途调用的timeout等最终审计可用共享清理预算，不再退避重放写入；hardStop后返回调用方，资源取消不得触发工具重试。
+
+发生致命异常时Manager没有正常返回，本次迭代未完成的助手/工具消息不追加；已执行工具审计保留，之前迭代消息不变，失败轮次下一轮只保留用户消息与说明。正常finally和恢复清理均可终结in_progress工具记录，不要求父轮次仍为RUNNING。

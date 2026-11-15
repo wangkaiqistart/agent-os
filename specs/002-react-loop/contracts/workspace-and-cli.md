@@ -32,10 +32,10 @@
 | `provider.model` | **是** | 聊天模型名（US-1 起连接不再配模型） |
 | `provider.reasoning_effort`、`provider.max_output_tokens`、`provider.temperature` | 否 | 没写的不发给模型（FR-025） |
 | `tools` | 否 | 可用工具名单；没写等于空，一个工具都不能用（Clarifications） |
-| `settings.max_iterations` | 否 | 默认 10 |
-| `settings.max_history_turns` | 否 | 默认 20 |
-| `settings.max_history_tokens` | 否 | 默认 32000 |
-| `settings.turn_timeout` | 否 | 默认 300s |
+| `settings.max_iterations` | 否 | 默认10，整数≥1 |
+| `settings.max_history_turns` | 否 | 默认20，整数≥0；0不带历史 |
+| `settings.max_history_tokens` | 否 | 默认32000，整数≥0；0不带历史，正值按90% floor使用 |
+| `settings.turn_timeout` | 否 | 默认300s，正Duration |
 
 `identity`、`mcp_servers`、`channels`、`schedules`、`bootstrap`、`settings.tool_search` 等键本版本认识但不支持，打一条 WARN，不报错。Bootstrap 固定读 `AGENTS.md`、`SOUL.md`、`USER.md`，缺失的打 WARN 并跳过（FR-024）。
 
@@ -60,4 +60,6 @@ AgentOS chat [--profile <name>] [--message "<文本>"] [--new]
 | 2 | 用法错误：没有可用的 Agent、`AGENT.md` 不合法、消息为空 |
 | 3 | 用 `--message` 时轮次没有成功：失败、超时、达到上限、中断、会话忙 |
 
-**中断**：交互时按 Ctrl-C，注册的关闭钩子尽力释放会话租约并把轮次收尾为 `INTERRUPTED`。来不及时，下次启动由收尾处理；租约到期之前再发消息，会提示"上一条消息还在处理"。
+**中断**：交互时按 Ctrl-C，注册的关闭钩子尽力释放会话租约并把轮次收尾为 `INTERRUPTED`。来不及时，数据库恢复且租约过期后，在下次启动或会话接管时回收，不要求deadline已过；租约有效时新请求提示忙。默认租约至少到本轮deadline加30秒，强杀后等待可能超过150秒。
+
+数据库收尾无法确认时，CLI明确打印turnId和“持久化未确认”；--message退出码3，不将它显示为成功或声称租约已释放。

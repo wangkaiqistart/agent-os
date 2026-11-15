@@ -24,13 +24,13 @@
 
 ## R4 工具次数上限
 
-- **Decision**: 沿用 `spring.ai.tools.limits.*` 与 `RETURN_ERROR_RESPONSE`。`ToolExecutor` 对比"响应里请求的调用"与"实际执行的调用"，为没被执行的补写 `limit_skipped` 记录。
+- **Decision**: 沿用 `spring.ai.tools.limits.*` 与 `RETURN_ERROR_RESPONSE`。`ToolExecutor` 对比"响应里请求的调用"与"实际执行的调用"，仅在管理器正常返回时，为因次数上限未执行的补写 `limit_skipped`；中途致命异常后未开始的调用不算超限，不计入工具执行审计分母。
 - **Rationale**: 探针 B（单工具上限 2，请求 4 次 `get_a`）：前两次执行，后两次得到 `Tool call limit (2) exceeded for tool 'get_a'...` 的纯文本结果，回调没有被调用，所以回调里没法记录它们。管理器从 prompt 里最后一条 `UserMessage` 之后开始计数，所以交给它的 prompt 必须带着本轮累计的全部历史，不能只带本次迭代，否则跨迭代的上限会被重置，要有一个测试专门覆盖。
 - 全部调用都声明直接返回时 `returnDirect()` 才是 `true`，混合时是 `false`（探针 C、D）。
 
 ## R5 模型给的工具调用 ID 怎么交给审计
 
-- **Decision**: `ToolExecutor` 调用管理器之前，按工具名建一个先进先出的账本：同名工具的调用 ID 按响应里的顺序排队，账本放进 `ToolContext`。`GovernedToolCallback` 执行时取同名队首的 ID。执行结束后账本里还剩的 ID，就是被次数上限跳过的。
+- **Decision**: `ToolExecutor` 调用管理器之前，按工具名建一个先进先出的账本：同名工具的调用 ID 按响应里的顺序排队，账本放进 `ToolContext`。`GovernedToolCallback` 执行时取同名队首的 ID。仅管理器正常返回时，账本剩余ID才代表次数超限；致命中止不这样补记。整批执行前验证所有ID非空且本响应内唯一，异常时整批零执行、轮次FAILED，不猜ID。Provider请求没有本次响应ID账本；账本由ToolExecutor在响应后放进重建的Manager Prompt。
 - **Rationale**: `ToolContext` 只有一个 `Map`（`getContext()`），回调拿不到模型给的调用 ID，而审计要关联它（FR-035）。管理器顺序执行，且次数上限跳过的总是同名工具里靠后的调用，所以"同名工具的第 k 次执行对应第 k 个 ID"成立。这个前提依赖管理器的顺序语义，要用测试固定下来；升级 Spring AI 后测试失败，说明前提变了。
 - **Alternatives**: 按参数匹配调用。没选：参数相同的调用会混在一起。
 
@@ -46,13 +46,13 @@
 - **Rationale**: `hibernate-core` 7.4.13 带 `Jackson3JsonFormatMapper`，和 Boot 4 的 Jackson 3 对得上，经 JPA 映射 `jsonb` 应该可行。但本机没有数据库，没法实测，所以先做 spike，不通过就把这几列改成 `JdbcClient` 读写。宪章要求 Spring Data JPA，所以不整体换掉。
 - **Alternatives**: 全部用 `JdbcClient`。没选：偏离宪章指定的技术栈，只在 spike 失败时作为兜底。
 
-## R8 租约与会话的 SQL
+## R8 租约、接管与回收
 
-- 取租约：`UPDATE sessions SET lease_owner=?, lease_until=now()+? WHERE session_id=? AND (lease_until IS NULL OR lease_until < now())`，影响行数为 0 就是被占用。
-- 续租：同样的更新，条件是 `lease_owner=?`，影响行数为 0 就是租约丢失。释放：置空，条件同样是 `lease_owner=?`。
-- 查找或创建会话：`INSERT ... ON CONFLICT DO NOTHING` 再查询，唯一索引保证并发下只有一个活跃会话。
-- 时间一律用数据库的 `now()`，不用 Java 时钟，避免多进程时钟不一致影响租约。
-- 租约时长不能按"每个 Provider 的 timeout"算：`AgentService` 不知道本轮会用哪个连接。改成配置 `agentos.turn.lease-ttl`，默认 150 秒（`primary` 的 120 秒加 30 秒），启动时对每个连接检查 `timeout + 30s ≤ lease-ttl`，不满足打 WARN。
+- **Decision**: 取租约/续租使用数据库时间，租约至少覆盖本轮deadline加30秒（max(最短TTL150s,剩余本轮预算+30s)）。Provider内部重试和Retry-After都受本轮deadline约束，所以无需修改Provider或另加后台心跳。代价是强杀后回收可能等待剩余本轮时间加30秒。
+- core端口TurnStore.startTurn在storage一个短事务中完成会话查找创建、失效旧轮次回收、取租约、建轮次、用户消息写入；不把这些拆成core多次端口调用。turnId在调用前生成，提交结果未知仅按turnId查证，不重放。finishAndRelease同样是单一原子端口。已存在会话的busy请求不更新last_active_at。归档和取租约在数据库条件更新/行锁上串行，不用进程内锁。
+- 续租要求owner匹配且lease未过期；消息追加在同一短事务中验证owner、未过期及RUNNING状态，不能用“先检查后在另一事务写入”留下竞态。
+- 启动与会话接管均收尾没有有效owner租约的RUNNING轮次，不要求deadline已过；独立扫描终态轮次遗留的in_progress工具行。清理不可影响有效/新owner，幂等不重写终态。
+- **Alternatives**: 150秒只按一次Provider timeout计算不安全，因为逻辑调用可能有两次120秒请求；周期心跳有额外生命周期，本story采用覆盖整轮的租约。
 
 ## R9 没有 Docker 时的测试分层
 
@@ -81,21 +81,45 @@
 ## R13 AGENT.md 的解析
 
 - **Decision**: 在 `core` 里用 SnakeYAML（`core` 已依赖它）解析 frontmatter；认识但本 story 不支持的键只打 WARN；`provider.model` 必填。
-- **Rationale**: US-1 起连接不再配聊天模型，模型名只能来自 Profile，所以缺了就在发请求前失败。`docs/DemandAnalysis.md` 5.2 还写着"model 可选，默认用 provider 配置的模型"，已经过时，列入文档同步。
+- **Rationale**: US-1 起连接不再配聊天模型，模型名只能来自 Profile，所以缺了就在发请求前失败。该说明已经在提交9d3cf6e更正，本story只保持一致，不再列为未解决项。
 
-## R14 审计写入的重试
+## R14 审计重试、幂等性与硬截止预算
 
-- **Decision**: `RetryingAuditWriter` 包装所有落库写入：共 3 次尝试，间隔 200 毫秒、500 毫秒，总时长约 0.7 秒；仍失败抛 `AuditWriteException`。它走 `finally` 之外的路径，被当作"本轮失败"，不当成模型故障去重试模型调用。
-- **Rationale**: 0.7 秒落在整轮截止时间的 1 秒容差之内。`LlmCallRecorder.record` 抛出的异常，US-1 已保证"不吞掉、不重发请求"。
+- **Decision**: 只重试模型/工具审计的瞬时数据库写入错误，最多3次，等待200/500ms。每次事务在等待前结束；约束、参数、协议错误不重试。消息追加、租约、建轮次等不统一包进重试器。
+- 模型审计每次LlmCallRecorder.record入口生成一次UUID write_id，单次重试复用；数据库UNIQUE write_id，冲突读取并比对相同payload后视为成功，不同payload报错。工具begin复用(turn,iteration,tool_call_id)唯一键；complete对同一行幂等更新；不重发模型、不重复执行工具。不改US-1的调用逻辑。
+- `TurnExecutionBudget`用单调时间，TurnBudgetRegistry按turnId显式提供给只有LlmCallRecord参数的记录器。TurnRunner有界等待到deadline+1s，到hardStop必要持久化仍未确认时取消并返回UNCONFIRMED，仅终结通知未返回则保留已确认结果；移除登记后迟到record失败关闭，不能拿到新预算。
+- 0.7秒只是退避总和，不包含3次SQL；每次audit最多250ms且受剩余预算限制。deadline后停止新外呼、工具begin和普通审计退避；deadline前已开始调用返回后的最终模型审计/工具终态也从共享最后1秒出预算，每项最多一次写尝试，提交未知仅有界查证、不重放；它与工具收尾、轮次终态和释放租约共用hardStop。正常超时且必要审计/收尾确认为TIMED_OUT+CONFIRMED。连接/锁/SQL/socket等待必须有界，外层取消不能代替JDBC超时，必须做故障注入验证。
+- 正常收尾在一个短事务写轮次终态、终结in_progress工具并释放本owner租约。持续数据库故障不可能保证立即持久化，返回安全失败及persistenceStatus=UNCONFIRMED，停止外呼，不伪装已入库，也不承诺恢复缺失模型记录；数据库恢复后由租约失效回收收敛。
+- **Alternatives**: 对所有写入自动重试会重复消息和审计、误判lease；使用线程局部变量传deadline违反宪章；增补持久化补偿队列超出本story，均不采用。
 
 ## R15 命名与要同步的文档
 
 - 新增 `AgentProfile` 包装 US-1 的 `Profile`，不改 `Profile` 的签名，避免牵动 `ProviderRequest` 和已有测试。
-- 实现完成后要同步到技术方案：`tool_invocations` 增加 `in_progress`、`interrupted` 状态和 `updated_at`；`llm_calls` 增加 `failure_kind`、`http_status` 两列；`AGENT.md` 的 `provider.model` 改为必填（`DemandAnalysis.md` 5.2）。
+- 实现完成后要同步到技术方案：`tool_invocations` 增加 `in_progress`、`interrupted` 状态和 `updated_at`；`llm_calls` 增加 `failure_kind`、`http_status` 两列及模型审计去重的write_id；AGENT.md模型必填说明已更正。
 
 ## R16 落库的记录器怎么压过 provider 的日志记录器
 
 - **Decision**: `AgentOS-storage` 的自动配置声明落库的 `LlmCallRecorder`，用 `@AutoConfiguration(beforeName = "com.agentos.provider.config.ProviderAutoConfiguration")` 排在 provider 之前；provider 里的日志记录器带 `@ConditionalOnMissingBean`，于是退让。用字符串引用类名，因为 `storage` 不依赖 `provider`。
 - **Rationale**: US-1 就是为此设计的：记录输出可替换，替换时不改 Provider 的调用逻辑（US-1 FR-025）。
 - **风险**：自动配置的先后顺序出错时，会悄悄回到日志记录器，审计表就没有模型调用记录。由一个 boot 装配测试固定：容器里只有一个 `LlmCallRecorder`，且是落库的那个。
-- **代价**：`LlmCallJsonLogTest` 验证的是日志记录器本身，不受影响；但落库之后，应用日志里不再有 `llm_call` 事件。US-1 把它当作临时输出，spec 也要求落库，这里不再保留日志输出。
+- **日志保留**：落库记录器在数据库确认成功后写同一份脱敏结构化llm_call元数据，每次record最多一条，不在每次SQL重试重复输出；数据库写入失败时ERROR保留脱敏后的相同调用元数据、write_id和persistenceStatus=UNCONFIRMED，不含响应体/Prompt/key；这是故障诊断证据，不当作审计落库成功。原LlmCallJsonLogTest继续验证日志实现，另用装配测试验证落库+日志。
+
+## R17 端口、流式与配置边界
+
+- core新增ToolCatalog端口由tool实现；ProviderCatalog.validate(Profile)只读外呼前校验由provider的现有RequestValidator实现，不更改Provider的call/stream/retry逻辑。所有新接口和配置变化先测后实现。
+- 流式必须验证完整正常链：delta→toolCall→toolResult→后续delta→唯一complete；sink可用且有剩余通知预算时错误终态最多一次error，不能complete和error都发；过程sink异常终止后不再回调该sink，终结通知失败不改已确认结果。
+- settings合法范围固定：maxIterations≥1、turnTimeout>0、两个history上限≥0；任一history上限0时不带历史，正token预算用90% floor，避免“留余量”不可测。
+- Demo的真实模型调用次数不固定，按响应核对有界闭环和审计一一对应。精确一次工具/两次模型仅用于脚本替身，不把真实模型行为写成确定性测试。
+
+## R18 复查闭合：提交查证与时钟（2026-11-15）
+
+- startTurn预生成turnId，起步前建立单调预算。确认已提交且RUNNING/owner/预算有效则继续；确认已提交但不可继续则收尾；确认原事务已结束且未提交才报启动失败；仅查无行不等于未提交，仍未知返回本地FAILED+turnId+UNCONFIRMED。不重放起步事务。
+- finishAndRelease更新0行先查旧轮次：若被新owner回收且必要审计/旧工具/旧owner租约均已收敛，返回数据库终态+CONFIRMED；不覆盖不同终态、不清新owner；无法查证才UNCONFIRMED。
+- 数据库deadline使用取得连接/行锁后的数据库clock_timestamp()+本地剩余时长，本地单调预算不重新起算，连接/SQL/往返都扣预算。消息写入既要本地未截止也要数据库owner/lease/deadline条件有效；Provider的Instant只作为当前剩余时长的适配。
+- 在途调用最终审计可在deadline之后、hardStop之前写入，避免把正常数据库下的超时模型记录丢掉；不增加第二份清理预算。对应故障/时钟/已收敛用例前置于实现，后续HTTP与装配测试只做集成复验。
+
+## R19 数据库实际时间与输出回调（2026-11-15）
+
+- PostgreSQL的now()/transaction_timestamp()固定为事务开始时刻，等待行锁后不会更新；clock_timestamp()才返回实际当前时间。租约和deadline实时判定必须取得所需行锁后捕获db_now=clock_timestamp()，本操作统一使用该值；普通created_at默认值可用now()。依据：[PostgreSQL当前时间函数](https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT)。补两个连接锁等待跨过有效期的测试，不只在无锁路径测时间。
+- 输入ProcessRequest不含回调；process(request)委托process(request,TurnSink.NOOP)，双参数重载同一执行链路，sink非空。CLI使用单参数，测试/后续适配器用双参数选择流式。
+- 过程回调失败在终态确认前按取消处理；终结通知是结果通知，不是新的业务执行。必要持久化处理结束后才在受管虚拟线程尝试一次complete或error，只等待剩余hardStop；已失效、过程回调未退出或无剩余预算则跳过并安全记录未送达。异常/阻塞超时不改确认终态或persistenceStatus，不再补另一种终结事件。取消不响应中断的回调不能声称已强制杀死，但系统不再向它发送事件或推进外呼/消息写入。

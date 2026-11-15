@@ -6,13 +6,13 @@
 
 ## Summary
 
-统一入口 `AgentService.process` 接收一条消息：找到或创建活跃会话、取得会话租约、开始轮次，然后由 `ReActLoop` 迭代。`PromptBuilder` 组装提示词，`ProviderService`（US-1）调用一次模型；响应没有工具调用就结束，有就交给 `ToolExecutor`，它调用容器注入的 `ToolCallingManager` 执行，结果追加进历史再进入下一次迭代。契约放 `AgentOS-core`；工具与沙箱在 `AgentOS-tool`；会话、轮次、消息和两张审计表的 JPA 实现与迁移脚本在 `AgentOS-storage`；`AgentOS init` 与 `AgentOS chat` 在 `AgentOS-cli` 与 `AgentOS-channel-cli`；`AgentOS-boot` 只负责装配和启动上下文。US-1 的 `AgentOS-provider` 不需要改动。
+统一入口 `AgentService.process` 接收一条消息：找到或创建活跃会话、取得会话租约、开始轮次，然后由 `ReActLoop` 迭代。`PromptBuilder` 组装提示词，`ProviderService`（US-1）调用一次模型；响应没有工具调用就结束，有就交给 `ToolExecutor`，它调用容器注入的 `ToolCallingManager` 执行，结果追加进历史再进入下一次迭代。契约放 `AgentOS-core`；工具与沙箱在 `AgentOS-tool`；会话、轮次、消息和两张审计表的 JPA 实现与迁移脚本在 `AgentOS-storage`；`AgentOS init` 与 `AgentOS chat` 在 `AgentOS-cli` 与 `AgentOS-channel-cli`；`AgentOS-boot` 只负责装配和启动上下文。Provider调用/重试逻辑不改；新增只读ProviderCatalog实现，复用RequestValidator在轮次开始前验证Profile。
 
 Phase 0 对 Spring AI 2.0.2 的工具执行做了实测（见 [research.md](research.md)），决定设计走向的结论：
 
 - `ToolCallingManager` 在调用线程上顺序执行工具，没有超时；遇到不认识的工具名会让整批调用抛异常，已执行的结果也丢。
 - 默认解析器会执行"声明成 Bean 但不在 Agent 名单里"的工具。必须换成只返回错误的解析器并打开解析回退，才能守住名单（FR-030）。
-- 回调里拿不到模型给的调用 ID，审计要靠一个按工具名排队的账本来对应。
+- 回调里拿不到模型给的调用 ID，审计靠响应之后建立的按工具名排队账本；ID非空/唯一在整批执行前校验。
 - 自定义回调直接抛异常时，密钥原文会连同异常消息一起冒出来，所以所有工具异常都要在治理层先包装、脱敏。
 - 本机 Docker Desktop 已安装但没有运行，依赖数据库的测试要有不依赖 Docker 的分层。
 
@@ -32,7 +32,7 @@ Phase 0 对 Spring AI 2.0.2 的工具执行做了实测（见 [research.md](rese
 
 **Performance Goals**: 循环自身开销相对模型耗时可忽略；spec 未设吞吐目标
 
-**Constraints**: 整轮超时之后最多超出 1 秒；工具调用先记后做；审计写入重试总时长约 0.7 秒；数据库事务不跨模型调用与工具调用；日志不含密钥、完整提示词和工具参数
+**Constraints**: 整轮超时之后最多超出 1 秒；工具调用先记后做；审计最多3次、200/500ms只是退避时间；每次数据库调用有界且受本轮剩余预算限制，收尾共用最后1秒；数据库事务不跨模型调用与工具调用；日志不含密钥、完整提示词和工具参数
 
 **Scale/Scope**: 单进程、单用户的 CLI；`core` 约 30 个新类型，`tool` 约 8 个，`storage` 约 14 个，`cli` 与 `channel-cli` 约 8 个；约 25 个测试类
 
@@ -54,7 +54,7 @@ Phase 0 对 Spring AI 2.0.2 的工具执行做了实测（见 [research.md](rese
 | 测试环境 | 自动化测试默认 Testcontainers，不连共享库；没有 Docker 时 `db` 测试跳过，CI 不允许跳过（R9） | 通过（带说明，见 Complexity Tracking） |
 | 质量门 | `mvn -B verify` 全绿，不新增排除项 | 通过 |
 
-无违反项。设计之后的复查见文末。
+设计按本次修订与宪章对齐，等待人工review；技术方案9.2字段与租约/回收事实源同步更新。设计之后的复查见文末。
 
 ## Project Structure
 
@@ -82,10 +82,11 @@ specs/002-react-loop/
 AgentOS-core/src/main/java/com/agentos/core/
 ├── agent/      AgentProfile、AgentSettings、LoadedAgent、AgentLoader（SnakeYAML）、ContextLoader
 ├── turn/       AgentService、ReActLoop、PromptBuilder、ToolExecutor、TurnGuard、TurnContext、
-│               TurnResult、TurnStatus、ProcessRequest、TurnSink、ToolCallLedger、TurnReaper 逻辑
+│               TurnResult、TurnStatus、ProcessRequest、TurnSink、ToolCallLedger、TurnReaper、TurnRunner、TurnExecutionBudget、TurnBudgetRegistry
 ├── session/    SessionManager、TurnStore、MessageStore（端口）、SessionKey
 ├── audit/      ToolInvocationRecorder（端口）、RetryingAuditWriter、AuditWriteException
-├── tool/       Sandbox、SandboxAction、ActionType、SandboxViolationException、ToolPolicy、Redactor
+├── tool/       Sandbox、SandboxAction、ActionType、SandboxViolationException、ToolPolicy、Redactor、ToolCatalog
+├── provider/   ProviderCatalog（新增只读验证端口，Profile不改）
 └── turn/       TurnDeadlineExceededException、LeaseLostException
 
 AgentOS-tool/src/main/java/com/agentos/tool/
@@ -108,7 +109,7 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 
 测试：`core` 下 `ReActLoopTest`、`PromptBuilderTest`、`ToolExecutorTest`、`AgentServiceTest`、`ContextLoaderTest`、`RedactorTest`、`RetryingAuditWriterTest`，以及端口的内存实现和契约测试基类；`tool` 下 `HttpToolsTest`、`WhitelistSandboxTest`、`GovernedToolCallbackTest`、`ToolRegistryTest`；`storage` 下契约测试的 JPA 子类、`MigrationTest`、`TurnReaperTest`（`@Tag("db")`）；`cli` 下 `InitCommandTest`、`ChatCommandTest`；`boot` 下 `ArchitectureRulesTest` 补充规则与装配测试。
 
-**Structure Decision**: 沿用现有 9 个模块，不新增模块。`AgentOS-provider` 不需要改动：它已经支持截止时间、可替换的记录输出、调用关联信息。`AgentOS-memory`、`AgentOS-web` 不动。
+**Structure Decision**: 沿用现有 9 个模块，不新增模块。Provider只新增ProviderCatalog的现有校验适配和Bean，不改call/stream/retry实现。`AgentOS-memory`、`AgentOS-web` 不动。
 
 ## 需求到设计的对应
 
@@ -148,8 +149,31 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 - **账本依赖管理器的顺序语义**：用测试固定"同名工具第 k 次执行对应第 k 个 ID"；升级 Spring AI 后若失败，说明前提变了（R5）。
 - **处理器重抛路径没有实测**：整轮超时、租约丢失、审计写入失败三类异常能否穿过管理器冒到循环，要用测试验证（R3）。
 - **跨迭代的次数上限**：交给管理器的 prompt 要带累计历史，否则上限每次迭代都被重置（R4）。
-- **崩溃后的租约等待**：进程被强杀后，在租约到期（默认 150 秒）之前再发消息会提示"上一条消息还在处理"。关闭钩子尽力缓解，来不及时靠到期自愈。SC-010 说的"启动完成后标为已中断"针对的是已过截止时间且租约已过期的轮次。
+- **租约覆盖与回收**：动态租约至少到本轮deadline+30s（150s只作最短TTL），不用心跳，代价是强杀等待更久。没有有效owner租约的RUNNING轮次在启动或接管时立即回收，不额外要求deadline过期；终态轮次孤儿工具记录独立清理。
 - **DNS 重绑定**：沙箱只校验主机名，不校验解析后的地址。只信任白名单内的公共接口，完整防护留到后续阶段。
 - **共享库首次启动会自动建表**：可接受，但宪章禁止 Flyway `clean`；共享库需要 SSL。
-- **文档矛盾**：`TechnicalSolution.md` 第 111、126、130 行关于"自动配置的 `OpenAiChatModel` 用于辅助调用"仍与 `chat: none` 矛盾；本 story 不涉及辅助调用，留到用到它时再定。`DemandAnalysis.md` 5.2 的"model 可选"已过时（R13）。
+- **已更正与延期事项**：9d3cf6e已经修复技术方案111/126行与DemandAnalysis的model必填说明；仅技术方案130行辅助ChatClient的模型来源仍留到实际使用时设计，不作为本story已实现能力。
 - **天气数据源依赖外网**：met.no 不通时换 7timer；自动化测试用本地替身，不受影响。
+
+## 分析修订后的闭合设计（2026-11-15）
+
+- 只对审计瞬时写故障重试；llm_calls新增write_id UUID唯一键，单次record重试复用；工具记录复用原唯一键并校验payload。消息追加、lease与建轮次不统一重试（R14）。
+- ToolCatalog和ProviderCatalog为core端口；ToolRegistry和现有Provider校验分别实现。账本在模型响应后才建，给Manager的Prompt含累计历史与内部上下文。
+- TurnRunner/TurnExecutionBudget/TurnBudgetRegistry使用同一单调deadline，调用方有界等到deadline+1s；正常审计受执行预算限制，收尾最后1秒共用，数据库连接/锁/语句/socket也有界。预算查找显式按turnId，移除后迟到审计拒绝。
+- 数据库持续不可用是不能即时保证持久化的物理边界：停止外呼、返回安全失败/turnId/UNCONFIRMED，不称终态已确认，也不承诺恢复模型审计缺行。恢复后经租约失效收尾数据库状态。CONFIRMED只在终态和释放事务确认时返回。
+- 异常工具ID整批执行前失败；致命中止未开始的后续工具不记作limit_skipped、不纳入实际执行分母；本次未完整返回的助手/工具消息不保存，保留工具审计与此前迭代消息。
+- 流式正常路径五类事件与唯一终结回调有单独测试；history上限0与正token预算90%规则可测。真实模型/真实天气调用次数不硬编码，脚本替身才断言精确次数。
+
+## 七项复查修订（2026-11-15）
+
+- deadline附近结束的在途调用，其最终模型审计/工具终态可以使用共享最后1秒；清理阶段不再退避重放写入，仅有界尝试并查证，所有收尾仍共用hardStop。
+- 业务status与persistenceStatus独立：TIMED_OUT或FAILED也可CONFIRMED，只有必要审计/终态/清理未确认才UNCONFIRMED。旧owner发现数据库已有收敛终态时返回数据库终态，不误报更新0行为数据库故障。
+- startTurn提交未知的已提交有效/已提交失效/确认未提交/仍未知四分支按agent-service契约处理，不能把暂时查无行当未提交，不重放起步事务。
+- 数据库clock_timestamp()+本地剩余时长计算数据库deadline；本地单调预算不重新起算，连接/SQL/网络往返都扣预算。两端时间条件同时满足才可追加消息。
+- T037/T039/T070先写行为红灯，分别早于T048/T047/T073；T060/T049/T077仅作后续集成复验。会话接管统一由TurnStore.startTurn事务负责。
+
+## 本轮复查修订：实际时间与输出端（2026-11-15）
+
+- 租约/deadline/接管/消息有效性采用取锁后的db_now=clock_timestamp()，避免PostgreSQL事务起点now()在锁等待后过时；默认创建时间仍可用now()。T022先测锁等待跨有效期，T025/T082实现。
+- AgentService提供process(request,sink)与委托NOOP的单参数入口，输入不带回调；两种调用共用循环和持久化链路。
+- 终结通知与结果分离：complete/error只尝试一次且有界等到相同hardStop；失败不改业务终态或确认状态，也不补第二终结事件。无预算、sink已失效或过程回调仍阻塞时跳过通知并写安全日志。T037先红灯，T028/T048实现，T054/T060验证硬截止边界。
