@@ -32,5 +32,15 @@ jobs:
           distribution: temurin
           java-version: 21
           cache: maven
-      # .mvn/maven.config 已强制只走 Maven Central
-      - run: mvn -B -ntp verify
+      # GitHub 托管 runner 提供 Docker；缺失时直接失败，不允许跳过数据库验证。
+      - name: 检查 Docker
+        run: docker info
+      - name: 验证数据库报告检查器
+        run: python3 -m unittest discover -s scripts/tests -p 'test_check_db_test_reports.py'
+      # .mvn/maven.config 已强制只走 Maven Central；db 标签默认执行，只有 llm 被排除。
+      - name: Maven 完整质量门
+        run: mvn -B -ntp verify
+        env:
+          CI: 'true'
+      - name: 确认数据库测试实际执行
+        run: python3 scripts/check_db_test_reports.py
