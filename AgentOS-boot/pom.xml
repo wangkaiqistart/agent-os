@@ -12,6 +12,11 @@
     <artifactId>AgentOS-boot</artifactId>
     <description>Spring Boot 启动模块：主类、自动配置、依赖聚合，打包成可执行 JAR</description>
 
+    <properties>
+        <!-- 正式构建仍使用 CLI 入口；本地 HTTP 链路调试可在命令行覆盖。 -->
+        <agentos.boot.main-class>com.agentos.boot.AgentOSApplication</agentos.boot.main-class>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.agentos</groupId>
@@ -81,7 +86,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.agentos.boot.AgentOSApplication</mainClass>
+                    <mainClass>${agentos.boot.main-class}</mainClass>
                 </configuration>
             </plugin>
         </plugins>
