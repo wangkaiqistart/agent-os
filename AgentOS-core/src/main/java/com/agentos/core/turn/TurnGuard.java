@@ -3,6 +3,10 @@ package com.agentos.core.turn;
 import com.agentos.core.session.TurnSnapshot;
 import com.agentos.core.session.TurnStore;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 高成本操作和消息追加前的统一检查点：先查整轮预算，再尝试续租。
@@ -25,8 +29,37 @@ public final class TurnGuard {
         if (budget.cancelled() || Thread.currentThread().isInterrupted()) {
             throw new LeaseLostException();
         }
-        if (!turnStore.renewLease(turn, budget)) {
+        if (!renewWithinBudget(turn, budget)) {
             throw new LeaseLostException();
+        }
+    }
+
+    /** 数据库续租也必须受本轮预算约束，避免检查点把 hard stop 变成无限等待。 */
+    private boolean renewWithinBudget(TurnSnapshot turn, TurnExecutionBudget budget) {
+        long remaining = budget.remainingNanos();
+        if (remaining <= 0) {
+            throw new TurnDeadlineExceededException();
+        }
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        var future = executor.submit(() -> turnStore.renewLease(turn, budget));
+        try {
+            return future.get(
+                    Math.max(1, Math.min(remaining, budget.remainingHardStopNanos())),
+                    TimeUnit.NANOSECONDS);
+        } catch (TimeoutException timeout) {
+            future.cancel(true);
+            throw new TurnDeadlineExceededException();
+        } catch (InterruptedException interrupted) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new LeaseLostException();
+        } catch (ExecutionException failure) {
+            if (failure.getCause() instanceof TurnDeadlineExceededException deadline) {
+                throw deadline;
+            }
+            throw new LeaseLostException();
+        } finally {
+            executor.shutdownNow();
         }
     }
 }

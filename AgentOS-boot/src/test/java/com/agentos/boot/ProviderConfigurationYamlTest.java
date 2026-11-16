@@ -95,6 +95,11 @@ class ProviderConfigurationYamlTest {
                 .hasToString("RETURN_ERROR_RESPONSE");
         assertThat(yaml.getProperty("spring.ai.tools.limits.max-total-tool-calls"))
                 .hasToString("30");
+        assertThat(yaml.getProperty("spring.ai.tools.limits.max-calls-per-tool-default"))
+                .hasToString("10");
+        assertThat(yaml.getProperty("agentos.turn.lease-ttl")).hasToString("150s");
+        assertThat(yaml.getProperty("agentos.turn.lease-grace")).hasToString("30s");
+        assertThat(yaml.getProperty("agentos.turn.cleanup")).hasToString("1s");
     }
 
     private static ProviderProperties bindProviders(Binder binder) {

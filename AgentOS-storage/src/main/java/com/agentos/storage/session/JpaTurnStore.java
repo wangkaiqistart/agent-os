@@ -1,5 +1,6 @@
 package com.agentos.storage.session;
 
+import com.agentos.core.config.TurnProperties;
 import com.agentos.core.error.AgentOSException;
 import com.agentos.core.error.ErrorCode;
 import com.agentos.core.session.SessionKey;
@@ -24,6 +25,7 @@ public class JpaTurnStore implements TurnStore {
     private final AgentTurnRepository turns;
     private final SessionMessageRepository messages;
     private final JdbcTemplate jdbc;
+    private final TurnProperties properties;
 
     /** 简化测试的构造器；未注入 JDBC 时以进程时间代替数据库时间。 */
     public JpaTurnStore(
@@ -38,10 +40,20 @@ public class JpaTurnStore implements TurnStore {
             AgentTurnRepository turns,
             SessionMessageRepository messages,
             JdbcTemplate jdbc) {
+        this(sessions, turns, messages, jdbc, new TurnProperties(null, null, null));
+    }
+
+    public JpaTurnStore(
+            SessionRepository sessions,
+            AgentTurnRepository turns,
+            SessionMessageRepository messages,
+            JdbcTemplate jdbc,
+            TurnProperties properties) {
         this.sessions = sessions;
         this.turns = turns;
         this.messages = messages;
         this.jdbc = jdbc;
+        this.properties = properties;
     }
 
     @Override
@@ -65,9 +77,11 @@ public class JpaTurnStore implements TurnStore {
             throw new AgentOSException(ErrorCode.SESSION_BUSY, "会话正有轮次在执行");
         }
         String owner = turnId.toString();
-        // 当前实现固定至少租用 150 秒，并给剩余业务预算加 30 秒缓冲；
-        // 尚未读取 TurnProperties 的同类配置，不能靠修改配置来改变这里的值。
-        Instant until = now.plus(max(Duration.ofSeconds(150), budget.remaining().plusSeconds(30)));
+        Instant until =
+                now.plus(
+                        max(
+                                properties.leaseTtl(),
+                                budget.remaining().plus(properties.leaseGrace())));
         session.lease(owner, until);
         session.touch(now);
         sessions.save(session);
@@ -104,7 +118,10 @@ public class JpaTurnStore implements TurnStore {
         }
         session.lease(
                 turn.owner(),
-                now.plus(max(Duration.ofSeconds(150), budget.remaining().plusSeconds(30))));
+                now.plus(
+                        max(
+                                properties.leaseTtl(),
+                                budget.remaining().plus(properties.leaseGrace()))));
         sessions.save(session);
         return true;
     }

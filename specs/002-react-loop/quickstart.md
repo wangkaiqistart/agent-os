@@ -2,7 +2,7 @@
 
 **Plan**: [plan.md](plan.md) | 行为契约见 [contracts/](contracts/)，表结构见 [data-model.md](data-model.md)
 
-**2026-11-16 当前状态**：默认主 Agent 的 Phase 10 已完成（第 9.5 节）；Phase 4 工具闭环已完成（第 10 节）。本次统一质量门与容器 PostgreSQL 已通过，不代表真实模型、真实天气、迭代上限和恢复机制已全部完成。第 2.1 节和第 9.5 节保留各自历史证据。
+**2026-11-16 当前状态**：默认主 Agent 的 Phase 10 已完成（第 9.5 节）；Phase 4 工具闭环和 Phase 5 安全上限已完成（第 10、11 节）。本次全量质量门通过；本机 Docker 未运行时，数据库测试按约定跳过，数据库质量门需在 Docker/CI 中补验。真实天气仍等待 US5 审计恢复。
 
 ## 前置条件
 
@@ -61,9 +61,9 @@ python3 scripts/check_db_test_reports.py
 
 随后补充的 Core/CLI/Channel 回归测试共 21 个通过，覆盖 Agent frontmatter 错误、Bootstrap 顺序与热加载、空助手失败、Provider 校验先于建会话、CLI 单消息假 launcher、空行/EOF/`/exit`；同时修复了 Bootstrap 映射顺序在不可变包装后不稳定的问题，并消除了内存契约测试的 JUnit 静态 `@Nested` 发现警告。
 
-## 3. 阶段 Demo 1：查天气穿衣（手动，待 US3/US5 后执行）
+## 3. 阶段 Demo 1：查天气穿衣（手动，待 US5 后执行）
 
-本节是后续真实演示指南，Phase 4 不执行；先完成 Phase 5 的安全上限和 Phase 7 的审计恢复。
+本节是后续真实演示指南，Phase 4/5 不执行；先完成 US5 的审计恢复。
 
 `.env` 里要有 `AGENTOS_DB_URL` 等数据库连接，以及 `AGENTOS_LLM_*`（`primary` 模型）。HTTP白名单通过下面合法的环境变量传入，不向.env追加带点的Spring属性（.env还需被shell source）。
 
@@ -341,4 +341,32 @@ Phase 4 本地工具闭环通过。**NOT_RUN**：US2 场景 10 的真实模型 +
 | FR-035–038 的正常工具写入与脱敏 | T036、T039–041、T045–046、T050 | 容器库原行审计/JSONB、日志与审计脱敏；重试/恢复与完整故障分母待 Phase 7 |
 | 本地独立验收及真实 Demo 前置约束 | T050–051 | 本节本地天气结果；真实 Demo 延期且未发送外部请求 |
 
-全表现在 67 项完成、42 项待办。扩展配置 `.specify/extensions.yml` 不存在，实施前后及分析前后无 hooks 需要执行。后续按用户指定继续 Phase 5，不自动进入下一阶段。
+Phase 4 收尾时全表为 67 项完成、42 项待办；Phase 5 已在本记录第 11 节追加收口。扩展配置 `.specify/extensions.yml` 不存在，实施前后及分析前后无 hooks 需要执行。
+
+## 11. Phase 5 循环上限实施记录（2026-11-16）
+
+**范围与结果**：用户明确执行 `/speckit-implement Phase 5`，完成 T052–T061。模型调用、工具调用、整轮时间和 HTTP body 现在共享有界预算；达到上限时停止后续动作并保留可解释的终态/审计信息。没有新增表、迁移、模块或真实模型请求，也没有提交、推送或发布。
+
+### 11.1 实现路径
+
+`ReActLoop → TurnExecutionBudget/TurnGuard → ToolExecutor → 官方 ToolCallingManager → GovernedToolCallback → HttpTools` 复用同一个 turn budget。`max_iterations` 在每次模型请求前检查，最后一轮仍有工具调用时返回 `MAX_ITERATIONS`，不会额外发送总结请求；完成文本在上限轮次仍返回 `SUCCEEDED`。Spring AI Manager 从当前轮完整历史累计单工具/总工具调用次数，返回 `RETURN_ERROR_RESPONSE` 后由 `ToolExecutor` 只对账本剩余 ID 写入 `limit_skipped`，Manager 致命异常不会误记。
+
+审计 begin/complete、数据库续租、工具执行和 HTTP 响应 body 消费都使用剩余业务 deadline；complete/持久化收尾另受 cleanup hard stop 约束。HTTP body 在 `onNext`/`onComplete` 再次检查 deadline，超时取消订阅并停止后续跳转/读取。动态租约按 `max(lease-ttl, 剩余预算 + lease-grace)` 计算，持久化无法在 hard stop 内确认时返回 `UNCONFIRMED`，不覆盖真实业务状态。
+
+### 11.2 测试与质量门证据
+
+| 验收 | 实际证据 |
+|---|---|
+| 模型调用上限 | `ReActLoopLimitsTest` 3 项：默认 10 次、覆盖 3 次、完成响应在上限轮次成功；模型调用计数分别为 10、3、1，无第 11/4 次或总结调用 |
+| 工具调用上限 | `ToolCallLimitsTest` 1 项：同一响应一次多调用、跨迭代累计；callback 实际执行 1 次，两个被限调用各有 `limit_skipped`，跳过记录 attempts=0 |
+| deadline/hard stop | `TurnDeadlineTest` 1 项、`GovernedToolCallbackTest` 6 项：慢模型返回 `TIMED_OUT+CONFIRMED`，阻塞终态审计不遮盖超时，工具自身 timeout 与整轮 timeout 区分 |
+| HTTP body | `HttpToolsDeadlineTest` 2 项：响应头后持续 body 在共享 deadline 处取消，已过预算时请求数为 0 |
+| 配置与装配 | `ProviderConfigurationYamlTest` 4 项：默认单工具 10、总计 30、`RETURN_ERROR_RESPONSE`、lease-ttl 150s、lease-grace 30s、cleanup 1s；完整模块编译和静态质量检查通过 |
+| 真实 Boot 链路 | `ReActApplicationTest` 新增 2 项：真实 Provider HTTP 替身 + Spring AI Manager 装配验证 `MAX_ITERATIONS`，慢 HTTP 工具消耗共享 deadline；本机因 Docker 缺失跳过，已完成 test-compile |
+| 全量质量门 | `mvn -B -ntp verify` 返回 0、BUILD SUCCESS（2026-11-16 20:21:57 +08:00，约 1:12）。Surefire 合计 **369 tests / 0 failures / 0 errors / 15 skipped**：core 39、provider 220、tool 23、storage 18（9 skipped）、web 11、channel-cli 3、CLI 28、boot 27（6 skipped）。Spotless、Checkstyle、SpotBugs/FindSecBugs、Enforcer、ArchUnit 均通过 |
+
+### 11.3 验收边界
+
+`python3 scripts/check_db_test_reports.py` 返回 1：“数据库连通性测试未成功执行，缺失、跳过或失败均不允许。”原因是本机 `/var/run/docker.sock` 不存在，Testcontainers 的 9 个 storage 测试和 boot 中 6 个数据库相关测试被跳过；因此本轮数据库续租/收尾的真实 PostgreSQL 质量门为 **NOT_RUN**，不能把 `mvn verify` 的 BUILD SUCCESS 当作数据库已验证。CI 或启动 Docker 后必须重新运行该脚本并确认返回 0。
+
+Phase 5 的本地合成测试、配置检查和非数据库质量门均通过；真实模型、真实天气和 US5 审计恢复仍为 **NOT_RUN**。下一阶段按用户指定进入 Phase 6，不自动执行后续任务。

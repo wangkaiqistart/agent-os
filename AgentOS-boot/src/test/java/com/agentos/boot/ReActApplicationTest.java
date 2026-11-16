@@ -62,6 +62,16 @@ class ReActApplicationTest {
         Files.writeString(
                 toolAgent.resolve("AGENT.md"),
                 "---\nname: weather\nprovider:\n  model: test-model\ntools: [http_get]\n---\n查询天气。\n");
+        Path boundedAgent = workspace.resolve("agents/bounded");
+        Files.createDirectories(boundedAgent);
+        Files.writeString(
+                boundedAgent.resolve("AGENT.md"),
+                "---\nname: bounded\nprovider:\n  model: test-model\ntools: [http_get]\nsettings:\n  max_iterations: 1\n  turn_timeout: 5s\n---\n只调用一次工具。\n");
+        Path deadlineAgent = workspace.resolve("agents/deadline");
+        Files.createDirectories(deadlineAgent);
+        Files.writeString(
+                deadlineAgent.resolve("AGENT.md"),
+                "---\nname: deadline\nprovider:\n  model: test-model\ntools: [http_get]\nsettings:\n  turn_timeout: 100ms\n---\n调用工具。\n");
         model = LocalModelServer.start();
         weather =
                 com.sun.net.httpserver.HttpServer.create(
@@ -258,5 +268,69 @@ class ReActApplicationTest {
                                 String.class,
                                 result.turnId()))
                 .isEqualTo("sandbox_denied");
+    }
+
+    @Test
+    void realManagerAssemblyHonorsMaxIterationsWithoutSecondModelCall(
+            org.springframework.context.ApplicationContext context) {
+        model.reset(
+                LocalModelServer.toolResponse(
+                        "bounded-call",
+                        "http://127.0.0.1:" + weather.getAddress().getPort() + "/weather"));
+        weatherCalls.set(0);
+        var result =
+                context.getBean(AgentService.class)
+                        .process(
+                                new ProcessRequest(
+                                        "test", "bounded-user", "bounded", "执行", "test"));
+
+        assertThat(result.status()).isEqualTo(TurnStatus.MAX_ITERATIONS);
+        assertThat(result.iterations()).isEqualTo(1);
+        assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
+        assertThat(model.calls()).isOne();
+        assertThat(weatherCalls).hasValue(1);
+        var jdbc = new JdbcTemplate(context.getBean(DataSource.class));
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from tool_invocations where turn_id=? and status='success'",
+                                Integer.class,
+                                result.turnId()))
+                .isOne();
+    }
+
+    @Test
+    void realProviderToolLoopStopsWhenSlowBodyConsumesSharedDeadline(
+            org.springframework.context.ApplicationContext context) {
+        model.reset(
+                LocalModelServer.toolResponse(
+                        "deadline-call",
+                        "http://127.0.0.1:" + weather.getAddress().getPort() + "/weather"));
+        weatherCalls.set(0);
+        beforeHttp.set(() -> {
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        long started = System.nanoTime();
+        try {
+            var result =
+                    context.getBean(AgentService.class)
+                            .process(
+                                    new ProcessRequest(
+                                            "test", "deadline-user", "deadline", "执行", "test"));
+            assertThat(result.status()).isEqualTo(TurnStatus.TIMED_OUT);
+            assertThat(result.iterations()).isEqualTo(1);
+            assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
+            assertThat(model.calls()).isOne();
+            assertThat(weatherCalls).hasValue(1);
+            assertThat(
+                            java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                                    System.nanoTime() - started))
+                    .isLessThan(1200);
+        } finally {
+            beforeHttp.set(() -> {});
+        }
     }
 }

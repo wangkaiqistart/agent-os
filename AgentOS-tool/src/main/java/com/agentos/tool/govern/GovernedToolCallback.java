@@ -12,6 +12,7 @@ import com.agentos.core.turn.ToolContextKeys;
 import com.agentos.core.turn.TurnContext;
 import com.agentos.core.turn.TurnDeadlineExceededException;
 import com.agentos.core.turn.TurnExecutionBudget;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -74,7 +75,7 @@ public final class GovernedToolCallback implements ToolCallback {
         var call = ledger.next(getToolDefinition().name());
         String safeInput = redactor.redact(input);
         // begin 的正常返回是执行许可；失败时不会创建任务，更不会调用真实工具。
-        var begin =
+        var beginRecord =
                 new ToolInvocationRecord(
                         turn.sessionId(),
                         turn.turnId(),
@@ -91,7 +92,7 @@ public final class GovernedToolCallback implements ToolCallback {
                         policy.idempotent(),
                         0,
                         null);
-        recorder.begin(begin);
+        var begin = withinBudget(() -> recorder.begin(beginRecord), budget, false);
         long started = System.nanoTime();
         int attempts = 0;
         String status = "failed";
@@ -205,7 +206,22 @@ public final class GovernedToolCallback implements ToolCallback {
                         attempts,
                         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
         // 结果写入失败也必须中止 Manager；操作可能已发生，绝不能因审计失败重试副作用。
-        recorder.complete(end);
+        try {
+            withinBudget(
+                    () -> {
+                        recorder.complete(end);
+                        return null;
+                    },
+                    budget,
+                    true);
+        } catch (RuntimeException completionFailure) {
+            // 超时/租约丢失是原始终止原因，不能被最后一次审计等待遮盖。
+            if (failure instanceof TurnDeadlineExceededException
+                    || failure instanceof LeaseLostException) {
+                throw failure;
+            }
+            throw completionFailure;
+        }
         if (failure instanceof AuditWriteException
                 || failure instanceof LeaseLostException
                 || failure instanceof TurnDeadlineExceededException) {
@@ -218,5 +234,33 @@ public final class GovernedToolCallback implements ToolCallback {
                             redactor.redact("工具 " + call.name() + " 执行失败：" + error + "；本轮不自动重试")));
         }
         return result;
+    }
+
+    /** 审计写入使用独立虚拟线程等待，等待上限取业务 deadline 或 hard stop 的剩余时间。 */
+    private <T> T withinBudget(Callable<T> action, TurnExecutionBudget budget, boolean hardStop) {
+        long remaining = hardStop ? budget.remainingHardStopNanos() : budget.remainingNanos();
+        if (remaining <= 0) {
+            throw new TurnDeadlineExceededException();
+        }
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        Future<T> future = executor.submit(action);
+        try {
+            return future.get(Math.max(1, remaining), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException timeout) {
+            future.cancel(true);
+            throw new TurnDeadlineExceededException();
+        } catch (InterruptedException interrupted) {
+            future.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new LeaseLostException();
+        } catch (ExecutionException execution) {
+            Throwable cause = execution.getCause();
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new AuditWriteException("工具审计写入未确认，操作可能已经执行");
+        } finally {
+            executor.shutdownNow();
+        }
     }
 }

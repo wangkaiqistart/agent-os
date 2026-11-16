@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -23,6 +25,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
  * 只依赖 core 端口，模型、工具实现和数据库均由装配层注入；跨用户消息的历史恢复仍属后续阶段。
  */
 public final class ReActLoop {
+    private static final Logger log = LoggerFactory.getLogger(ReActLoop.class);
     private final ProviderService provider;
     private final MessageStore messages;
     private final PromptBuilder promptBuilder;
@@ -112,8 +115,10 @@ public final class ReActLoop {
         MDC.put("turnId", turn.turnId().toString());
         MDC.put("agent", agent.profile().name());
         try {
-            for (int iteration = 1; ; iteration++) {
+            int maxIterations = agent.profile().settings().maxIterations();
+            for (int iteration = 1; iteration <= maxIterations; iteration++) {
                 MDC.put("iteration", Integer.toString(iteration));
+                log.debug("ReAct iteration {} started", iteration);
                 guard.checkpoint(turn, budget);
                 var context =
                         new TurnContext(
@@ -191,7 +196,14 @@ public final class ReActLoop {
                                     .collect(Collectors.joining("\n"));
                     return new Result(TurnStatus.SUCCEEDED, text, iteration);
                 }
+                if (iteration == maxIterations) {
+                    String limit = "已达到模型调用上限（" + maxIterations + "），本轮停止继续调用模型";
+                    messages.append(turn, iteration, List.of(new AssistantMessage(limit)));
+                    return new Result(TurnStatus.MAX_ITERATIONS, limit, iteration);
+                }
             }
+            String limit = "已达到模型调用上限（" + maxIterations + "），本轮停止继续调用模型";
+            return new Result(TurnStatus.MAX_ITERATIONS, limit, maxIterations);
         } finally {
             MDC.clear();
         }

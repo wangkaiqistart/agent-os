@@ -77,7 +77,8 @@ public final class HttpTools implements AutoCloseable {
                             .build();
             var future =
                     client.sendAsync(
-                            request, info -> new BoundedBody(properties.maxResponseBytes()));
+                            request,
+                            info -> new BoundedBody(properties.maxResponseBytes(), deadline));
             HttpResponse<byte[]> response;
             try {
                 response =
@@ -96,6 +97,9 @@ public final class HttpTools implements AutoCloseable {
                 }
                 // 不附带 SDK cause：其中可能含完整 URL、代理凭证或响应正文。
                 throw new IllegalStateException("HTTP 请求失败或超时（响应可能超过大小上限）");
+            }
+            if (budget.expired()) {
+                throw new TurnDeadlineExceededException();
             }
             if (response.statusCode() >= 300 && response.statusCode() < 400) {
                 if (redirects >= properties.maxRedirects()) {
@@ -123,12 +127,14 @@ public final class HttpTools implements AutoCloseable {
     /** 在接收每批字节时检查上限；超限立即取消订阅，不先把整个正文读进内存。 */
     private static final class BoundedBody implements HttpResponse.BodySubscriber<byte[]> {
         private final int cap;
+        private final long deadlineNanos;
         private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         private final CompletableFuture<byte[]> result = new CompletableFuture<>();
         private Flow.Subscription subscription;
 
-        BoundedBody(int cap) {
+        BoundedBody(int cap, long deadlineNanos) {
             this.cap = cap;
+            this.deadlineNanos = deadlineNanos;
         }
 
         public CompletionStage<byte[]> getBody() {
@@ -141,6 +147,11 @@ public final class HttpTools implements AutoCloseable {
         }
 
         public void onNext(List<ByteBuffer> buffers) {
+            if (System.nanoTime() >= deadlineNanos) {
+                subscription.cancel();
+                result.completeExceptionally(new TimeoutException());
+                return;
+            }
             for (var buffer : buffers) {
                 if (buffer.remaining() > cap - bytes.size()) {
                     subscription.cancel();
@@ -159,7 +170,11 @@ public final class HttpTools implements AutoCloseable {
         }
 
         public void onComplete() {
-            result.complete(bytes.toByteArray());
+            if (System.nanoTime() >= deadlineNanos) {
+                result.completeExceptionally(new TimeoutException());
+            } else {
+                result.complete(bytes.toByteArray());
+            }
         }
     }
 

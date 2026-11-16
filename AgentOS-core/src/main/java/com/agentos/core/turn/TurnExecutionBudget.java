@@ -3,13 +3,12 @@ package com.agentos.core.turn;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 一轮执行共享的时间预算，同时保留单调计时和可对外传递的绝对截止时间。
  *
  * <p>System.nanoTime 用于进程内计算经过多久，不受系统时间校准影响；Instant 用于写入数据库
- * 及传给 Provider。正常 deadline 后额外留一秒作为外层 hard stop，但这不是强制终止所有 I/O 的保证。
+ * 及传给 Provider。正常 deadline 后额外保留 cleanup 窗口作为外层 hard stop，但这不是强制终止所有 I/O 的保证。
  */
 public final class TurnExecutionBudget {
     private final long deadlineNanos;
@@ -35,16 +34,23 @@ public final class TurnExecutionBudget {
 
     /** 从调用时刻开始计时；后续步骤共享这个对象，不能在每次模型调用时重置整轮预算。 */
     public static TurnExecutionBudget start(Duration duration) {
+        return start(duration, Duration.ofSeconds(1));
+    }
+
+    /** 清理窗口只用于有限的持久化/通知等待，不会延长业务 deadline。 */
+    public static TurnExecutionBudget start(Duration duration, Duration cleanup) {
         Objects.requireNonNull(duration, "duration");
+        Objects.requireNonNull(cleanup, "cleanup");
         if (duration.isZero() || duration.isNegative()) {
             throw new IllegalArgumentException("预算必须为正数");
+        }
+        if (cleanup.isZero() || cleanup.isNegative()) {
+            throw new IllegalArgumentException("清理窗口必须为正数");
         }
         long now = System.nanoTime();
         long nanos = duration.toNanos();
         return new TurnExecutionBudget(
-                now + nanos,
-                now + nanos + TimeUnit.SECONDS.toNanos(1),
-                Instant.now().plus(duration));
+                now + nanos, now + nanos + cleanup.toNanos(), Instant.now().plus(duration));
     }
 
     /** 适合存储或跨组件传递的绝对时间；进程内是否耗尽以单调计时检查为准。 */

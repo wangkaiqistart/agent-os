@@ -6,8 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * 全局轮次时间配置契约；Duration 可由 150s、1s 等 Boot 配置值绑定。
  *
- * <p>当前已注册绑定，但 JpaTurnStore 的租约数值仍在实现中固定为 150s 和 30s，
- * TurnExecutionBudget 的额外窗口固定为 1s；修改这些属性尚不会自动改变对应实现。
+ * <p>JpaTurnStore 使用 {@code max(leaseTtl, 剩余轮次预算 + leaseGrace)} 计算租约，
+ * TurnExecutionBudget 使用 cleanup 作为 hard stop 收尾窗口。
  *
  * @param leaseTtl 规划中的租约基础存活时间
  * @param leaseGrace 规划中的租约宽限窗口，可为零

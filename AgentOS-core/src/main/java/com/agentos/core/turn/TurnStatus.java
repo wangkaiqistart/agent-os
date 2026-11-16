@@ -2,17 +2,17 @@ package com.agentos.core.turn;
 
 /**
  * 轮次生命周期状态。RUNNING 是存储中的中间态，其余值描述不同结束原因。
- * 当前最小链路主要返回 SUCCEEDED、FAILED、TIMED_OUT；保留的上限状态不表示相应功能已接入。
+ * 正常轮次会返回 SUCCEEDED、FAILED、TIMED_OUT 或 MAX_ITERATIONS；其余值描述中断和资源限额。
  */
 public enum TurnStatus {
     RUNNING,
     SUCCEEDED,
     FAILED,
     TIMED_OUT,
-    /** 预留：耗尽模型迭代次数。 */
+    /** 模型调用次数达到 Agent 的 max_iterations，未再发起总结请求。 */
     MAX_ITERATIONS,
     /** 回收失去租约等无法继续的残留 RUNNING 记录时使用。 */
     INTERRUPTED,
-    /** 预留：触发工具调用等资源限额。 */
+    /** 仅用于需要 THROW 模式时表示工具限额终止。 */
     LIMIT_EXCEEDED
 }

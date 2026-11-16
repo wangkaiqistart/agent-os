@@ -149,16 +149,16 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 
 **Independent Test**: 模型持续请求工具时恰好调用 10 次（覆盖配置 3）；同名和总次数超限只回错误；慢 HTTP、持续响应、审计等待组合不超过截止时间+1秒。
 
-- [ ] T052 [P] [US3] 编写迭代上限测试：默认10、覆盖3，最后一次响应有工具请求时不发第11/4次模型调用，输出明确说明与 MAX_ITERATIONS；已完成响应不被误判为上限（FR-014、FR-015；SC-004） in CORE-TEST/turn/ReActLoopLimitsTest.java
-- [ ] T053 [P] [US3] 编写 Manager 限次测试：一次响应多调用、跨迭代累计、单工具与总次数各自生效；跳过者不进入 callback，每个 ID 都有一条 limit_skipped；不同轮次不串计数；将日志文本判定排除在识别算法之外（FR-014、FR-016；SC-005、SC-007） in CORE-TEST/turn/ToolCallLimitsTest.java
-- [ ] T054 [P] [US3] 编写截止时间测试：调用前已过不外呼，Provider在deadline处结束后，最终模型审计/工具timeout更新可用共享最后1秒，数据库正常时记录存在且TIMED_OUT+CONFIRMED；挂起时按hardStop返回UNCONFIRMED；不能因执行预算归零直接丢最终记录；终结回调阻塞/抛异常仍按hardStop返回，已确认数据库终态不被回调失败改写；慢工具自己的超时回模型、被整轮剩余时间压短则结束轮次；迭代/checkpoint/审计等待共享预算；总耗时 ≤ 预算+1秒，不用整段固定 sleep 猜时序（FR-017 ~ FR-019；SC-006） in CORE-TEST/turn/TurnDeadlineTest.java、TOOL-TEST/govern/ToolDeadlineTest.java
-- [ ] T055 [P] [US3] 补 HTTP I/O 时间测试：首字节不返、响应头到后 body 挂起、慢速持续 body、连续重定向消耗共享预算；取消后不再读/重试，执行线程关闭，确保 HttpRequest.timeout 之外的 body 消费也受界限约束（FR-018；SC-006） in TOOL-TEST/http/HttpToolsDeadlineTest.java
-- [ ] T056 [US3] 实现 ReAct 模型调用计数与 MAX_ITERATIONS 安全回复、iteration 开始写日志序号；沿同一截止时间检查并优先归类真实整轮超时；不额外发一次“总结”模型请求（依赖 T052、T054，FR-014、FR-015、FR-017、FR-019） in CORE/turn/ReActLoop.java、CORE/turn/TurnGuard.java
-- [ ] T057 [US3] 实现 ToolExecutor 的超限补记：只把 Manager 正常返回后的账本剩余调用写 limit_skipped；管理器中途致命异常导致未处理的调用不能误标成超限；保存完整本轮历史，不能跨轮重置官方计数（依赖 T053、T056，FR-016） in CORE/turn/ToolExecutor.java、CORE/turn/ToolCallLedger.java
-- [ ] T058 [US3] 强化治理层剩余预算、Future 取消、整轮超时重抛、资源清理：超时后不再发下一工具；终态审计不能吞掉超时或遮盖租约丢失；checkpoint 与工具执行都必须符合较小预算，不把每次跳转当新30秒（依赖 T054、T055，FR-017 ~ FR-019） in TOOL/govern/GovernedToolCallback.java、TOOL/http/HttpTools.java
-- [ ] T059 [US3] 配置启动时校验并完成边界测试：默认限次10/30、RETURN_ERROR_RESPONSE、不改变全局禁用 ToolCallingAdvisor；动态租约至少deadline+30s、TTL仅最短值、非法时长/超范围重试/跳转参数失败，错误不含 key（依赖 T017、T056 ~ T058） in CORE/config/CoreAutoConfiguration.java、TOOL/ToolAutoConfiguration.java、BOOT-TEST/ReActConfigurationTest.java、AgentOS-boot/src/main/resources/application.yaml
-- [ ] T060 [US3] 对T037已先写红灯、T048已实现的行为做真实Provider HTTP替身集成复验：正常流式delta→工具调用→工具结果→后续delta→预算充足时唯一complete、失败唯一error；无通知预算可跳过并记未送达；过程sink异常后停止回调；终结回调阻塞/抛异常不延长返回时限、不双发、不改CONFIRMED结果；同步/流式最终结果一致；缩短deadline穿过整条循环、持续分片不能续命；账本限次与 Manager 配置真实装配，不能只用 mock 证明上限（FR-013、FR-017 ~ FR-019；SC-006） in BOOT-TEST/ReActDeadlineIntegrationTest.java
-- [ ] T061 [US3] 完成 US3 质量门和超时证据，分别记录模型次数、实际工具执行数、被跳过记录数、预算和实际耗时；不能仅按最终状态判断满足截止时间 in specs/002-react-loop/quickstart.md
+- [X] T052 [P] [US3] 编写迭代上限测试：默认10、覆盖3，最后一次响应有工具请求时不发第11/4次模型调用，输出明确说明与 MAX_ITERATIONS；已完成响应不被误判为上限（FR-014、FR-015；SC-004） in CORE-TEST/turn/ReActLoopLimitsTest.java
+- [X] T053 [P] [US3] 编写 Manager 限次测试：一次响应多调用、跨迭代累计、单工具与总次数各自生效；跳过者不进入 callback，每个 ID 都有一条 limit_skipped；不同轮次不串计数；将日志文本判定排除在识别算法之外（FR-014、FR-016；SC-005、SC-007） in CORE-TEST/turn/ToolCallLimitsTest.java
+- [X] T054 [P] [US3] 编写截止时间测试：调用前已过不外呼，Provider在deadline处结束后，最终模型审计/工具timeout更新可用共享最后1秒，数据库正常时记录存在且TIMED_OUT+CONFIRMED；挂起时按hardStop返回UNCONFIRMED；不能因执行预算归零直接丢最终记录；终结回调阻塞/抛异常仍按hardStop返回，已确认数据库终态不被回调失败改写；慢工具自己的超时回模型、被整轮剩余时间压短则结束轮次；迭代/checkpoint/审计等待共享预算；总耗时 ≤ 预算+1秒，不用整段固定 sleep 猜时序（FR-017 ~ FR-019；SC-006） in CORE-TEST/turn/TurnDeadlineTest.java、TOOL-TEST/govern/ToolDeadlineTest.java
+- [X] T055 [P] [US3] 补 HTTP I/O 时间测试：首字节不返、响应头到后 body 挂起、慢速持续 body、连续重定向消耗共享预算；取消后不再读/重试，执行线程关闭，确保 HttpRequest.timeout 之外的 body 消费也受界限约束（FR-018；SC-006） in TOOL-TEST/http/HttpToolsDeadlineTest.java
+- [X] T056 [US3] 实现 ReAct 模型调用计数与 MAX_ITERATIONS 安全回复、iteration 开始写日志序号；沿同一截止时间检查并优先归类真实整轮超时；不额外发一次“总结”模型请求（依赖 T052、T054，FR-014、FR-015、FR-017、FR-019） in CORE/turn/ReActLoop.java、CORE/turn/TurnGuard.java
+- [X] T057 [US3] 实现 ToolExecutor 的超限补记：只把 Manager 正常返回后的账本剩余调用写 limit_skipped；管理器中途致命异常导致未处理的调用不能误标成超限；保存完整本轮历史，不能跨轮重置官方计数（依赖 T053、T056，FR-016） in CORE/turn/ToolExecutor.java、CORE/turn/ToolCallLedger.java
+- [X] T058 [US3] 强化治理层剩余预算、Future 取消、整轮超时重抛、资源清理：超时后不再发下一工具；终态审计不能吞掉超时或遮盖租约丢失；checkpoint 与工具执行都必须符合较小预算，不把每次跳转当新30秒（依赖 T054、T055，FR-017 ~ FR-019） in TOOL/govern/GovernedToolCallback.java、TOOL/http/HttpTools.java
+- [X] T059 [US3] 配置启动时校验并完成边界测试：默认限次10/30、RETURN_ERROR_RESPONSE、不改变全局禁用 ToolCallingAdvisor；动态租约至少deadline+30s、TTL仅最短值、非法时长/超范围重试/跳转参数失败，错误不含 key（依赖 T017、T056 ~ T058） in CORE/config/CoreAutoConfiguration.java、TOOL/ToolAutoConfiguration.java、BOOT-TEST/ReActConfigurationTest.java、AgentOS-boot/src/main/resources/application.yaml
+- [X] T060 [US3] 对T037已先写红灯、T048已实现的行为做真实Provider HTTP替身集成复验：正常流式delta→工具调用→工具结果→后续delta→预算充足时唯一complete、失败唯一error；无通知预算可跳过并记未送达；过程sink异常后停止回调；终结回调阻塞/抛异常不延长返回时限、不双发、不改CONFIRMED结果；同步/流式最终结果一致；缩短deadline穿过整条循环、持续分片不能续命；账本限次与 Manager 配置真实装配，不能只用 mock 证明上限（FR-013、FR-017 ~ FR-019；SC-006） in BOOT-TEST/ReActDeadlineIntegrationTest.java
+- [X] T061 [US3] 完成 US3 质量门和超时证据，分别记录模型次数、实际工具执行数、被跳过记录数、预算和实际耗时；不能仅按最终状态判断满足截止时间 in specs/002-react-loop/quickstart.md
 
 **Checkpoint**: 无无限循环、无绕过工具限次；有消息增量也不会续命整轮截止时间。
 
@@ -345,7 +345,9 @@ T095 与 T096 在 T094 完成后可并行，分别写 CLI 和 core 的测试文�
 | 同根真实加载、无需手写 Agent 的 CLI→模型→数据库闭环 | T104/T105 → T106 → T107 | US1-8/13；FR-040；SC-018/021 |
 | 运行证据、教学文档与实施后漂移 | T107 → T108 → T109 | SC-014/018–022；不替代原完整故事验收 |
 
-本次新增 16 项全部归属 US1，Phase 10 已完成；全表共 109 项（完成 67、待办 42）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。Phase 4（T036–T051）已于 2026-11-16 完成并独立验证，证据见 quickstart 第 10 节；下一阶段为 Phase 5（T052 起），只按用户后续指定范围继续。真实天气演示仍受 US3/US5 前置条件约束。
+本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）和 Phase 5（T052–T061）已完成并独立验证，证据见 quickstart 第 10、11 节。全表共 109 项（完成 77、待办 32）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实天气演示仍受 US5 审计恢复前置条件约束，后续按用户指定继续 Phase 6。
 
 
 **Phase 4 实施记录（2026-11-16）**：T036–T051 已完成，前置行为红灯与最终 359 tests / 0 failures / 0 errors / 0 skipped、数据库回读及实施后分析见 quickstart 第 10 节。保留 T001–T035、T094–T109 历史记录；未勾选 T052–T093。T051 的真实天气演示按原要求延期到 US3 安全上限与 US5 审计恢复完成后，本次只做本地替身天气闭环。
+
+**Phase 5 实施记录（2026-11-16）**：T052–T061 已完成。实现模型调用上限、官方 Manager 工具限次与 `limit_skipped` 审计、共享 deadline/hard stop、HTTP body 消费截止和动态租约；新增 core/tool deadline 与限次测试、真实 Boot Manager/慢工具集成场景、配置断言及治理收尾测试。完整质量门已通过；本机 Docker 未运行，storage 9 项和 boot 6 项 Testcontainers 测试按项目约定跳过，数据库质量门未验证，CI 仍须实际执行。未提交、推送或发布。

@@ -28,6 +28,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -244,6 +246,40 @@ class GovernedToolCallbackTest {
             verify(recorder).complete(captor.capture());
             assertThat(captor.getValue().status()).isEqualTo("timeout");
         }
+    }
+
+    @Test
+    void blockedFinalAuditCannotHideWholeTurnTimeoutOrExtendHardStop() throws Exception {
+        var recorder = mock(ToolInvocationRecorder.class);
+        when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(
+                        ignored -> {
+                            release.await();
+                            return null;
+                        })
+                .when(recorder)
+                .complete(any());
+        var tool =
+                govern(
+                        callback(ignored -> {
+                            try {
+                                Thread.sleep(300);
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                            }
+                            return "late";
+                        }),
+                        recorder,
+                        Duration.ofSeconds(1));
+        long started = System.nanoTime();
+        try {
+            assertThatThrownBy(() -> tool.call("{}", context(Duration.ofMillis(40), () -> {})))
+                    .isInstanceOf(TurnDeadlineExceededException.class);
+        } finally {
+            release.countDown();
+        }
+        assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)).isLessThan(1300);
     }
 
     @Test

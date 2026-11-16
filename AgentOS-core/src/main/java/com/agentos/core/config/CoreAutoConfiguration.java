@@ -95,7 +95,9 @@ public class CoreAutoConfiguration {
             TurnRunner runner,
             com.agentos.core.tool.ToolCatalog catalog,
             org.springframework.ai.model.tool.ToolCallingManager manager,
-            com.agentos.core.tool.Redactor redactor) {
+            com.agentos.core.tool.Redactor redactor,
+            com.agentos.core.audit.ToolInvocationRecorder recorder,
+            TurnProperties turnProperties) {
         // ReActLoop 是普通对象，生命周期由持有它的 AgentService 管理，不单独注册成 Bean。
         return new DefaultAgentService(
                 loader,
@@ -109,9 +111,10 @@ public class CoreAutoConfiguration {
                         prompts,
                         guard,
                         catalog,
-                        new com.agentos.core.turn.ToolExecutor(manager),
+                        new com.agentos.core.turn.ToolExecutor(manager, recorder, redactor),
                         redactor),
                 budgets,
-                runner);
+                runner,
+                turnProperties);
     }
 }

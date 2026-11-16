@@ -1,5 +1,6 @@
 package com.agentos.storage;
 
+import com.agentos.core.config.TurnProperties;
 import com.agentos.core.provider.LlmCallRecorder;
 import com.agentos.core.session.MessageStore;
 import com.agentos.core.session.SessionManager;
@@ -52,9 +53,10 @@ public class StorageAutoConfiguration {
             SessionRepository sessions,
             AgentTurnRepository turns,
             SessionMessageRepository messages,
-            org.springframework.jdbc.core.JdbcTemplate jdbc) {
+            org.springframework.jdbc.core.JdbcTemplate jdbc,
+            TurnProperties properties) {
         // 正式路径必须传入 JDBC，以数据库时钟协调跨实例租约。
-        return new JpaTurnStore(sessions, turns, messages, jdbc);
+        return new JpaTurnStore(sessions, turns, messages, jdbc, properties);
     }
 
     @Bean

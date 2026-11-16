@@ -1,5 +1,8 @@
 package com.agentos.core.turn;
 
+import com.agentos.core.audit.ToolInvocationRecord;
+import com.agentos.core.audit.ToolInvocationRecorder;
+import com.agentos.core.tool.Redactor;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -16,9 +19,29 @@ import org.springframework.ai.tool.ToolCallback;
  */
 public final class ToolExecutor {
     private final ToolCallingManager manager;
+    private final ToolInvocationRecorder recorder;
+    private final Redactor redactor;
 
     public ToolExecutor(ToolCallingManager manager) {
+        this(
+                manager,
+                new ToolInvocationRecorder() {
+                    public ToolInvocationRecord begin(ToolInvocationRecord record) {
+                        return record;
+                    }
+
+                    public void complete(ToolInvocationRecord record) {}
+
+                    public void skipped(ToolInvocationRecord record) {}
+                },
+                new Redactor(List::of));
+    }
+
+    public ToolExecutor(
+            ToolCallingManager manager, ToolInvocationRecorder recorder, Redactor redactor) {
         this.manager = Objects.requireNonNull(manager);
+        this.recorder = Objects.requireNonNull(recorder);
+        this.redactor = Objects.requireNonNull(redactor);
     }
 
     public Result execute(
@@ -44,6 +67,26 @@ public final class ToolExecutor {
                                         budget))
                         .build();
         var result = manager.executeToolCalls(new Prompt(history, options), response);
+        for (var call : ledger.pending()) {
+            ledger.checkpoint();
+            recorder.skipped(
+                    new ToolInvocationRecord(
+                            context.sessionId(),
+                            context.turnId(),
+                            context.iteration(),
+                            call.id(),
+                            call.name(),
+                            "builtin",
+                            redactor.redact(call.arguments()),
+                            null,
+                            null,
+                            false,
+                            "limit_skipped",
+                            "工具调用次数达到上限",
+                            true,
+                            0,
+                            0L));
+        }
         List<Message> complete = List.copyOf(result.conversationHistory());
         List<Message> added = List.copyOf(complete.subList(history.size(), complete.size()));
         return new Result(complete, added, result.returnDirect());
