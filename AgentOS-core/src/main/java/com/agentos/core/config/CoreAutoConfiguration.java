@@ -29,7 +29,9 @@ import org.springframework.context.annotation.Bean;
 @AutoConfiguration(
         afterName = {
             "com.agentos.storage.StorageAutoConfiguration",
-            "com.agentos.provider.config.ProviderAutoConfiguration"
+            "com.agentos.provider.config.ProviderAutoConfiguration",
+            "com.agentos.tool.ToolAutoConfiguration",
+            "org.springframework.ai.model.tool.autoconfigure.ToolCallingAutoConfiguration"
         })
 @EnableConfigurationProperties({
     WorkspaceProperties.class,
@@ -90,7 +92,10 @@ public class CoreAutoConfiguration {
             TurnGuard guard,
             TurnBudgetRegistry budgets,
             ProviderService provider,
-            TurnRunner runner) {
+            TurnRunner runner,
+            com.agentos.core.tool.ToolCatalog catalog,
+            org.springframework.ai.model.tool.ToolCallingManager manager,
+            com.agentos.core.tool.Redactor redactor) {
         // ReActLoop 是普通对象，生命周期由持有它的 AgentService 管理，不单独注册成 Bean。
         return new DefaultAgentService(
                 loader,
@@ -98,7 +103,14 @@ public class CoreAutoConfiguration {
                 providers,
                 sessions,
                 turns,
-                new ReActLoop(provider, messages, prompts, guard),
+                new ReActLoop(
+                        provider,
+                        messages,
+                        prompts,
+                        guard,
+                        catalog,
+                        new com.agentos.core.turn.ToolExecutor(manager),
+                        redactor),
                 budgets,
                 runner);
     }

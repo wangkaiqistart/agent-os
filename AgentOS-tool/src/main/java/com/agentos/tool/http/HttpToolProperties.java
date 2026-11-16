@@ -3,22 +3,23 @@ package com.agentos.tool.http;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * HTTP 工具的配置契约和值归一化，当前已有绑定测试，但生产装配和 HTTP 执行器尚未接入。
+ * HTTP 工具的配置和值归一化，由 ToolAutoConfiguration 装配到实际 HTTP 执行器。
  * ConfigurationProperties 注解声明前缀，不会单独把本 record 注册成 Bean。
  *
- * @param allowedDomains 允许域名列表，移除首尾空白与空项，缺省为空；实际域名校验尚待执行器实现
+ * @param allowedDomains 允许域名列表，移除首尾空白与空项，缺省为空；实际域名校验由 WhitelistSandbox 执行
  * @param userAgent 缺省 AgentOS/0.1
- * @param maxRedirects 缺省 3，当前传 0 也回退为 3，不能用 0 表示禁止重定向
+ * @param maxRedirects 绑定缺省 3，显式 0 禁止重定向
  * @param maxResponseBytes 缺省且最大为 1 MiB，0 视为缺省值
- * @param timeout 正数时长，缺省 30 秒；声明配置不代表 I/O 层已执行该超时
+ * @param timeout 正数时长，缺省 30 秒；实际连接、跳转和正文读取共用此上限
  */
 @ConfigurationProperties("agentos.tools.http")
 public record HttpToolProperties(
         List<String> allowedDomains,
         String userAgent,
-        int maxRedirects,
+        @DefaultValue("3") int maxRedirects,
         int maxResponseBytes,
         Duration timeout) {
     /** 紧凑构造器先归一化缺省值再校验；record 最终保存归一化后的不可变字段。 */
@@ -31,9 +32,6 @@ public record HttpToolProperties(
                                 .filter(s -> !s.isEmpty())
                                 .toList();
         userAgent = userAgent == null || userAgent.isBlank() ? "AgentOS/0.1" : userAgent;
-        if (maxRedirects == 0) {
-            maxRedirects = 3;
-        }
         if (maxResponseBytes == 0) {
             maxResponseBytes = 1_048_576;
         }

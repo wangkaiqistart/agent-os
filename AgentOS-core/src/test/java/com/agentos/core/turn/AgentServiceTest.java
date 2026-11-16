@@ -156,4 +156,41 @@ class AgentServiceTest {
         assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
         assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
     }
+
+    @Test
+    void unknownAgentToolFailsBeforeStartingTurnOrCallingModel() throws Exception {
+        var workspace = Files.createTempDirectory("agent-service-tools");
+        AgentFixtures.agent(workspace, "assistant");
+        var sessions = new InMemorySessionManager();
+        var turns = new InMemoryTurnStore(sessions);
+        var provider = mock(com.agentos.core.provider.ProviderService.class);
+        var catalog = mock(com.agentos.core.tool.ToolCatalog.class);
+        doThrow(new IllegalArgumentException("agents/assistant/AGENT.md 的 tools 包含未注册工具"))
+                .when(catalog)
+                .validate(org.mockito.ArgumentMatchers.any());
+        var loop =
+                new ReActLoop(
+                        provider,
+                        new InMemoryMessageStore(),
+                        new PromptBuilder(new ContextLoader(workspace)),
+                        new TurnGuard(turns),
+                        catalog,
+                        new ToolExecutor(
+                                mock(org.springframework.ai.model.tool.ToolCallingManager.class)));
+        var service =
+                new DefaultAgentService(
+                        new AgentLoader(workspace.resolve("agents")),
+                        new ContextLoader(workspace),
+                        mock(ProviderCatalog.class),
+                        sessions,
+                        turns,
+                        loop,
+                        new TurnBudgetRegistry());
+        assertThatThrownBy(() ->
+                        service.process(new ProcessRequest("cli", "u", "assistant", "hi", "cli")))
+                .hasMessageContaining("AGENT.md")
+                .hasMessageContaining("tools");
+        assertThat(sessions.findActive(new SessionKey("cli", "u", "assistant"))).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(provider);
+    }
 }

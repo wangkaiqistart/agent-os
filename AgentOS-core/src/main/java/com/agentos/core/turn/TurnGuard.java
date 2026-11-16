@@ -22,6 +22,9 @@ public final class TurnGuard {
         if (budget.expired() || budget.hardStopped()) {
             throw new TurnDeadlineExceededException();
         }
+        if (budget.cancelled() || Thread.currentThread().isInterrupted()) {
+            throw new LeaseLostException();
+        }
         if (!turnStore.renewLease(turn, budget)) {
             throw new LeaseLostException();
         }

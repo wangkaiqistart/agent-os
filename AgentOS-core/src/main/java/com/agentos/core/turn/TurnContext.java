@@ -6,9 +6,9 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 传给后续工具执行链的显式轮次上下文契约，不通过 ThreadLocal 传递业务身份。
+ * 传给 Provider 与工具执行链的显式轮次上下文契约，不通过 ThreadLocal 传递业务身份。
  *
- * <p>当前最小 ReActLoop 尚未把本对象接入工具执行；ProviderRequest 中目前只传入 turnId 字符串。
+ * <p>Provider 请求阶段只带本上下文；模型返回后，ToolExecutor 才另外放入账本和预算。
  *
  * @param sessionId 会话标识，关联多轮对话
  * @param turnId 当前用户消息对应的轮次标识

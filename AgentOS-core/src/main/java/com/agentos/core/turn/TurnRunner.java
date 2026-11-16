@@ -29,11 +29,13 @@ public final class TurnRunner {
                         Math.max(1, budget.remainingHardStopNanos()), TimeUnit.NANOSECONDS);
             } catch (java.util.concurrent.TimeoutException e) {
                 // cancel(true) 只是请求中断；Provider 的 HTTP 超时仍是停止外部 I/O 的重要约束。
+                budget.cancel();
                 future.cancel(true);
                 throw new TurnDeadlineExceededException();
             } catch (InterruptedException e) {
                 // InterruptedException 会清掉中断标志，恢复后让上层也能感知关闭或取消。
                 Thread.currentThread().interrupt();
+                budget.cancel();
                 future.cancel(true);
                 throw new TurnDeadlineExceededException();
             } catch (ExecutionException e) {
@@ -46,11 +48,6 @@ public final class TurnRunner {
         } finally {
             // 无论任务如何退出都回收执行器；等待有上限，避免不响应中断的任务拖住调用方。
             executor.shutdownNow();
-            try {
-                executor.awaitTermination(100, TimeUnit.MILLISECONDS);
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-            }
         }
     }
 }

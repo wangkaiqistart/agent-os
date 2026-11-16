@@ -1,6 +1,6 @@
 package com.agentos.core.audit;
 
-/** 工具审计生命周期端口，当前仅有契约；数据库实体存在不代表执行链已经使用它。 */
+/** 工具审计生命周期端口：治理层只在 begin 确认提交后执行真实工具。 */
 public interface ToolInvocationRecorder {
     /** 在产生工具副作用前登记执行意图，返回用于后续关联的记录。 */
     ToolInvocationRecord begin(ToolInvocationRecord record);

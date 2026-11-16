@@ -21,6 +21,12 @@ public interface TurnStore {
     FinishResult finishAndRelease(
             TurnSnapshot turn, String status, String text, String errorMessage);
 
+    /** 正常循环收口时同时保存实际迭代数；旧端口实现可继续沿用基础收尾行为。 */
+    default FinishResult finishAndRelease(
+            TurnSnapshot turn, String status, String text, String errorMessage, int iterations) {
+        return finishAndRelease(turn, status, text, errorMessage);
+    }
+
     /** 查询指定轮次的快照，不隐式创建记录。 */
     Optional<TurnSnapshot> find(UUID turnId);
 

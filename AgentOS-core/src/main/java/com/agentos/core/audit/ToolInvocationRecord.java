@@ -3,7 +3,7 @@ package com.agentos.core.audit;
 import java.util.UUID;
 
 /**
- * 工具调用审计的不可变载荷契约，当前尚未由正式工具执行链产生。
+ * 工具调用审计的不可变载荷，由治理层产生、存储层独立事务提交。
  *
  * <p>sessionId、turnId、iteration 关联会话与模型迭代；toolCallId 是模型给出的工具调用 ID，
  * 与 turnId、iteration 组合用于区分同一轮中的不同工具动作。

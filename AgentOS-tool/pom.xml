@@ -13,6 +13,11 @@
     <description>核心能力四：内置 Tool、GovernedToolCallback、ToolRegistry、MCP Client、Sandbox、通知适配器（三合一模块，不要拆）</description>
 
     <dependencies>
+        <!-- 直接使用 Jackson 3 解析/脱敏工具 JSON；沿用 Boot BOM 管理的既有版本。 -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.agentos</groupId>
             <artifactId>AgentOS-core</artifactId>

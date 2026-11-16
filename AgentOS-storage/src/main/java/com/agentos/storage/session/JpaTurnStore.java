@@ -113,6 +113,22 @@ public class JpaTurnStore implements TurnStore {
     @Transactional
     public FinishResult finishAndRelease(
             TurnSnapshot turn, String status, String text, String errorMessage) {
+        return finish(turn, status, text, errorMessage, null);
+    }
+
+    @Override
+    @Transactional
+    public FinishResult finishAndRelease(
+            TurnSnapshot turn, String status, String text, String errorMessage, int iterations) {
+        return finish(turn, status, text, errorMessage, iterations);
+    }
+
+    private FinishResult finish(
+            TurnSnapshot turn,
+            String status,
+            String text,
+            String errorMessage,
+            Integer iterations) {
         // 收尾独立于模型调用。当前是普通查询，没有使用 startTurn 那样的 FOR UPDATE 行锁。
         Instant now = databaseNow();
         AgentTurnEntity entity = turns.findById(turn.turnId()).orElse(null);
@@ -120,6 +136,10 @@ public class JpaTurnStore implements TurnStore {
         if (entity == null || session == null) {
             // 返回未确认，交上层区分“业务结果已得到”和“数据库终态已确认”。
             return new FinishResult(status, false, text, errorMessage);
+        }
+        // 来自循环结果，不靠文本或审计行数推测；与终态一起在本次短事务中保存。
+        if (iterations != null) {
+            entity.iteration(iterations);
         }
         entity.finish(status, text, errorMessage, now);
         turns.save(entity);

@@ -42,6 +42,12 @@ class ReActApplicationTest {
 
     private static Path workspace;
     private static LocalModelServer model;
+    private static com.sun.net.httpserver.HttpServer weather;
+    private static java.util.concurrent.ExecutorService weatherExecutor;
+    private static final java.util.concurrent.atomic.AtomicInteger weatherCalls =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private static final java.util.concurrent.atomic.AtomicReference<Runnable> beforeHttp =
+            new java.util.concurrent.atomic.AtomicReference<>(() -> {});
 
     @BeforeAll
     static void prepareWorkspace() throws Exception {
@@ -51,11 +57,41 @@ class ReActApplicationTest {
         Files.writeString(
                 agent.resolve("AGENT.md"),
                 "---\nname: answer\nprovider:\n  model: test-model\n---\nAnswer briefly.\n");
+        Path toolAgent = workspace.resolve("agents/weather");
+        Files.createDirectories(toolAgent);
+        Files.writeString(
+                toolAgent.resolve("AGENT.md"),
+                "---\nname: weather\nprovider:\n  model: test-model\ntools: [http_get]\n---\n查询天气。\n");
         model = LocalModelServer.start();
+        weather =
+                com.sun.net.httpserver.HttpServer.create(
+                        new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        weatherExecutor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
+        weather.setExecutor(weatherExecutor);
+        weather.createContext(
+                "/weather",
+                exchange -> {
+                    try (exchange) {
+                        weatherCalls.incrementAndGet();
+                        beforeHttp.get().run();
+                        byte[] body =
+                                "{\"weather\":\"晴\",\"token\":\"RESPONSE_SECRET\",\"note\":\"local-test-key\"}"
+                                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        exchange.sendResponseHeaders(200, body.length);
+                        exchange.getResponseBody().write(body);
+                    }
+                });
+        weather.start();
     }
 
     @AfterAll
     static void stopModel() {
+        if (weather != null) {
+            weather.stop(0);
+        }
+        if (weatherExecutor != null) {
+            weatherExecutor.shutdownNow();
+        }
         if (model != null) {
             model.close();
         }
@@ -72,11 +108,13 @@ class ReActApplicationTest {
         registry.add("agentos.providers.primary.base-url", () -> model.baseUrl() + "/v1");
         registry.add("agentos.providers.primary.api-key", () -> "local-test-key");
         registry.add("agentos.embedding.enabled", () -> false);
+        registry.add("agentos.tools.http.allowed-domains", () -> "127.0.0.1");
     }
 
     @Test
     void plainTextChatPersistsSessionTurnMessagesAndOneModelCall(
             org.springframework.context.ApplicationContext context) {
+        model.reset();
         AgentService service = context.getBean(AgentService.class);
         var result =
                 service.process(new ProcessRequest("cli", "boot-user", "answer", "hello", "cli"));
@@ -92,14 +130,133 @@ class ReActApplicationTest {
                 .isEmpty();
 
         JdbcTemplate jdbc = new JdbcTemplate(context.getBean(DataSource.class));
-        assertThat(jdbc.queryForObject("select count(*) from sessions", Integer.class))
-                .isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from agent_turns", Integer.class))
-                .isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from session_messages", Integer.class))
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from session_messages where turn_id=?",
+                                Integer.class,
+                                result.turnId()))
                 .isEqualTo(2);
-        assertThat(jdbc.queryForObject("select count(*) from llm_calls", Integer.class))
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from llm_calls where turn_id=?",
+                                Integer.class,
+                                result.turnId()))
                 .isEqualTo(1);
-        assertThat(jdbc.queryForMap("select * from llm_calls")).doesNotContainKey("prompt");
+        assertThat(jdbc.queryForMap("select * from llm_calls where turn_id=?", result.turnId()))
+                .doesNotContainKey("prompt");
+    }
+
+    @Test
+    @org.junit.jupiter.api.extension.ExtendWith(
+            org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void toolRoundUsesTwoModelsOneHttpFourMessagesAndRedactedAudit(
+            org.springframework.context.ApplicationContext context,
+            org.springframework.boot.test.system.CapturedOutput output) {
+        var jdbc = new JdbcTemplate(context.getBean(DataSource.class));
+        String id = "weather-call";
+        model.reset(
+                LocalModelServer.toolResponse(
+                        id,
+                        "http://127.0.0.1:"
+                                + weather.getAddress().getPort()
+                                + "/weather?token=URL_SECRET"),
+                LocalModelServer.textResponse("北京天气晴，建议穿薄外套。"));
+        weatherCalls.set(0);
+        beforeHttp.set(() ->
+                assertThat(
+                                jdbc.queryForObject(
+                                        "select count(*) from tool_invocations where tool_call_id=? and status='in_progress' and attempts=0",
+                                        Integer.class,
+                                        id))
+                        .isOne());
+        var result =
+                context.getBean(AgentService.class)
+                        .process(
+                                new ProcessRequest(
+                                        "test", "weather-user", "weather", "天气怎样", "test"));
+        beforeHttp.set(() -> {});
+        assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
+        assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
+        assertThat(result.iterations()).isEqualTo(2);
+        assertThat(result.text()).contains("薄外套");
+        assertThat(
+                        jdbc.queryForObject(
+                                "select iterations from agent_turns where turn_id=?",
+                                Integer.class,
+                                result.turnId()))
+                .isEqualTo(2);
+        assertThat(model.calls()).isEqualTo(2);
+        assertThat(weatherCalls).hasValue(1);
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from session_messages where turn_id=?",
+                                Integer.class,
+                                result.turnId()))
+                .isEqualTo(4);
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from llm_calls where turn_id=?",
+                                Integer.class,
+                                result.turnId()))
+                .isEqualTo(2);
+        var messages =
+                jdbc.queryForList(
+                        "select type,tool_calls::text as calls,tool_responses::text as responses from session_messages where turn_id=? order by id",
+                        result.turnId());
+        assertThat(messages)
+                .extracting(r -> r.get("type"))
+                .containsExactly("USER", "ASSISTANT", "TOOL", "ASSISTANT");
+        assertThat(messages.get(1).get("calls").toString()).contains(id);
+        assertThat(messages.get(2).get("responses").toString())
+                .contains(id)
+                .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
+        var audit =
+                jdbc.queryForMap("select * from tool_invocations where turn_id=?", result.turnId());
+        assertThat(audit)
+                .containsEntry("status", "success")
+                .containsEntry("tool_call_id", id)
+                .containsEntry("iteration", 1)
+                .containsEntry("tool_source", "builtin");
+        assertThat(audit.toString())
+                .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
+        assertThat(model.requests().get(1))
+                .contains(id, "晴")
+                .doesNotContain("RESPONSE_SECRET", "local-test-key");
+        assertThat(output.getAll())
+                .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
+    }
+
+    @Test
+    void sandboxDenialIsAuditedAndExplainedToSecondModelWithoutHttp(
+            org.springframework.context.ApplicationContext context) {
+        int before = weatherCalls.get();
+        model.reset(
+                LocalModelServer.toolResponse(
+                        "denied-call",
+                        "http://localhost:"
+                                + weather.getAddress().getPort()
+                                + "/weather?token=DENIED_SECRET"));
+        var result =
+                context.getBean(AgentService.class)
+                        .process(
+                                new ProcessRequest(
+                                        "test", "denied-user", "weather", "查天气", "test"));
+        assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
+        assertThat(model.calls()).isEqualTo(2);
+        assertThat(weatherCalls).hasValue(before);
+        var second =
+                tools.jackson.databind.json.JsonMapper.builder()
+                        .build()
+                        .readTree(model.requests().get(1));
+        assertThat(second.get("messages").get(3).get("content").asText())
+                .contains("沙箱拒绝")
+                .doesNotContain("DENIED_SECRET");
+        var jdbc = new JdbcTemplate(context.getBean(DataSource.class));
+        assertThat(
+                        jdbc.queryForObject(
+                                "select status from tool_invocations where turn_id=?",
+                                String.class,
+                                result.turnId()))
+                .isEqualTo("sandbox_denied");
     }
 }

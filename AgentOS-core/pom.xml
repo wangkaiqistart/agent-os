@@ -13,6 +13,11 @@
     <description>核心抽象与引擎：TurnContext、ReActLoop、PromptBuilder、ToolExecutor、AgentService、AgentScheduler</description>
 
     <dependencies>
+        <!-- 直接使用 Jackson 3 解析/脱敏工具 JSON；沿用 Boot BOM 管理的既有版本。 -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <!-- ChatModel、ToolCallback、ToolCallingManager、Message 等抽象 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>

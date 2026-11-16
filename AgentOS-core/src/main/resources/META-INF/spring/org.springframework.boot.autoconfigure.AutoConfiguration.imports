@@ -1,1 +1,2 @@
 com.agentos.core.config.CoreAutoConfiguration
+com.agentos.core.config.RedactionAutoConfiguration

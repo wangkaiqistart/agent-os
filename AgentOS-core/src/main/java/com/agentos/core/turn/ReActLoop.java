@@ -1,81 +1,201 @@
 package com.agentos.core.turn;
 
+import com.agentos.core.agent.AgentProfile;
 import com.agentos.core.agent.LoadedAgent;
 import com.agentos.core.provider.CallCorrelation;
 import com.agentos.core.provider.ProviderRequest;
-import com.agentos.core.provider.ProviderResult;
 import com.agentos.core.provider.ProviderService;
 import com.agentos.core.session.MessageStore;
 import com.agentos.core.session.TurnSnapshot;
+import com.agentos.core.tool.Redactor;
+import com.agentos.core.tool.ToolCatalog;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
+import org.slf4j.MDC;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 
 /**
- * 当前 US1 的最小执行内核：拼 Prompt、检查预算与租约、调用一次模型、保存助手消息。
- *
- * <p>由 CoreAutoConfiguration 创建并传给 AgentService，本类自身没有单独注册为 Bean。
- * 这里只依赖 ProviderService、MessageStore 等端口，不知道模型服务地址或 JPA 细节。
- *
- * <p>名称保留 ReActLoop，是后续多次“模型思考 → 工具动作 → 观察结果”的扩展位置；
- * 当前没有工具执行与多次迭代，返回工具调用时明确失败，不能把它理解为完整 ReAct 已实现。
+ * 模型思考 → 官方 Manager 执行工具 → 完整结果回填的单轮循环。
+ * 只依赖 core 端口，模型、工具实现和数据库均由装配层注入；跨用户消息的历史恢复仍属后续阶段。
  */
 public final class ReActLoop {
     private final ProviderService provider;
     private final MessageStore messages;
     private final PromptBuilder promptBuilder;
     private final TurnGuard guard;
+    private final ToolCatalog catalog;
+    private final ToolExecutor executor;
+    private final Redactor redactor;
 
     public ReActLoop(
             ProviderService provider,
             MessageStore messages,
-            PromptBuilder promptBuilder,
+            PromptBuilder prompts,
             TurnGuard guard) {
-        this.provider = Objects.requireNonNull(provider);
-        this.messages = Objects.requireNonNull(messages);
-        this.promptBuilder = Objects.requireNonNull(promptBuilder);
-        this.guard = Objects.requireNonNull(guard);
+        this(
+                provider,
+                messages,
+                prompts,
+                guard,
+                new ToolCatalog() {
+                    public void validate(AgentProfile p) {
+                        if (!p.tools().isEmpty()) {
+                            throw new IllegalArgumentException("工具目录未装配");
+                        }
+                    }
+
+                    public List<org.springframework.ai.tool.ToolCallback> callbacks(
+                            AgentProfile p) {
+                        return List.of();
+                    }
+                },
+                null,
+                new Redactor(List::of));
     }
 
-    /** 运行一个轮次；成功时助手消息已追加，但轮次终态和租约仍由 AgentService 收尾。 */
+    public ReActLoop(
+            ProviderService provider,
+            MessageStore messages,
+            PromptBuilder prompts,
+            TurnGuard guard,
+            ToolCatalog catalog,
+            ToolExecutor executor) {
+        this(provider, messages, prompts, guard, catalog, executor, new Redactor(List::of));
+    }
+
+    public ReActLoop(
+            ProviderService provider,
+            MessageStore messages,
+            PromptBuilder prompts,
+            TurnGuard guard,
+            ToolCatalog catalog,
+            ToolExecutor executor,
+            Redactor redactor) {
+        this.provider = Objects.requireNonNull(provider);
+        this.messages = Objects.requireNonNull(messages);
+        this.promptBuilder = Objects.requireNonNull(prompts);
+        this.guard = Objects.requireNonNull(guard);
+        this.catalog = Objects.requireNonNull(catalog);
+        this.executor = executor;
+        this.redactor = redactor;
+    }
+
+    /** 在 startTurn 之前校验名单，未知工具不会占用会话，更不会触发模型请求。 */
+    public void validate(AgentProfile profile) {
+        catalog.validate(profile);
+    }
+
     public Result run(
             TurnSnapshot turn,
             LoadedAgent agent,
             String userMessage,
             TurnExecutionBudget budget,
             TurnSink sink) {
-        // 当前传空历史，数据库已有的前轮消息不会自动进入本次模型上下文。
-        List<Message> prompt = promptBuilder.build(agent, List.of(), userMessage);
-        // 在外呼前确认还能继续执行；续租本身是短事务，不包住下面的 HTTP 等待。
-        guard.checkpoint(turn, budget);
-        var request =
-                new ProviderRequest(
-                        agent.profile().providerProfile(),
-                        prompt,
-                        List.of(), // 当前不向模型暴露工具定义。
-                        Map.of("turnContext", turn.turnId().toString()),
-                        budget.deadline(),
-                        new CallCorrelation(turn.sessionId(), turn.turnId(), 1));
-        // 同步与流式共用请求、审计关联和预算；流式只增加 onDelta 过程输出。
-        ProviderResult result =
-                sink.streaming() ? provider.stream(request, sink::onDelta) : provider.call(request);
-        // 模型已返回也不代表可以写答案：等待期间可能超时或失去租约，需要再次检查。
-        guard.checkpoint(turn, budget);
-        var generation = result.response().getResults().getFirst();
-        String text = generation.getOutput().getText();
-        if (!generation.getOutput().getToolCalls().isEmpty()) {
-            return new Result(TurnStatus.FAILED, "当前版本暂不支持工具调用", 1);
-        }
-        if (text == null || text.isBlank()) {
-            return new Result(TurnStatus.FAILED, "模型返回了空回答", 1);
-        }
-        // USER 已在 startTurn 写入；这里只补 ASSISTANT。iteration=1 是本轮第一次模型调用。
-        messages.append(turn, 1, List.of(new AssistantMessage(text)));
-        return new Result(TurnStatus.SUCCEEDED, text, 1);
+        return run(turn, agent, userMessage, budget, sink, turn.sessionKey().channel());
     }
 
-    /** 循环层结果，不含持久化确认；AgentService 收尾后才形成对外的 TurnResult。 */
+    /** 入口触发来源显式传递，不从 MDC 或线程状态推断。 */
+    public Result run(
+            TurnSnapshot turn,
+            LoadedAgent agent,
+            String userMessage,
+            TurnExecutionBudget budget,
+            TurnSink sink,
+            String trigger) {
+        List<Message> history = promptBuilder.build(agent, List.of(), userMessage);
+        var callbacks = catalog.callbacks(agent.profile());
+        MDC.put("sessionId", turn.sessionId().toString());
+        MDC.put("turnId", turn.turnId().toString());
+        MDC.put("agent", agent.profile().name());
+        try {
+            for (int iteration = 1; ; iteration++) {
+                MDC.put("iteration", Integer.toString(iteration));
+                guard.checkpoint(turn, budget);
+                var context =
+                        new TurnContext(
+                                turn.sessionId(),
+                                turn.turnId(),
+                                agent,
+                                trigger,
+                                iteration,
+                                budget.deadline());
+                var request =
+                        new ProviderRequest(
+                                agent.profile().providerProfile(),
+                                history,
+                                callbacks,
+                                Map.of(ToolContextKeys.TURN_CONTEXT, context),
+                                budget.deadline(),
+                                new CallCorrelation(turn.sessionId(), turn.turnId(), iteration));
+                var response =
+                        (sink.streaming()
+                                        ? provider.stream(request, sink::onDelta)
+                                        : provider.call(request))
+                                .response();
+                guard.checkpoint(turn, budget);
+                var generation = response.getResult();
+                if (generation == null) {
+                    return new Result(TurnStatus.FAILED, "模型返回了空回答", iteration);
+                }
+                var output = generation.getOutput();
+                if (output.getToolCalls().isEmpty()) {
+                    String text = output.getText();
+                    if (text == null || text.isBlank()) {
+                        return new Result(TurnStatus.FAILED, "模型返回了空回答", iteration);
+                    }
+                    messages.append(turn, iteration, List.of(new AssistantMessage(text)));
+                    return new Result(TurnStatus.SUCCEEDED, text, iteration);
+                }
+                ToolCallLedger.validate(output.getToolCalls());
+                for (var call : output.getToolCalls()) {
+                    guard.checkpoint(turn, budget);
+                    sink.onToolCall(call.id(), call.name(), redactor.redact(call.arguments()));
+                }
+                if (executor == null) {
+                    throw new IllegalStateException("工具执行器未装配");
+                }
+                // 不捕获致命异常；Manager 未正常返回时，这一批消息绝不落库。
+                var executed =
+                        executor.execute(
+                                history,
+                                response,
+                                callbacks,
+                                context,
+                                budget,
+                                () -> guard.checkpoint(turn, budget));
+                for (var added : executed.added()) {
+                    if (added instanceof ToolResponseMessage toolMessage) {
+                        for (var result : toolMessage.getResponses()) {
+                            guard.checkpoint(turn, budget);
+                            sink.onToolResult(
+                                    result.id(),
+                                    result.name(),
+                                    redactor.redact(result.responseData()));
+                        }
+                    }
+                }
+                guard.checkpoint(turn, budget);
+                messages.append(turn, iteration, executed.added());
+                history = executed.history();
+                if (executed.returnDirect()) {
+                    String text =
+                            executed.added().stream()
+                                    .filter(ToolResponseMessage.class::isInstance)
+                                    .map(ToolResponseMessage.class::cast)
+                                    .flatMap(m -> m.getResponses().stream())
+                                    .map(ToolResponseMessage.ToolResponse::responseData)
+                                    .collect(Collectors.joining("\n"));
+                    return new Result(TurnStatus.SUCCEEDED, text, iteration);
+                }
+            }
+        } finally {
+            MDC.clear();
+        }
+    }
+
     public record Result(TurnStatus status, String text, int iterations) {}
 }

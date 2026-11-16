@@ -68,4 +68,14 @@ public class StorageAutoConfiguration {
         // 自定义 Recorder 已存在时退让；这里的条件不意味着发生数据库错误时会回退到日志。
         return new JpaLlmCallRecorder(repository);
     }
+
+    @Bean
+    @ConditionalOnMissingBean(com.agentos.core.audit.ToolInvocationRecorder.class)
+    com.agentos.core.audit.ToolInvocationRecorder toolInvocationRecorder(
+            com.agentos.storage.session.ToolInvocationRepository repository,
+            com.agentos.core.tool.Redactor redactor,
+            org.springframework.transaction.PlatformTransactionManager manager) {
+        return new com.agentos.storage.audit.JpaToolInvocationRecorder(
+                repository, redactor, manager);
+    }
 }

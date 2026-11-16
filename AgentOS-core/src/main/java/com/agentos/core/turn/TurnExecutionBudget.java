@@ -15,6 +15,17 @@ public final class TurnExecutionBudget {
     private final long deadlineNanos;
     private final long hardStopNanos;
     private final Instant deadline;
+    private final java.util.concurrent.atomic.AtomicBoolean cancelled =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** 取消只阻止后续业务动作，不重置 deadline，也不抢占已有数据库事务。 */
+    public void cancel() {
+        cancelled.set(true);
+    }
+
+    public boolean cancelled() {
+        return cancelled.get();
+    }
 
     private TurnExecutionBudget(long deadlineNanos, long hardStopNanos, Instant deadline) {
         this.deadlineNanos = deadlineNanos;

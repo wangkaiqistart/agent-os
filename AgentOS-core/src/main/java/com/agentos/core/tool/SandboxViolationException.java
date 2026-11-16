@@ -1,6 +1,6 @@
 package com.agentos.core.tool;
 
-/** 沙箱拒绝动作的业务信号；后续工具错误适配可据此反馈模型，当前尚未接入该流程。 */
+/** 沙箱拒绝动作的业务信号；治理层记录 sandbox_denied 并把安全原因反馈模型。 */
 public class SandboxViolationException extends RuntimeException {
     private static final long serialVersionUID = 1L;
 

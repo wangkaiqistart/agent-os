@@ -23,7 +23,7 @@ import org.slf4j.MDC;
  * 因而这里不处理终端、Servlet 或 SSE 细节；这些差异通过 ProcessRequest 和 TurnSink 适配。
  *
  * <p>本类不加整方法事务：模型调用可能等待很久，事务只在注入的存储端口内短暂开启。
- * 当前循环只有一次无工具模型调用，历史恢复、工具执行和新会话语义尚未接入。
+ * 当前已支持工具循环；跨轮历史恢复和新会话语义仍待后续阶段接入。
  */
 public final class DefaultAgentService implements AgentService {
     private static final Logger log = LoggerFactory.getLogger(DefaultAgentService.class);
@@ -90,9 +90,11 @@ public final class DefaultAgentService implements AgentService {
         // PromptBuilder 组装消息时还会读取一次 Bootstrap，所以缺文件时可能看到两组警告。
         LoadedAgent agent = contextLoader.load(loader.load(request.agentName()));
         providers.validate(agent.profile().providerProfile());
+        loop.validate(agent.profile());
         UUID turnId = UUID.randomUUID();
         TurnExecutionBudget budget =
                 TurnExecutionBudget.start(agent.profile().settings().turnTimeout());
+        var managedSink = new ManagedTurnSink(sink, budget);
         // 2. 一个短事务内确保 session 存在、取得租约、写 turn 和 USER 消息。
         // channel + userId + Agent 名称区分活跃会话；同会话已有有效租约时这里会拒绝请求。
         TurnSnapshot turn =
@@ -113,14 +115,23 @@ public final class DefaultAgentService implements AgentService {
             // budget、turn、agent 都通过参数传过去，当前线程的事务与 MDC 不会自动跟过去。
             ReActLoop.Result outcome =
                     runner.run(
-                            () -> loop.run(turn, agent, request.message(), budget, sink), budget);
+                            () ->
+                                    loop.run(
+                                            turn,
+                                            agent,
+                                            request.message(),
+                                            budget,
+                                            managedSink,
+                                            request.trigger()),
+                            budget);
             // 4. 先完成持久化收尾，再生成给用户的结果。业务状态和持久化确认分开表达。
             TurnStore.FinishResult finish =
                     turns.finishAndRelease(
                             turn,
                             outcome.status().name(),
                             outcome.text(),
-                            outcome.status() == TurnStatus.SUCCEEDED ? null : outcome.text());
+                            outcome.status() == TurnStatus.SUCCEEDED ? null : outcome.text(),
+                            outcome.iterations());
             result =
                     new TurnResult(
                             turnId,
@@ -144,6 +155,35 @@ public final class DefaultAgentService implements AgentService {
                             finish.persistenceConfirmed()
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
+        } catch (LeaseLostException e) {
+            TurnStore.FinishResult finish =
+                    turns.finishAndRelease(
+                            turn, TurnStatus.INTERRUPTED.name(), "本轮处理已中断", "会话租约或输出端已失效");
+            result =
+                    new TurnResult(
+                            turnId,
+                            TurnStatus.INTERRUPTED,
+                            "本轮处理已中断",
+                            0,
+                            finish.persistenceConfirmed()
+                                    ? PersistenceStatus.CONFIRMED
+                                    : PersistenceStatus.UNCONFIRMED);
+        } catch (com.agentos.core.audit.AuditWriteException e) {
+            log.error("轮次 {} 审计写入未确认，操作可能已经执行", turnId);
+            // 不把审计异常当作普通工具失败，更不能宣称副作用未发生。
+            try {
+                turns.finishAndRelease(
+                        turn, TurnStatus.FAILED.name(), "审计写入未确认，操作可能已经执行", "工具审计写入未确认");
+            } catch (RuntimeException ignored) {
+                log.warn("审计失败后的轮次收尾未确认");
+            }
+            result =
+                    new TurnResult(
+                            turnId,
+                            TurnStatus.FAILED,
+                            "审计写入未确认，操作可能已经执行",
+                            0,
+                            PersistenceStatus.UNCONFIRMED);
         } catch (RuntimeException e) {
             // 给用户固定失败文案；存储摘要做有限脱敏，不向输出端返回原始内部异常。
             TurnStore.FinishResult finish =
@@ -159,32 +199,20 @@ public final class DefaultAgentService implements AgentService {
                                     : PersistenceStatus.UNCONFIRMED);
         } finally {
             // 无论循环成功、失败或收尾抛错，都解除进程内预算引用和当前线程的日志标记。
+            budget.cancel();
             budgets.remove(turnId);
             MDC.remove("sessionId");
             MDC.remove("turnId");
             MDC.remove("agent");
             MDC.remove("iteration");
         }
-        try {
-            // 5. 回调是结果投递，不是事务的一部分。客户端断开不会撤销已经确认的业务结果。
-            if (result.status() == TurnStatus.SUCCEEDED) {
-                sink.onComplete(result);
-            } else {
-                sink.onError(result);
-            }
-        } catch (RuntimeException callbackError) {
-            log.warn("终结通知失败：{}", callbackError.getClass().getSimpleName());
-        }
+        // 已确认的业务结果不可被终结通知撤销，通知等待也共享 hard stop。
+        managedSink.finish(result);
         return result;
     }
 
-    /** 仅遮蔽常见 key=value 形式；调用方仍不应把含凭证的原始响应塞入异常消息。 */
+    /** 未分类内部异常仅记录安全类型，不保存可能含凭证的原始详情。 */
     private static String safeMessage(Throwable error) {
-        return error.getMessage() == null
-                ? "内部错误"
-                : error.getMessage()
-                        .replaceAll(
-                                "(?i)(key|token|secret|password)\\s*[=:]\\s*[^\\s]+",
-                                "$1=[REDACTED]");
+        return "内部处理失败：" + error.getClass().getSimpleName();
     }
 }

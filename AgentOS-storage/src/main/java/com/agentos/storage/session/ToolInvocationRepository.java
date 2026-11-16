@@ -5,7 +5,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-/** 工具审计表的存储基础；当前无工具执行主链路调用它，不代表工具能力已接通。 */
+/** 工具审计仓库；由记录器按模型调用 ID 定位同行，不依赖参数或结果文本猜测。 */
 public interface ToolInvocationRepository extends JpaRepository<ToolInvocationEntity, Long> {
     /** 同一轮、同一迭代、同一 toolCallId 定位一次逻辑调用，与迁移中的唯一约束一致。 */
     Optional<ToolInvocationEntity> findByTurnIdAndIterationAndToolCallId(

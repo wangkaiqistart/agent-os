@@ -12,9 +12,9 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 /**
- * tool_invocations 表映射，为后续工具执行审计与迁移契约测试准备。
+ * tool_invocations 表映射，由 JpaToolInvocationRecorder 保存工具意图与终态。
  *
- * <p>当前最小对话链路尚未执行工具，存在此实体不等于工具治理已经接通。
+ * <p>begin 先提交 in_progress，真实执行之后只更新原行，外呼不处于数据库事务中。
  * 一次逻辑调用以 turnId + iteration + toolCallId 唯一标识，约束定义在 Flyway 中。
  */
 @Entity
@@ -45,7 +45,7 @@ public class ToolInvocationEntity {
     @Column(nullable = false)
     private String status;
 
-    // JSONB 只解决结构化保存，不会自动脱敏；未来调用方必须先处理敏感参数。
+    // JSONB 只解决结构化保存，不自动脱敏；记录器在写入前统一处理敏感参数。
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "input_json", columnDefinition = "jsonb")
     private Object inputJson;
