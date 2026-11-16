@@ -1,0 +1,13 @@
+.git/
+**/target/
+**/node_modules/
+**/dist/
+**/coverage/
+Dockerfile*
+.dockerignore
+**/*.log*
+.env*
+**/.env*
+.AgentOS/
+.idea/
+.DS_Store

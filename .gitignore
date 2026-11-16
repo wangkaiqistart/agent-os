@@ -18,3 +18,4 @@ __pycache__/
 # AgentOS 运行日志
 .AgentOS/logs/
 **/.AgentOS/logs/
+/.AgentOS/
