@@ -36,7 +36,7 @@ erDiagram
 | `agent_turns` | `AgentTurnEntity` | 一次用户请求的状态、deadline、最终文本 |
 | `session_messages` | `SessionMessageEntity` | USER/ASSISTANT/TOOL 消息和 JSON 字段 |
 | `llm_calls` | `LlmCallEntity` | 每次 Provider 尝试的完整结构化审计 |
-| `tool_invocations` | `ToolInvocationEntity` | 后续工具账本预留表，当前最小链路不执行工具 |
+| `tool_invocations` | `ToolInvocationEntity` | Phase 4 工具意图、终态与脱敏输入/结果 |
 
 Core 只接收快照和消息值对象，不暴露 JPA 实体或懒加载关系。
 
@@ -64,13 +64,13 @@ Core 只接收快照和消息值对象，不暴露 JPA 实体或懒加载关系�
 
 ### 收尾和回收
 
-`finishAndRelease` 写入轮次终态，然后仅在 owner 匹配时清空 session lease。`reapInterrupted` 扫描 RUNNING 轮次，对租约无效或 owner 不一致的轮次写入 `INTERRUPTED`。
+`finishAndRelease` 的带 iterations 重载把正常循环次数与轮次终态一起保存，保留原四参数契约；然后仅在 owner 匹配时清空 session lease。`reapInterrupted` 扫描 RUNNING 轮次，对租约无效或 owner 不一致的轮次写入 `INTERRUPTED`。
 
 ## `JpaMessageStore`：只追加和快照读取
 
 入口：[JpaMessageStore.java](../../AgentOS-storage/src/main/java/com/agentos/storage/session/JpaMessageStore.java)
 
-消息按 iteration 追加，不更新历史行。读取时按 session 消息 ID 排序，重新组装成 `HistoryTurn`；当前最小实现按 turn 分组并返回 USER/ASSISTANT 消息，系统提示词从不写入消息表。
+消息按 iteration 追加，不更新历史行。Phase 4 把 ASSISTANT 的 toolCalls、TOOL 的 responses 分别写入 JSONB；本轮后续模型使用 Manager 的内存完整历史，不依赖数据库重新读取。读取时按 session 消息 ID 排序，重新组装成 `HistoryTurn`；当前最小实现按 turn 分组并返回 USER/ASSISTANT 消息，系统提示词从不写入消息表。
 
 ## `JpaLlmCallRecorder`：模型审计
 
@@ -80,6 +80,14 @@ record 入口先校验 `sessionId`、`turnId` 和 `iteration`，然后把 `LlmCa
 
 审计表保留 `null` 和 `0` 的区别：没有返回 token 是 `null`，服务端明确返回 0 才是 0；`attempt`、`image_count`、`output_cap_honored`、失败类型和 HTTP 状态均按 data-model 映射。当前实现只生成稳定写入键，写入失败直接抛 `AuditWriteException`，审计重试属于后续阶段。
 
+## `JpaToolInvocationRecorder`：先确认意图，再允许执行
+
+`begin`、`complete`、`skipped` 分别通过 `TransactionTemplate` 使用 REQUIRES_NEW 短事务。模板覆盖提交过程，因此 flush 和提交失败都转换成固定安全 `AuditWriteException`，不把可能含参数的数据库异常 cause 带回模型。外部 HTTP 执行发生在 begin 提交之后、complete 开始之前，不占用事务连接。
+
+唯一键 `(turn_id, iteration, tool_call_id)` 定位同一行。begin 是 `in_progress`、attempts=0、结果/耗时为 null、truncated=false；complete 只允许更新已有行。重复确认必须身份、脱敏输入和终态载荷一致，冲突会安全失败，不覆盖旧记录。
+
+参数先脱敏再解析：合法 JSON 保持嵌套结构；非法 JSON 作为 JSON 字符串保存，不截断参数。结果和错误在存储边界再次脱敏。记录器不会重试外部工具；审计退避、有界 DB I/O、提交不确定性查证和恢复清理仍由 Phase 7 完成。
+
 ## 测试怎么读
 
 | 测试 | 关注点 |
@@ -88,6 +96,7 @@ record 入口先校验 `sessionId`、`turnId` 和 `iteration`，然后把 `LlmCa
 | `PostgresConnectivityTest` | Testcontainers PostgreSQL 真实连通 |
 | `MigrationTest` | Flyway V1 在空库建表 |
 | `JsonbMappingTest` | JSONB 编解码边界 |
+| `JpaToolInvocationRecorderTest` | 同行状态转换、重复 ID、null/false/0、非法 JSON、安全输入与冲突拒绝 |
 | `JpaStorageContractTest` | 落库、快照、审计字段、关联校验、数据库时钟和真实行锁竞争 |
 
 运行入口：

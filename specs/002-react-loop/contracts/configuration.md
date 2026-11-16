@@ -2,6 +2,8 @@
 
 各模块使用配置属性；正式入口配置在 `AgentOS-boot/src/main/resources/application.yaml`，密钥仍只由已有环境变量注入。
 
+**Phase 4 实施状态**：HTTP GET、白名单、治理回调、安全拒绝 resolver 和输出通知边界已实现；证据见 quickstart 第 10 节。下文审计退避、有界数据库 I/O 和恢复语义仍是 Phase 7 及后续目标，不能因配置示例存在就认为全部完成。
+
 **2026-11-16 增量说明**：初始化模型输入与 CLI 工作区契约已按 Phase 10 实施并实测通过，证据见 quickstart 第 9.5 节；此结论不涵盖其他未完成阶段的时间预算、工具或会话归档设计。
 
 ```yaml
@@ -17,13 +19,14 @@ agentos:
     retry-backoff: [200ms, 500ms]
     attempt-timeout: 250ms           # 每次审计数据库操作上限，还须取剩余预算的较小值
   tools:
-    default-timeout: 30s
-    default-max-result-chars: 10000
+    default-timeout: 30s             # 规划项：当前内置 ToolPolicy 固定为 30s，尚非绑定的全局开关
+    default-max-result-chars: 10000   # 规划项：当前内置 ToolPolicy 固定为 10000，尚非绑定的全局开关
     http:
       allowed-domains: []
       user-agent: AgentOS/0.1
-      max-redirects: 3
-      max-body-bytes: 1048576
+      max-redirects: 3               # 未配置为 3，显式 0 禁止跳转
+      max-response-bytes: 1048576    # 沿用已有 HttpToolProperties 实际键名，最多 1 MiB
+      timeout: 30s                   # 连接、跳转、body 共用；还受工具策略和整轮预算压短
 spring:
   ai:
     tools:
@@ -68,8 +71,9 @@ spring:
 | audit.retry-backoff | 必须有write-retries个正Duration，默认200/500ms；总和不能替代预算判断 |
 | audit.attempt-timeout | 正数且不大于250ms |
 | HTTP max-redirects | 0到3；超过3拒绝 |
-| max-body-bytes、default-max-result-chars | 正整数 |
-| allowed-domains | 不允许空条目、协议、端口、路径；支持精确域名与通配子域 |
+| HTTP max-response-bytes | 1～1048576 字节；0 归一化为缺省值 1048576 |
+| default-max-result-chars | 规划中的全局策略配置；当前内置策略固定 10000，非已绑定开关 |
+| allowed-domains | 绑定时去空格/空项，得到空列表即全部拒绝；有效条目不允许协议、端口、路径，支持精确域名与通配子域 |
 | Agent max_iterations / turn_timeout | max_iterations整数≥1；turn_timeout正Duration |
 | Agent max_history_turns / max_history_tokens | 整数≥0；任一为0表示不带历史；正token预算按90%使用 |
 | AGENTOS_DB_URL缺失/不可达 | chat在模型请求前安全报错，包含变量名但不包含连接串/密码；init不启动上下文，不受影响 |

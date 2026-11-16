@@ -10,6 +10,8 @@
 
 **Input**: User description: "http://localhost:4321/projects/agent-os/react-loop/（官网"ReAct 原理、实现与验收"页）。AgentOS 的 ReAct 循环：用户发来一条消息，Agent 让模型决定下一步，需要时调用工具、把结果回填、再让模型继续判断，直到给出最终回答；全过程按会话与轮次持久化，每次模型调用和工具调用都有可追溯的审计记录。依据 docs/TechnicalSolution.md 第 4 章、docs/DemandAnalysis.md 5.4、5.9、5.10 节和 docs/AiProgrammingGuide.md 4.2 节；文档冲突时以技术方案为准"
 
+**Phase 4 状态（2026-11-16）**：US2 的本地替身工具闭环已通过，T036–T051 完成，具体实现/测试/延期边界见 quickstart 第 10 节。真实模型与真实天气场景仍未运行，须先完成 US3 安全上限与 US5 审计恢复；不将当前结果冒报为全部场景已验收。
+
 ## 范围与边界
 
 本 story 是路线图里的 US-2，依赖已完成的 US-1（Provider，见 [001-llm-provider](../001-llm-provider/spec.md)）。它交付"一条用户消息进来、一个最终回答出去、中间可能多次调用模型和工具"的完整链路，并把会话、轮次、消息和两类审计记录写进数据库。

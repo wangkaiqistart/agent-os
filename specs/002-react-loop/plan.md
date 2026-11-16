@@ -6,6 +6,8 @@
 
 **Updated**: 2026-11-16，增量规划 FR-039/FR-040“初始化默认主 Agent”。保留 2026-11-15 的设计、研究与人工 review 历史；该历史 review 不等于批准本次新增设计。增量状态：本次 `/speckit-implement Phase 10` 已确认范围并实施，文件/CLI/真实启动器及 PostgreSQL 验收通过；证据见 quickstart 第 9.5 节，真实模型未运行。`tasks.md` 的 T001–T035 完成记录及后续未完成任务原样保留，不重新编号或反向取消完成状态。
 
+**Phase 4 实施状态（2026-11-16）**：T036–T051 已完成，工具/沙箱/安全解析、先记后做、完整历史回填和有界终结通知已接通。统一质量门 359 项测试通过、无数据库跳过，详见 quickstart 第 10 节；Phase 5–9、完整数据库故障恢复与真实天气 Demo 仍未完成。复用 session/ 下已有工具仓库；正常循环次数通过 TurnStore 的兼容收尾重载与终态一起落库。
+
 ## Summary
 
 统一入口 `AgentService.process` 接收一条消息：找到或创建活跃会话、取得会话租约、开始轮次，然后由 `ReActLoop` 迭代。`PromptBuilder` 组装提示词，`ProviderService`（US-1）调用一次模型；响应没有工具调用就结束，有就交给 `ToolExecutor`，它调用容器注入的 `ToolCallingManager` 执行，结果追加进历史再进入下一次迭代。契约放 `AgentOS-core`；工具与沙箱在 `AgentOS-tool`；会话、轮次、消息和两张审计表的 JPA 实现与迁移脚本在 `AgentOS-storage`；`AgentOS init` 与 `AgentOS chat` 在 `AgentOS-cli` 与 `AgentOS-channel-cli`；`AgentOS-boot` 只负责装配和启动上下文。Provider调用/重试逻辑不改；新增只读ProviderCatalog实现，复用RequestValidator在轮次开始前验证Profile。

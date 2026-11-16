@@ -14,7 +14,7 @@
 | [AgentOS-cli](./AgentOS-cli.md) | `init`、`chat`、Agent 选择、单条和交互输入 | 看命令如何进入统一的 `AgentService` |
 | [AgentOS-channel-cli](./AgentOS-channel-cli.md) | CLI 输入输出适配和会话身份 | 看交互细节如何留在渠道层 |
 | [AgentOS-boot](./AgentOS-boot.md) | Spring 无 Web 启动器和完整装配测试 | 看自动配置顺序和本地模型替身 |
-| [AgentOS-tool](./AgentOS-tool.md) | HTTP 工具配置值对象 | 当前只有配置契约，尚无工具执行器 |
+| [AgentOS-tool](./AgentOS-tool.md) | HTTP 工具、域名沙箱、治理与安全 resolver | Phase 4 工具闭环，恢复与完整上限待后续阶段 |
 | [AgentOS-web](./AgentOS-web.md) | REST 基础响应、异常处理和临时调试 Controller | 正式 Web API 尚未接入；临时入口用于断点观察 AgentService |
 | [AgentOS-memory](./AgentOS-memory.md) | 记忆模块骨架 | 本轮没有接入 |
 
@@ -49,7 +49,7 @@ flowchart TD
 4. `JpaLlmCallRecorder.record` → `JpaMessageStore.append`：分别看外呼审计与助手消息写入。
 5. `JpaTurnStore.finishAndRelease`：看终态确认与租约释放，再回到渠道的终态回调。
 
-注释中写明“预留”“尚未接入”的字段或接口，不表示对应功能已实现；例如工具执行、历史恢复、`--new` 和部分配置项。实体的普通 getter 不逐一重复解释，重点放在字段含义、状态变化与事务边界。
+注释中写明“预留”“尚未接入”的字段或接口，不表示对应功能已实现；例如跨轮历史恢复、`--new`、审计重试和部分配置项。实体的普通 getter 不逐一重复解释，重点放在字段含义、状态变化与事务边界。
 
 ## 一次 `chat --message` 的最小路径
 

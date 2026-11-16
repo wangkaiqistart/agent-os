@@ -135,7 +135,7 @@ US-1 的记录里 `session_id`、`turn_id`、`iteration` 可空，落库时这�
 | 端口 | 方法 |
 |------|------|
 | `SessionManager` | `archiveIfIdle(key)`：原子回收失效旧轮次后仅空闲归档；`findActive(key)`：只读查询；创建会话由TurnStore.startTurn同一事务执行 |
-| `TurnStore` | `startTurn(turnId, sessionKey, trigger, userMessage, budget)`：一个短事务内找到/创建会话、回收失效旧轮次、取得租约、建轮次、写用户消息；`renewLease`；`finishAndRelease(turn, status, text, error)`：一个短事务写终态/工具收尾/owner释放；`reapInterrupted()`：回收没有匹配owner有效租约的RUNNING轮次（不要求deadline到期），独立收尾终态轮次的in_progress工具记录；取过期租约时也调用同一回收逻辑 |
+| `TurnStore` | `startTurn(turnId, sessionKey, trigger, userMessage, budget)`：一个短事务内找到/创建会话、回收失效旧轮次、取得租约、建轮次、写用户消息；`renewLease`；`finishAndRelease(turn, status, text, error)`（正常收口另有带 `iterations` 的兼容重载，同事务保存实际次数）：一个短事务写终态/工具收尾/owner释放；`reapInterrupted()`：回收没有匹配owner有效租约的RUNNING轮次（不要求deadline到期），独立收尾终态轮次的in_progress工具记录；取过期租约时也调用同一回收逻辑 |
 | `MessageStore` | `append(turn, iteration, messages)`；`recentTurns(session, maxTurns)`：返回每个轮次的状态、`error_message` 与消息 |
 | `ToolInvocationRecorder` | `begin(...)` 写 `in_progress`；`complete(...)` 更新终态；`skipped(...)` 直接写 `limit_skipped` |
 | `LlmCallRecorder` | US-1 已有；本 story 在 storage 里提供落库实现 |

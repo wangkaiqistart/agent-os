@@ -164,4 +164,27 @@ flowchart LR
     Context --> Shared[AGENTS / SOUL / USER]
 ```
 
-选择规则是显式 Agent、main、旧工作区唯一 Agent。文件错误在启动器前失败；真实 Provider 校验仍在统一服务链路里。默认 main 无工具，工具闭环和 --new 继续属于后续未完成阶段。
+选择规则是显式 Agent、main、旧工作区唯一 Agent。文件错误在启动器前失败；真实 Provider 校验仍在统一服务链路里。默认 main 无工具；Phase 4 已接通显式授权的 http_get 工具闭环，--new 仍待后续阶段。
+
+
+## Phase 4 工具对象关系
+
+```mermaid
+flowchart LR
+    Service[DefaultAgentService] --> Loop[ReActLoop]
+    Service --> Sink[ManagedTurnSink]
+    Loop --> Catalog[ToolCatalog / ToolRegistry]
+    Loop --> Executor[ToolExecutor]
+    Executor --> Manager[官方 ToolCallingManager]
+    Executor --> Ledger[ToolCallLedger]
+    Manager --> Governed[GovernedToolCallback]
+    Manager --> Unknown[UnknownToolResolver]
+    Unknown --> Governed
+    Governed --> Http[HttpTools]
+    Http --> Sandbox[WhitelistSandbox]
+    Governed --> Audit[ToolInvocationRecorder / JpaToolInvocationRecorder]
+    Governed --> Redactor[Redactor]
+    Audit --> Redactor
+```
+
+Provider 请求阶段只有 TurnContext；响应后才建 ToolCallLedger。全部工具共享同一 TurnExecutionBudget，callback 的参数通过 ToolContext 显式注入，不依赖日志 MDC。具体先后顺序和断点见 AgentOS-tool 导读。
