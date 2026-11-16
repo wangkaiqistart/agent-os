@@ -4,10 +4,8 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * 审计写入重试的配置边界，当前完成绑定和校验，尚未接入统一重试执行器。
- *
- * <p>不能因为 maxRetries 有值就认为 JpaLlmCallRecorder 已经自动重试；当前存储实现仍会
- * 把写入失败转换成 AuditWriteException，再交给上层处理。
+ * 审计写入重试配置；两类落库记录器共用 RetryingAuditWriter，每次尝试单独开短事务。
+ * 这些配置只控制数据库审计，不控制模型或工具的外部调用次数。
  *
  * @param maxRetries 重试次数上限，取值 0～2，不含第一次尝试
  * @param backoffFirst 第一次重试前的退避时间

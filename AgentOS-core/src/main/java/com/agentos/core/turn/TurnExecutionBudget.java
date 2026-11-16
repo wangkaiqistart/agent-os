@@ -14,11 +14,27 @@ public final class TurnExecutionBudget {
     private final long deadlineNanos;
     private final long hardStopNanos;
     private final Instant deadline;
+    private final java.util.concurrent.atomic.AtomicLong cancellationStop =
+            new java.util.concurrent.atomic.AtomicLong(Long.MAX_VALUE);
     private final java.util.concurrent.atomic.AtomicBoolean cancelled =
             new java.util.concurrent.atomic.AtomicBoolean();
 
+    private final java.util.concurrent.atomic.AtomicBoolean auditUnconfirmed =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** 任一必要审计未确认后，最终结果不能再宣称 CONFIRMED。 */
+    public void auditUnconfirmed() {
+        auditUnconfirmed.set(true);
+    }
+
+    public boolean auditsConfirmed() {
+        return !auditUnconfirmed.get();
+    }
+
     /** 取消只阻止后续业务动作，不重置 deadline，也不抢占已有数据库事务。 */
     public void cancel() {
+        cancellationStop.accumulateAndGet(
+                System.nanoTime() + Duration.ofSeconds(1).toNanos(), Math::min);
         cancelled.set(true);
     }
 
@@ -65,7 +81,7 @@ public final class TurnExecutionBudget {
 
     /** 是否连额外的一秒等待窗口也用尽。 */
     public boolean hardStopped() {
-        return System.nanoTime() >= hardStopNanos;
+        return remainingHardStopNanos() <= 0;
     }
 
     /** 余量最小返回零，避免负数被下游误当作无限超时等特殊值。 */
@@ -75,7 +91,7 @@ public final class TurnExecutionBudget {
 
     /** TurnRunner 使用的外层等待余量，包含额外的一秒窗口。 */
     public long remainingHardStopNanos() {
-        return Math.max(0, hardStopNanos - System.nanoTime());
+        return Math.max(0, Math.min(hardStopNanos, cancellationStop.get()) - System.nanoTime());
     }
 
     public Duration remaining() {

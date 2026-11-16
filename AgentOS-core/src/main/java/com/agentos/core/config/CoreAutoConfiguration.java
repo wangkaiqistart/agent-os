@@ -57,6 +57,8 @@ public class CoreAutoConfiguration {
     }
 
     @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean(
+            TurnBudgetRegistry.class)
     TurnBudgetRegistry turnBudgetRegistry() {
         // 容器内共享一个并发预算表，具体轮次的预算在业务入口登记和清理。
         return new TurnBudgetRegistry();

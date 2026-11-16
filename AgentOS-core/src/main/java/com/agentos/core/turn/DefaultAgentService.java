@@ -26,7 +26,7 @@ import org.slf4j.MDC;
  * <p>本类不加整方法事务：模型调用可能等待很久，事务只在注入的存储端口内短暂开启。
  * 当前已支持工具循环；每条新用户消息都会重新加载 Agent 与 Bootstrap，历史由循环按轮次恢复。
  */
-public final class DefaultAgentService implements AgentService {
+public final class DefaultAgentService implements AgentService, AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(DefaultAgentService.class);
     private final AgentLoader loader;
     private final ContextLoader contextLoader;
@@ -38,6 +38,13 @@ public final class DefaultAgentService implements AgentService {
     private final TurnBudgetRegistry budgets;
     private final TurnRunner runner;
     private final TurnProperties turnProperties;
+
+    private record InFlight(Thread caller, TurnExecutionBudget budget) {}
+
+    private final java.util.concurrent.ConcurrentHashMap<UUID, InFlight> inFlight =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private final Object lifecycle = new Object();
+    private boolean closed;
 
     /** 默认使用虚拟线程执行器；测试也可以通过另一个构造器显式传入执行器。 */
     public DefaultAgentService(
@@ -120,16 +127,91 @@ public final class DefaultAgentService implements AgentService {
         TurnExecutionBudget budget =
                 TurnExecutionBudget.start(
                         agent.profile().settings().turnTimeout(), turnProperties.cleanup());
+        synchronized (lifecycle) {
+            if (closed) {
+                throw new IllegalStateException("Agent 服务已关闭");
+            }
+            inFlight.put(turnId, new InFlight(Thread.currentThread(), budget));
+        }
+        try {
+            return execute(request, sink, agent, turnId, budget);
+        } finally {
+            inFlight.remove(turnId);
+        }
+    }
+
+    private TurnResult execute(
+            ProcessRequest request,
+            TurnSink sink,
+            LoadedAgent agent,
+            UUID turnId,
+            TurnExecutionBudget budget) {
         var managedSink = new ManagedTurnSink(sink, budget);
         // 2. 一个短事务内确保 session 存在、取得租约、写 turn 和 USER 消息。
         // channel + userId + Agent 名称区分活跃会话；同会话已有有效租约时这里会拒绝请求。
-        TurnSnapshot turn =
-                turns.startTurn(
+        TurnSnapshot turn;
+        long startNanos = System.nanoTime();
+        try {
+            turn =
+                    runner.run(
+                            () ->
+                                    turns.startTurn(
+                                            turnId,
+                                            new SessionKey(
+                                                    request.channel(),
+                                                    request.userId(),
+                                                    agent.profile().name()),
+                                            request.trigger(),
+                                            request.message(),
+                                            budget),
+                            budget);
+        } catch (AgentOSException rejected) {
+            throw rejected;
+        } catch (RuntimeException unknown) {
+            // 只记录阶段、异常类型和耗时，不传 Throwable/原始异常文本，避免带出 SQL 参数或连接凭证。
+            log.warn(
+                    "轮次起步返回异常，按原 turnId 查证，turnId={}，stage=start，failureType={}，elapsedMs={}",
+                    turnId,
+                    unknown.getClass().getSimpleName(),
+                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                            System.nanoTime() - startNanos));
+            java.util.Optional<TurnSnapshot> found;
+            String confirmation = "NOT_FOUND";
+            try {
+                found = runner.run(() -> turns.find(turnId, budget), budget);
+            } catch (RuntimeException unavailable) {
+                confirmation = unavailable.getClass().getSimpleName();
+                found = java.util.Optional.empty();
+            }
+            if (found.isEmpty()) {
+                log.error(
+                        "轮次起步未确认，turnId={}，stage=confirm，confirmation={}，persistenceStatus=UNCONFIRMED",
                         turnId,
-                        new SessionKey(request.channel(), request.userId(), agent.profile().name()),
-                        request.trigger(),
-                        request.message(),
-                        budget);
+                        confirmation);
+                budget.cancel();
+                var result =
+                        new TurnResult(
+                                turnId,
+                                TurnStatus.FAILED,
+                                "轮次是否建立尚未确认，未调用模型",
+                                0,
+                                PersistenceStatus.UNCONFIRMED);
+                managedSink.finish(result);
+                return result;
+            }
+            turn = found.get();
+        }
+        final TurnSnapshot startedTurn = turn;
+        return executeStarted(request, agent, turnId, budget, managedSink, startedTurn);
+    }
+
+    private TurnResult executeStarted(
+            ProcessRequest request,
+            LoadedAgent agent,
+            UUID turnId,
+            TurnExecutionBudget budget,
+            ManagedTurnSink managedSink,
+            TurnSnapshot turn) {
         // 预算按 turnId 显式登记；MDC 只用于当前线程的日志关联，不作为业务上下文传递。
         budgets.register(turnId, budget);
         MDC.put("sessionId", turn.sessionId().toString());
@@ -140,16 +222,18 @@ public final class DefaultAgentService implements AgentService {
             // 3. TurnRunner 在另一条虚拟线程中跑循环，并对外层等待设置 hard stop。
             // budget、turn、agent 都通过参数传过去，当前线程的事务与 MDC 不会自动跟过去。
             ReActLoop.Result outcome =
-                    runner.run(
-                            () ->
-                                    loop.run(
-                                            turn,
-                                            agent,
-                                            request.message(),
-                                            budget,
-                                            managedSink,
-                                            request.trigger()),
-                            budget);
+                    !"RUNNING".equals(turn.status())
+                            ? new ReActLoop.Result(TurnStatus.valueOf(turn.status()), "本轮已结束", 0)
+                            : runner.run(
+                                    () ->
+                                            loop.run(
+                                                    turn,
+                                                    agent,
+                                                    request.message(),
+                                                    budget,
+                                                    managedSink,
+                                                    request.trigger()),
+                                    budget);
             // 4. 先完成持久化收尾，再生成给用户的结果。业务状态和持久化确认分开表达。
             TurnStore.FinishResult finish =
                     finishWithinHardStop(
@@ -166,13 +250,17 @@ public final class DefaultAgentService implements AgentService {
             result =
                     new TurnResult(
                             turnId,
-                            outcome.status(),
-                            outcome.text(),
-                            outcome.iterations(),
                             finish.persistenceConfirmed()
+                                    ? TurnStatus.valueOf(finish.status())
+                                    : outcome.status(),
+                            finish.persistenceConfirmed() ? finish.text() : outcome.text(),
+                            outcome.iterations(),
+                            finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
         } catch (TurnDeadlineExceededException e) {
+            boolean closing = budget.cancelled() && !budget.expired();
+            TurnStatus interruptedStatus = closing ? TurnStatus.INTERRUPTED : TurnStatus.TIMED_OUT;
             // 超时同样需要更新轮次、释放属于自己的租约，不能只取消线程就直接返回。
             TurnStore.FinishResult finish =
                     finishWithinHardStop(
@@ -180,16 +268,18 @@ public final class DefaultAgentService implements AgentService {
                             () ->
                                     turns.finishAndRelease(
                                             turn,
-                                            TurnStatus.TIMED_OUT.name(),
+                                            interruptedStatus.name(),
                                             "本轮处理超时",
                                             e.getMessage()));
             result =
                     new TurnResult(
                             turnId,
-                            TurnStatus.TIMED_OUT,
-                            "本轮处理超时",
-                            0,
                             finish.persistenceConfirmed()
+                                    ? TurnStatus.valueOf(finish.status())
+                                    : interruptedStatus,
+                            finish.persistenceConfirmed() ? finish.text() : "本轮处理超时",
+                            0,
+                            finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
         } catch (LeaseLostException e) {
@@ -205,24 +295,25 @@ public final class DefaultAgentService implements AgentService {
             result =
                     new TurnResult(
                             turnId,
-                            TurnStatus.INTERRUPTED,
-                            "本轮处理已中断",
-                            0,
                             finish.persistenceConfirmed()
+                                    ? TurnStatus.valueOf(finish.status())
+                                    : TurnStatus.INTERRUPTED,
+                            finish.persistenceConfirmed() ? finish.text() : "本轮处理已中断",
+                            0,
+                            finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
         } catch (com.agentos.core.audit.AuditWriteException e) {
-            log.error("轮次 {} 审计写入未确认，操作可能已经执行", turnId);
+            String auditMessage =
+                    e.executionMayHaveOccurred() ? "审计写入未确认，操作可能已经执行" : "工具执行前的审计未确认，未执行本次工具";
+            log.error("轮次 {} 审计写入未确认，persistenceStatus=UNCONFIRMED", turnId);
             // 不把审计异常当作普通工具失败，更不能宣称副作用未发生。
             try {
                 finishWithinHardStop(
                         budget,
                         () ->
                                 turns.finishAndRelease(
-                                        turn,
-                                        TurnStatus.FAILED.name(),
-                                        "审计写入未确认，操作可能已经执行",
-                                        "工具审计写入未确认"));
+                                        turn, TurnStatus.FAILED.name(), auditMessage, "工具审计写入未确认"));
             } catch (RuntimeException ignored) {
                 log.warn("审计失败后的轮次收尾未确认");
             }
@@ -230,7 +321,7 @@ public final class DefaultAgentService implements AgentService {
                     new TurnResult(
                             turnId,
                             TurnStatus.FAILED,
-                            "审计写入未确认，操作可能已经执行",
+                            auditMessage,
                             0,
                             PersistenceStatus.UNCONFIRMED);
         } catch (RuntimeException e) {
@@ -247,10 +338,12 @@ public final class DefaultAgentService implements AgentService {
             result =
                     new TurnResult(
                             turnId,
-                            TurnStatus.FAILED,
-                            "处理失败",
-                            0,
                             finish.persistenceConfirmed()
+                                    ? TurnStatus.valueOf(finish.status())
+                                    : TurnStatus.FAILED,
+                            finish.persistenceConfirmed() ? finish.text() : "处理失败",
+                            0,
+                            finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
         } finally {
@@ -279,6 +372,7 @@ public final class DefaultAgentService implements AgentService {
         if (budget.remainingHardStopNanos() <= 0) {
             return new TurnStore.FinishResult("UNKNOWN", false, null, "持久化收尾未确认");
         }
+        boolean interrupted = Thread.interrupted();
         try {
             return runner.run(action, budget);
         } catch (TurnDeadlineExceededException timeout) {
@@ -286,6 +380,37 @@ public final class DefaultAgentService implements AgentService {
         } catch (RuntimeException failure) {
             log.warn("轮次收尾未确认：{}", failure.getClass().getSimpleName());
             return new TurnStore.FinishResult("UNKNOWN", false, null, "持久化收尾未确认");
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /** 容器先销毁协调者再销毁其依赖；所有轮次共用一秒关闭等待，不按轮次数累加。 */
+    @Override
+    public void close() {
+        java.util.List<InFlight> running;
+        synchronized (lifecycle) {
+            closed = true;
+            running = java.util.List.copyOf(inFlight.values());
+        }
+        for (var active : running) {
+            active.budget().cancel();
+            active.caller().interrupt();
+        }
+        long stop = System.nanoTime() + java.time.Duration.ofSeconds(1).toNanos();
+        for (var active : running) {
+            long remaining = stop - System.nanoTime();
+            if (remaining <= 0 || active.caller() == Thread.currentThread()) {
+                break;
+            }
+            try {
+                active.caller().join(java.time.Duration.ofNanos(remaining));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
     }
 }

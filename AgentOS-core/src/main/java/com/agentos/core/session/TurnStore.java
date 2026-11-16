@@ -30,6 +30,11 @@ public interface TurnStore {
     /** 查询指定轮次的快照，不隐式创建记录。 */
     Optional<TurnSnapshot> find(UUID turnId);
 
+    /** 起步结果未知时按同一轮次预算查证；默认实现兼容内存端口，生产存储必须限制数据库等待。 */
+    default Optional<TurnSnapshot> find(UUID turnId, TurnExecutionBudget budget) {
+        return find(turnId);
+    }
+
     /** 将失去有效会话租约的 RUNNING 记录改为 INTERRUPTED；当前尚未接定时触发器。 */
     int reapInterrupted();
 
