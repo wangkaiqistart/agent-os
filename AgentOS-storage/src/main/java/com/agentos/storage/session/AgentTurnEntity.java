@@ -7,6 +7,12 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * agent_turns 表映射：每条用户输入对应一轮，记录执行状态、截止时间和终态摘要。
+ *
+ * <p>新建状态为 RUNNING；与 sessions 的 active/archived 状态不是同一个维度。
+ * 实体方法只改变内存中的值，持久化和事务由 JpaTurnStore 负责。
+ */
 @Entity
 @Table(name = "agent_turns")
 public class AgentTurnEntity {
@@ -23,6 +29,7 @@ public class AgentTurnEntity {
     @Column(nullable = false)
     private String status;
 
+    // 次数更新方法已预留，但当前主链路尚未调用；数据库中的值不能视为 TurnResult 的次数。
     @Column(nullable = false)
     private int iterations;
 
@@ -32,6 +39,7 @@ public class AgentTurnEntity {
     @Column(name = "error_message")
     private String errorMessage;
 
+    // started/finished 用于审计耗时，deadline 用于业务超时；会话 leaseUntil 另存于 sessions。
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
 
@@ -41,6 +49,7 @@ public class AgentTurnEntity {
     @Column(name = "deadline_at", nullable = false)
     private Instant deadlineAt;
 
+    /** 供 JPA 恢复持久化对象。 */
     protected AgentTurnEntity() {}
 
     public AgentTurnEntity(
@@ -93,6 +102,7 @@ public class AgentTurnEntity {
         return deadlineAt;
     }
 
+    /** 记录终态和对外文本，不会自动追加 session_messages，也不负责释放会话租约。 */
     public void finish(String status, String text, String error, Instant at) {
         this.status = status;
         finalText = text;
@@ -104,6 +114,7 @@ public class AgentTurnEntity {
         iterations = value;
     }
 
+    /** 为租约失效的残留轮次收尾；与用户正常失败、业务超时分开标识。 */
     public void interrupt(String reason, Instant at) {
         finish("INTERRUPTED", "本轮已中断", reason, at);
     }

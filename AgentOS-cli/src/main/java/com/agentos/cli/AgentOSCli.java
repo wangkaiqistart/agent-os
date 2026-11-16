@@ -31,6 +31,8 @@ public final class AgentOSCli {
      */
     public static int execute(ContextLauncher launcher, String... args) {
         CommandLine commandLine = new CommandLine(new AgentOSCommand());
+        // 动态注册可传入启动器；注解中的 init 则无需 Spring 依赖即可实例化。
+        // 独立 CLI 的 launcher 为 null，执行 chat 会明确报错，完整 boot 入口才能启动对话链路。
         commandLine.addSubcommand("chat", new ChatCommand(launcher));
         return commandLine.execute(args);
     }

@@ -8,9 +8,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  *
  * <p>这个类的职责很小：它只负责把 Java 进程交给命令行入口。
  * 不要把它理解成“这里已经启动了整个 Spring Boot 应用”。当前设计是先解析命令：
- * {@code init}、{@code profile list} 这类只操作文件的命令不需要启动 Spring 上下文；
- * {@code chat}、{@code serve}、{@code gateway} 以后会在各自的子命令中调用
- * {@code SpringApplication.run(...)} 启动 Spring。
+ * {@code init} 只操作文件，不需要启动 Spring 上下文；{@code chat} 已通过 SpringContextLauncher
+ * 按需启动无 Web 容器。{@code profile list}、{@code serve}、{@code gateway} 等仍是后续目标命令。
  *
  * <p>{@link SpringBootApplication} 是 Spring Boot 的入口注解，概念上包含：
  * <ul>

@@ -12,9 +12,16 @@ import java.util.UUID;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+/**
+ * session_messages 表映射：消息逐条保存，通过 sessionId、turnId、iteration 还原所属位置。
+ *
+ * <p>当前 USER 在创建轮次时以 iteration=0 写入，ASSISTANT 在一次模型调用后以 iteration=1 写入。
+ * 工具结构字段仅为后续账本预留，当前 JpaMessageStore 尚未填充和完整恢复它们。
+ */
 @Entity
 @Table(name = "session_messages")
 public class SessionMessageEntity {
+    // 数据库生成递增序号，查询用它保持保存顺序；不同于业务生成的会话/轮次 UUID。
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -34,6 +41,8 @@ public class SessionMessageEntity {
     @Column(columnDefinition = "text")
     private String content;
 
+    // JdbcTypeCode 指定 Hibernate 的 JSON 编解码；columnDefinition 对齐 PostgreSQL jsonb 列。
+    // 这不负责字段脱敏，也不替代 Flyway 建表。
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "tool_calls", columnDefinition = "jsonb")
     private Object toolCalls;
@@ -49,6 +58,7 @@ public class SessionMessageEntity {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    /** 供 JPA 读取行数据；正常追加消息使用下面的构造器。 */
     protected SessionMessageEntity() {}
 
     public SessionMessageEntity(

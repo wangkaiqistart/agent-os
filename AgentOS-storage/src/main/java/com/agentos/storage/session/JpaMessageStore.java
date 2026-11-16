@@ -12,6 +12,12 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 消息账本的最小 JPA 实现，当前用于 US1 的纯文本用户/助手消息。
+ *
+ * <p>工具调用与工具响应字段尚未序列化，历史的真实轮次状态也尚未恢复；
+ * 不能据此认为完整的多轮工具上下文已经可用。当前 ReActLoop 尚未读取这里的历史。
+ */
 public class JpaMessageStore implements MessageStore {
     private final SessionMessageRepository repository;
 
@@ -22,6 +28,7 @@ public class JpaMessageStore implements MessageStore {
     @Override
     @Transactional
     public void append(TurnSnapshot turn, int iteration, List<Message> messages) {
+        // 一批消息在一个短事务中追加。这里只保存角色和文本，工具结构为空、metadata 为空表。
         Instant now = Instant.now();
         for (Message message : messages) {
             String type =
@@ -50,10 +57,12 @@ public class JpaMessageStore implements MessageStore {
         }
         List<SessionMessageEntity> rows =
                 repository.findBySessionIdOrderByIdAsc(session.sessionId());
+        // 当前先读全部消息，再按相邻 turnId 分组并取最后 N 轮；没有 SQL 分页或 token 截断。
         List<HistoryTurn> result = new ArrayList<>();
         for (SessionMessageEntity row : rows) {
             if (result.isEmpty()
                     || !result.get(result.size() - 1).turnId().equals(row.getTurnId())) {
+                // 暂用固定状态，未关联 agent_turns 恢复失败或中断原因。
                 result.add(new HistoryTurn(row.getTurnId(), "SUCCEEDED", null, List.of()));
             }
             HistoryTurn previous = result.get(result.size() - 1);
@@ -67,6 +76,7 @@ public class JpaMessageStore implements MessageStore {
     }
 
     private static Message toMessage(SessionMessageEntity row) {
+        // 目前只准确恢复 ASSISTANT/USER；TOOL 仍落入 default，不能用于完整工具历史重放。
         String content = row.getContent() == null ? "" : row.getContent();
         return switch (row.getType()) {
             case "ASSISTANT" -> new AssistantMessage(content);

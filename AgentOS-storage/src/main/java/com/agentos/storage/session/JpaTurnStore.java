@@ -13,12 +13,19 @@ import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * 轮次存储的 PostgreSQL 实现：用会话行锁协调抢占，用限时租约表示谁正在执行本轮。
+ *
+ * <p>行锁只持有到短事务结束，模型等待期间靠 leaseOwner/leaseUntil 协调，而不是一直锁表。
+ * 本类由 StorageAutoConfiguration 注册，调用方经 Spring 事务代理进入下面的方法。
+ */
 public class JpaTurnStore implements TurnStore {
     private final SessionRepository sessions;
     private final AgentTurnRepository turns;
     private final SessionMessageRepository messages;
     private final JdbcTemplate jdbc;
 
+    /** 简化测试的构造器；未注入 JDBC 时以进程时间代替数据库时间。 */
     public JpaTurnStore(
             SessionRepository sessions,
             AgentTurnRepository turns,
@@ -53,10 +60,13 @@ public class JpaTurnStore implements TurnStore {
                         .orElseThrow(
                                 () -> new AgentOSException(ErrorCode.INTERNAL_ERROR, "无法创建会话"));
         Instant now = databaseNow();
+        // 锁内检查有效租约，避免两个并发请求都以为会话空闲。过期租约允许被新轮次接管。
         if (session.getLeaseUntil() != null && session.getLeaseUntil().isAfter(now)) {
             throw new AgentOSException(ErrorCode.SESSION_BUSY, "会话正有轮次在执行");
         }
         String owner = turnId.toString();
+        // 当前实现固定至少租用 150 秒，并给剩余业务预算加 30 秒缓冲；
+        // 尚未读取 TurnProperties 的同类配置，不能靠修改配置来改变这里的值。
         Instant until = now.plus(max(Duration.ofSeconds(150), budget.remaining().plusSeconds(30)));
         session.lease(owner, until);
         session.touch(now);
@@ -64,6 +74,7 @@ public class JpaTurnStore implements TurnStore {
         turns.save(
                 new AgentTurnEntity(
                         turnId, session.getSessionId(), trigger, now, budget.deadline()));
+        // iteration=0 表示尚未调用模型的用户输入，与 RUNNING 轮次、租约一起提交或一起回滚。
         messages.save(
                 new SessionMessageEntity(
                         session.getSessionId(),
@@ -82,6 +93,7 @@ public class JpaTurnStore implements TurnStore {
     @Override
     @Transactional
     public boolean renewLease(TurnSnapshot turn, TurnExecutionBudget budget) {
+        // 续租也先锁行；旧 owner 或已经过期的 owner 不允许通过续租“复活”。
         SessionEntity session = sessions.findByIdForUpdate(turn.sessionId()).orElse(null);
         Instant now = databaseNow();
         if (session == null
@@ -101,14 +113,17 @@ public class JpaTurnStore implements TurnStore {
     @Transactional
     public FinishResult finishAndRelease(
             TurnSnapshot turn, String status, String text, String errorMessage) {
+        // 收尾独立于模型调用。当前是普通查询，没有使用 startTurn 那样的 FOR UPDATE 行锁。
         Instant now = databaseNow();
         AgentTurnEntity entity = turns.findById(turn.turnId()).orElse(null);
         SessionEntity session = sessions.findById(turn.sessionId()).orElse(null);
         if (entity == null || session == null) {
+            // 返回未确认，交上层区分“业务结果已得到”和“数据库终态已确认”。
             return new FinishResult(status, false, text, errorMessage);
         }
         entity.finish(status, text, errorMessage, now);
         turns.save(entity);
+        // 若租约已被别的轮次接管，不清除新 owner 的租约。
         if (turn.owner().equals(session.getLeaseOwner())) {
             session.lease(null, null);
             sessions.save(session);
@@ -119,6 +134,7 @@ public class JpaTurnStore implements TurnStore {
     @Override
     @Transactional(readOnly = true)
     public Optional<TurnSnapshot> find(UUID turnId) {
+        // 只返回跨模块快照，不把受持久化上下文管理的实体暴露给 core。
         return turns.findById(turnId)
                 .flatMap(t ->
                         sessions.findById(t.getSessionId())
@@ -138,6 +154,7 @@ public class JpaTurnStore implements TurnStore {
     @Override
     @Transactional
     public int reapInterrupted() {
+        // 这是回收操作本身，尚无定时器自动调用；只处理租约失效或已换 owner 的 RUNNING 轮次。
         Instant now = databaseNow();
         int count = 0;
         for (AgentTurnEntity turn : turns.findByStatus("RUNNING")) {
@@ -159,6 +176,7 @@ public class JpaTurnStore implements TurnStore {
             return Instant.now();
         }
         Instant value =
+                // clock_timestamp() 是查询执行时刻；不同实例以同一数据库时钟判断租约。
                 jdbc.queryForObject(
                         "select clock_timestamp()", (rs, rowNum) -> rs.getTimestamp(1).toInstant());
         return value == null ? Instant.now() : value;

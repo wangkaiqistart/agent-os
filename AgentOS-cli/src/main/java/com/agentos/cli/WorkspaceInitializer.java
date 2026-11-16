@@ -7,8 +7,14 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 幂等创建本地 AgentOS 工作区。 */
+/**
+ * 创建最小本地运行时工作区：顺序重复执行时跳过已有文件，保留用户内容。
+ *
+ * <p>这里只创建共享目录、Bootstrap 和 MEMORY 模板，不创建 answer Agent、模型凭证或
+ * mcp_servers.yaml。agents 下的具体 AGENT.md 仍需另行配置 provider.model。
+ */
 public final class WorkspaceInitializer {
+    /** root 通常是项目下的 .AgentOS，和供 Codex 阅读的仓库根 AGENTS.md 不是同一个位置。 */
     public Result initialize(Path root) throws IOException {
         List<Path> created = new ArrayList<>();
         List<Path> skipped = new ArrayList<>();
@@ -32,6 +38,7 @@ public final class WorkspaceInitializer {
 
     private static void createFile(
             Path path, String content, List<Path> created, List<Path> skipped) throws IOException {
+        // 这是先检查、后写入，不是并发原子创建；幂等语义针对正常顺序执行的 init。
         if (Files.exists(path)) {
             skipped.add(path);
             return;
@@ -44,5 +51,6 @@ public final class WorkspaceInitializer {
         created.add(path);
     }
 
+    /** 本次实际创建与已存在而跳过的路径，供 CLI 统计，不包含文件正文或凭证。 */
     public record Result(List<Path> created, List<Path> skipped) {}
 }

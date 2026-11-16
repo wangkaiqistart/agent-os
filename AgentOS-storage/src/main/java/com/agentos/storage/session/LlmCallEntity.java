@@ -14,9 +14,16 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * llm_calls 表映射：一行对应一次模型请求尝试，同一轮次重试时可能产生多行。
+ *
+ * <p>保存关联、模型标识、用量、失败分类和耗时，不保存完整 Prompt/答案。
+ * 上游 LlmCallRecord 已完成元数据归一化，此处只映射到列。
+ */
 @Entity
 @Table(name = "llm_calls")
 public class LlmCallEntity {
+    // id 用于数据库行定位；writeId 是摘要生成的稳定去重键，两者用途不同。
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -45,6 +52,7 @@ public class LlmCallEntity {
     @Column(name = "response_id")
     private String responseId;
 
+    // 枚举存名称而非 ordinal，避免将来调整 Java 枚举顺序后把旧数据读成另一种模式。
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private CallMode mode;
@@ -61,6 +69,7 @@ public class LlmCallEntity {
     @Column(name = "image_count", nullable = false)
     private int imageCount;
 
+    // 包装类型保留“服务端未报告”的 NULL；未知用量/缓存/限流余额不能假装成 0。
     @Column(name = "prompt_tokens")
     private Integer promptTokens;
 
@@ -82,6 +91,7 @@ public class LlmCallEntity {
     @Column(name = "tokens_remaining")
     private Long tokensRemaining;
 
+    // 三态：遵守/未遵守/无法判断输出上限，不能用 primitive boolean 丢失未知状态。
     @Column(name = "output_cap_honored")
     private Boolean outputCapHonored;
 
@@ -104,6 +114,7 @@ public class LlmCallEntity {
     @Column(name = "duration_ms", nullable = false)
     private long durationMs;
 
+    /** JPA 读取用；业务写入使用 LlmCallRecord 构造器。 */
     protected LlmCallEntity() {}
 
     public LlmCallEntity(UUID writeId, LlmCallRecord r) {
@@ -132,6 +143,7 @@ public class LlmCallEntity {
         failureKind = r.failureKind();
         httpStatus = r.httpStatus();
         errorMessage = r.errorSummary();
+        // created_at 记录请求开始时刻，并非数据库插入时刻。
         createdAt = r.startedAt();
         durationMs = r.durationMs();
     }

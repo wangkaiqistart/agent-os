@@ -31,7 +31,8 @@ import org.springframework.core.env.PropertySource;
  * <p>本模块不注册 ChatModel 或 EmbeddingModel Bean：模型对象只存在于不可变的连接映射里，
  * 避免有人靠扫描容器里的 ChatModel 区分 Provider。
  *
- * <p>Spring Boot 会通过 {@code META-INF/spring/AutoConfiguration.imports} 找到本类，
+ * <p>Spring Boot 会通过
+ * {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports} 找到本类，
  * 所以使用方不需要手工 {@code @Import} 它。
  *
  * <p>只用 {@code @Bean} 显式注册，不做包扫描：自动配置里扫描包会把同包组件（含测试类）反复注册进容器。
@@ -50,7 +51,7 @@ public class ProviderAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(LlmCallRecorder.class)
     LlmCallRecorder loggingLlmCallRecorder() {
-        // 这是默认记录器。后续如果业务模块提供数据库记录器，条件注解会让这个 Bean 不再创建。
+        // 缺少业务记录器时的后备；完整应用的 StorageAutoConfiguration 已优先注册 JPA 记录器。
         return new LoggingLlmCallRecorder();
     }
 
@@ -76,6 +77,7 @@ public class ProviderAutoConfiguration {
         return new DefaultProviderService(validator, recorder);
     }
 
+    /** 提供给 core 的前置校验端口；已有自定义 Catalog 时退让。 */
     @Bean
     @ConditionalOnMissingBean(ProviderCatalog.class)
     ProviderCatalog providerCatalog(
@@ -83,6 +85,8 @@ public class ProviderAutoConfiguration {
             ConfigurableEnvironment environment,
             ToolCallingManager toolCallingManager,
             ObjectProvider<ObservationRegistry> observationRegistry) {
+        // 当前按相同配置再次组装映射，不是复用 providerService 方法里的映射实例。
+        // 工厂构建模型客户端并不发送 Chat 请求，校验也只检查本地配置。
         ChatModelFactory factory =
                 new ChatModelFactory(
                         toolCallingManager,
@@ -177,6 +181,7 @@ public class ProviderAutoConfiguration {
     private static String rawProperty(ConfigurableEnvironment environment, String key) {
         for (PropertySource<?> source : environment.getPropertySources()) {
             if (MERGED_VIEW.equals(source.getName())) {
+                // 跳过已解析的合并视图，才可能读到原始占位符；按其余属性源的优先级取首个值。
                 continue;
             }
             Object value = source.getProperty(key);

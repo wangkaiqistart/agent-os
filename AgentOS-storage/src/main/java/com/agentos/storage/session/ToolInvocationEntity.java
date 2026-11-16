@@ -11,6 +11,12 @@ import java.util.UUID;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+/**
+ * tool_invocations 表映射，为后续工具执行审计与迁移契约测试准备。
+ *
+ * <p>当前最小对话链路尚未执行工具，存在此实体不等于工具治理已经接通。
+ * 一次逻辑调用以 turnId + iteration + toolCallId 唯一标识，约束定义在 Flyway 中。
+ */
 @Entity
 @Table(name = "tool_invocations")
 public class ToolInvocationEntity {
@@ -39,6 +45,7 @@ public class ToolInvocationEntity {
     @Column(nullable = false)
     private String status;
 
+    // JSONB 只解决结构化保存，不会自动脱敏；未来调用方必须先处理敏感参数。
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "input_json", columnDefinition = "jsonb")
     private Object inputJson;
@@ -46,6 +53,7 @@ public class ToolInvocationEntity {
     @Column(name = "result_text")
     private String resultText;
 
+    // 保留结果长度与是否截断，便于区分“原本很短”和“被策略裁短”。
     @Column(name = "result_chars")
     private Integer resultChars;
 
@@ -55,6 +63,7 @@ public class ToolInvocationEntity {
     @Column(name = "error_message")
     private String errorMessage;
 
+    // idempotent 描述重试资格，attempts 记录尝试次数；实体本身不执行或重试工具。
     @Column(nullable = false)
     private boolean idempotent;
 
@@ -70,6 +79,7 @@ public class ToolInvocationEntity {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /** 供 JPA 从数据库恢复。 */
     protected ToolInvocationEntity() {}
 
     public ToolInvocationEntity(
@@ -90,6 +100,7 @@ public class ToolInvocationEntity {
         toolSource = source;
         this.inputJson = inputJson;
         this.idempotent = idempotent;
+        // 工具状态使用小写，与 agent_turns 的 RUNNING 等大写状态分开。
         status = "in_progress";
         createdAt = now;
         updatedAt = now;
@@ -167,6 +178,7 @@ public class ToolInvocationEntity {
         return updatedAt;
     }
 
+    /** 只更新本条调用的结果字段；仍需在调用方事务内保存，不在这里发起外部副作用。 */
     public void complete(
             String status,
             String resultText,
