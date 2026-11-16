@@ -38,7 +38,9 @@ public final class SpringContextLauncher implements ContextLauncher {
         ConfigurableApplicationContext context =
                 builders.get()
                         .web(WebApplicationType.NONE)
-                        .run("--agentos.workspace.root=" + workspaceRoot);
+                        .run(
+                                "--agentos.workspace.root=" + workspaceRoot,
+                                "--agentos.runtime.chat=true");
         return new RunningContext() {
             @Override
             public AgentService agentService() {

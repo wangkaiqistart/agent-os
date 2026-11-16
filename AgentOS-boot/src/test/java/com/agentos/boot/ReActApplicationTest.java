@@ -173,13 +173,19 @@ class ReActApplicationTest {
                                 + "/weather?token=URL_SECRET"),
                 LocalModelServer.textResponse("北京天气晴，建议穿薄外套。"));
         weatherCalls.set(0);
-        beforeHttp.set(() ->
-                assertThat(
-                                jdbc.queryForObject(
-                                        "select count(*) from tool_invocations where tool_call_id=? and status='in_progress' and attempts=0",
-                                        Integer.class,
-                                        id))
-                        .isOne());
+        beforeHttp.set(() -> {
+            assertThat(
+                            ((com.zaxxer.hikari.HikariDataSource) context.getBean(DataSource.class))
+                                    .getHikariPoolMXBean()
+                                    .getActiveConnections())
+                    .isZero();
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select count(*) from tool_invocations where tool_call_id=? and status='in_progress' and attempts=0",
+                                    Integer.class,
+                                    id))
+                    .isOne();
+        });
         var result =
                 context.getBean(AgentService.class)
                         .process(
@@ -235,6 +241,117 @@ class ReActApplicationTest {
                 .doesNotContain("RESPONSE_SECRET", "local-test-key");
         assertThat(output.getAll())
                 .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
+    }
+
+    @Test
+    void tenConsecutiveTurnsKeepHistoryAndConfirmEveryAudit(
+            org.springframework.context.ApplicationContext context) {
+        var jdbc = new JdbcTemplate(context.getBean(DataSource.class));
+        String user = java.util.UUID.randomUUID().toString();
+        java.util.UUID session = null;
+        for (int i = 0; i < 10; i++) {
+            model.reset(LocalModelServer.textResponse("reply-" + i));
+            var result =
+                    context.getBean(AgentService.class)
+                            .process(
+                                    new ProcessRequest(
+                                            "test", user, "answer", "message-" + i, "test"));
+            assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
+            assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
+            assertThat(model.calls()).isOne();
+            var current =
+                    jdbc.queryForObject(
+                            "select session_id from agent_turns where turn_id=?",
+                            java.util.UUID.class,
+                            result.turnId());
+            if (session == null) {
+                session = current;
+            }
+            assertThat(current).isEqualTo(session);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select count(*) from llm_calls where turn_id=?",
+                                    Integer.class,
+                                    result.turnId()))
+                    .isOne();
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select count(*) from session_messages where turn_id=?",
+                                    Integer.class,
+                                    result.turnId()))
+                    .isEqualTo(2);
+            if (i > 0) {
+                assertThat(model.requests().getFirst())
+                        .contains("message-" + (i - 1), "reply-" + (i - 1));
+            }
+        }
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from agent_turns where session_id=? and status='SUCCEEDED'",
+                                Integer.class,
+                                session))
+                .isEqualTo(10);
+        assertThat(
+                        jdbc.queryForObject(
+                                "select lease_owner from sessions where session_id=?",
+                                String.class,
+                                session))
+                .isNull();
+    }
+
+    @Test
+    void slowTurnStorageStillReachesModelAndConfirmsResult(
+            org.springframework.context.ApplicationContext context) {
+        var jdbc = new JdbcTemplate(context.getBean(DataSource.class));
+        // 每次 INSERT/UPDATE 延迟1.1秒：分别覆盖起步、续租和正常收尾，审计不注入延迟。
+        jdbc.execute(
+                """
+                CREATE FUNCTION slow_turn_storage() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN PERFORM pg_sleep(1.1); RETURN NEW; END $$
+                """);
+        jdbc.execute(
+                """
+                CREATE TRIGGER slow_turn_storage BEFORE INSERT OR UPDATE ON agent_turns
+                FOR EACH ROW EXECUTE FUNCTION slow_turn_storage()
+                """);
+        jdbc.execute(
+                """
+                CREATE TRIGGER slow_session_storage BEFORE UPDATE ON sessions
+                FOR EACH ROW EXECUTE FUNCTION slow_turn_storage()
+                """);
+        model.reset();
+        try {
+            var result =
+                    context.getBean(AgentService.class)
+                            .process(
+                                    new ProcessRequest(
+                                            "test", "slow-storage-user", "answer", "你好", "test"));
+            assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
+            assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
+            assertThat(model.calls()).isOne();
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select count(*) from session_messages where turn_id=? and type='USER'",
+                                    Integer.class,
+                                    result.turnId()))
+                    .isOne();
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select status from agent_turns where turn_id=?",
+                                    String.class,
+                                    result.turnId()))
+                    .isEqualTo("SUCCEEDED");
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select lease_owner from sessions where session_id=(select session_id from agent_turns where turn_id=?)",
+                                    String.class,
+                                    result.turnId()))
+                    .isNull();
+        } finally {
+            jdbc.execute("DROP TRIGGER slow_turn_storage ON agent_turns");
+            jdbc.execute("DROP TRIGGER slow_session_storage ON sessions");
+            jdbc.execute("DROP FUNCTION slow_turn_storage()");
+        }
     }
 
     @Test

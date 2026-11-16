@@ -92,7 +92,13 @@ public final class GovernedToolCallback implements ToolCallback {
                         policy.idempotent(),
                         0,
                         null);
-        var begin = withinBudget(() -> recorder.begin(beginRecord), budget, false);
+        ToolInvocationRecord begin;
+        try {
+            begin = withinBudget(() -> recorder.begin(beginRecord), budget, false);
+        } catch (RuntimeException failure) {
+            budget.auditUnconfirmed();
+            throw new AuditWriteException("工具执行前的审计未确认，未执行本次工具", false);
+        }
         long started = System.nanoTime();
         int attempts = 0;
         String status = "failed";
@@ -215,12 +221,13 @@ public final class GovernedToolCallback implements ToolCallback {
                     budget,
                     true);
         } catch (RuntimeException completionFailure) {
+            budget.auditUnconfirmed();
             // 超时/租约丢失是原始终止原因，不能被最后一次审计等待遮盖。
             if (failure instanceof TurnDeadlineExceededException
                     || failure instanceof LeaseLostException) {
                 throw failure;
             }
-            throw completionFailure;
+            throw new AuditWriteException("工具执行后的审计未确认，操作可能已经执行");
         }
         if (failure instanceof AuditWriteException
                 || failure instanceof LeaseLostException
@@ -243,6 +250,7 @@ public final class GovernedToolCallback implements ToolCallback {
             throw new TurnDeadlineExceededException();
         }
         var executor = Executors.newVirtualThreadPerTaskExecutor();
+        boolean restoreInterrupt = hardStop && Thread.interrupted();
         Future<T> future = executor.submit(action);
         try {
             return future.get(Math.max(1, remaining), TimeUnit.NANOSECONDS);
@@ -261,6 +269,9 @@ public final class GovernedToolCallback implements ToolCallback {
             throw new AuditWriteException("工具审计写入未确认，操作可能已经执行");
         } finally {
             executor.shutdownNow();
+            if (restoreInterrupt) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }

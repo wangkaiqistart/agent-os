@@ -17,7 +17,16 @@ public final class LocalModelServer implements AutoCloseable {
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final AtomicInteger calls = new AtomicInteger();
     private final List<String> requests = new CopyOnWriteArrayList<>();
-    private final java.util.Queue<String> responses =
+
+    public record Reply(int status, String body) {}
+
+    private volatile Runnable beforeRequest = () -> {};
+
+    public void onRequest(Runnable callback) {
+        beforeRequest = callback;
+    }
+
+    private final java.util.Queue<Reply> responses =
             new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     /** 只供本地集成测试安排模型动作，不访问真实模型。 */
@@ -25,7 +34,15 @@ public final class LocalModelServer implements AutoCloseable {
         calls.set(0);
         requests.clear();
         responses.clear();
-        responses.addAll(java.util.List.of(scriptedResponses));
+        for (String body : scriptedResponses) {
+            responses.add(new Reply(200, body));
+        }
+        beforeRequest = () -> {};
+    }
+
+    public void resetReplies(Reply... replies) {
+        reset();
+        responses.addAll(List.of(replies));
     }
 
     /** 本地脚本的最终建议；和原默认纯文本替身共用同一兼容协议。 */
@@ -131,14 +148,16 @@ public final class LocalModelServer implements AutoCloseable {
             calls.incrementAndGet();
             requests.add(
                     new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            String scripted = responses.poll();
+            beforeRequest.run();
+            Reply reply = responses.poll();
+            String scripted = reply == null ? null : reply.body();
             byte[] body =
                     (scripted == null
                                     ? "{\"id\":\"local-1\",\"object\":\"chat.completion\",\"model\":\"test-model\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"local answer\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}"
                                     : scripted)
                             .getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.length);
+            exchange.sendResponseHeaders(reply == null ? 200 : reply.status(), body.length);
             exchange.getResponseBody().write(body);
         }
     }
