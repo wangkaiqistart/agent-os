@@ -43,6 +43,7 @@ class JpaStorageContractTest extends PostgresIntegrationTest {
     @jakarta.annotation.Resource private SessionManager sessions;
     @jakarta.annotation.Resource private TurnStore turns;
     @jakarta.annotation.Resource private MessageStore messages;
+    @jakarta.annotation.Resource private com.agentos.core.turn.TurnBudgetRegistry budgets;
     @jakarta.annotation.Resource private JpaLlmCallRecorder recorder;
     @jakarta.annotation.Resource private LlmCallRepository llmCalls;
     @jakarta.annotation.Resource private JdbcTemplate jdbc;
@@ -119,6 +120,7 @@ class JpaStorageContractTest extends PostgresIntegrationTest {
                         started,
                         0);
 
+        budgets.register(turn.turnId(), TurnExecutionBudget.start(Duration.ofSeconds(10)));
         recorder.record(record);
         LlmCallEntity saved =
                 llmCalls.findAll().stream()

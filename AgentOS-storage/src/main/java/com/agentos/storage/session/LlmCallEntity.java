@@ -23,7 +23,7 @@ import java.util.UUID;
 @Entity
 @Table(name = "llm_calls")
 public class LlmCallEntity {
-    // id 用于数据库行定位；writeId 是摘要生成的稳定去重键，两者用途不同。
+    // id 用于数据库行定位；writeId 是每次 record 入口生成、在 SQL 重试间复用的去重键，两者用途不同。
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -146,6 +146,37 @@ public class LlmCallEntity {
         // created_at 记录请求开始时刻，并非数据库插入时刻。
         createdAt = r.startedAt();
         durationMs = r.durationMs();
+    }
+
+    /** 完整载荷比较用于提交丢响应后的查证，不能仅比较业务关联或吞唯一键冲突。 */
+    public LlmCallRecord toRecord() {
+        return new LlmCallRecord(
+                sessionId,
+                turnId,
+                iteration,
+                provider,
+                requestedModel,
+                responseModel,
+                responseId,
+                mode,
+                attempt,
+                finishReason,
+                toolCallCount,
+                imageCount,
+                promptTokens,
+                completionTokens,
+                totalTokens,
+                cacheReadTokens,
+                cacheWriteTokens,
+                requestsRemaining,
+                tokensRemaining,
+                outputCapHonored,
+                success,
+                failureKind,
+                httpStatus,
+                errorMessage,
+                createdAt,
+                durationMs);
     }
 
     public Long getId() {

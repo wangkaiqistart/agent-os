@@ -1,18 +1,21 @@
 package com.agentos.storage.audit;
 
 import com.agentos.core.audit.AuditWriteException;
+import com.agentos.core.audit.RetryingAuditWriter;
 import com.agentos.core.audit.ToolInvocationRecord;
 import com.agentos.core.audit.ToolInvocationRecorder;
+import com.agentos.core.config.AuditProperties;
 import com.agentos.core.tool.Redactor;
+import com.agentos.core.turn.TurnBudgetRegistry;
 import com.agentos.storage.session.ToolInvocationEntity;
 import com.agentos.storage.session.ToolInvocationRepository;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.TransactionTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -22,79 +25,140 @@ import tools.jackson.databind.json.JsonMapper;
 public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
     private final ToolInvocationRepository repository;
     private final Redactor redactor;
-    private final TransactionTemplate transaction;
+    private static final Logger log = LoggerFactory.getLogger(JpaToolInvocationRecorder.class);
+    private final AuditTransactions transactions;
+    private final TurnBudgetRegistry budgets;
+    private final RetryingAuditWriter writer;
     private final JsonMapper json = JsonMapper.builder().build();
 
     public JpaToolInvocationRecorder(
             ToolInvocationRepository repository,
             Redactor redactor,
-            PlatformTransactionManager manager) {
+            AuditTransactions transactions,
+            TurnBudgetRegistry budgets,
+            AuditProperties properties) {
         this.repository = repository;
         this.redactor = redactor;
-        transaction = new TransactionTemplate(manager);
-        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.transactions = transactions;
+        this.budgets = budgets;
+        writer = new RetryingAuditWriter(properties, AuditTransactions::transientFailure);
     }
 
     @Override
     public ToolInvocationRecord begin(ToolInvocationRecord record) {
-        return write(() -> {
-            validate(record);
-            var existing = find(record);
-            if (existing.isPresent()) {
-                if (!sameIdentity(existing.get(), record)
-                        || !"in_progress".equals(existing.get().getStatus())) {
-                    throw new AuditWriteException("工具审计意图冲突");
-                }
-                return record;
-            }
-            repository.saveAndFlush(entity(record));
-            return record;
-        });
+        return write(
+                record,
+                false,
+                () -> {
+                    validate(record);
+                    // 正常意图直接插入；唯一约束及失败后的完整查证处理重复调用/冲突。
+                    repository.saveAndFlush(entity(record));
+                    return record;
+                });
     }
 
     @Override
     public void complete(ToolInvocationRecord record) {
-        write(() -> {
-            validate(record);
-            var row = find(record).orElseThrow(() -> new AuditWriteException("缺少工具审计意图"));
-            if (!sameIdentity(row, record)) {
-                throw new AuditWriteException("工具审计身份冲突");
-            }
-            if (!"in_progress".equals(row.getStatus())) {
-                if (!sameOutcome(row, record)) {
-                    throw new AuditWriteException("工具审计终态冲突");
-                }
-                return null;
-            }
-            apply(row, record);
-            repository.saveAndFlush(row);
-            return null;
-        });
+        write(
+                record,
+                true,
+                () -> {
+                    validate(record);
+                    var row = find(record).orElseThrow(() -> new AuditWriteException("缺少工具审计意图"));
+                    if (!sameIdentity(row, record)) {
+                        throw new AuditWriteException("工具审计身份冲突");
+                    }
+                    if (!"in_progress".equals(row.getStatus())) {
+                        if (!sameOutcome(row, record)) {
+                            throw new AuditWriteException("工具审计终态冲突");
+                        }
+                        return null;
+                    }
+                    apply(row, record);
+                    repository.saveAndFlush(row);
+                    return null;
+                });
     }
 
     @Override
     public void skipped(ToolInvocationRecord record) {
-        write(() -> {
-            validate(record);
-            var existing = find(record);
-            if (existing.isPresent()) {
-                if (!sameIdentity(existing.get(), record) || !sameOutcome(existing.get(), record)) {
-                    throw new AuditWriteException("工具审计跳过记录冲突");
-                }
-            } else {
-                var row = entity(record);
-                apply(row, record);
-                repository.saveAndFlush(row);
-            }
-            return null;
-        });
+        write(
+                record,
+                false,
+                () -> {
+                    validate(record);
+                    var row = entity(record);
+                    apply(row, record);
+                    repository.saveAndFlush(row);
+                    return null;
+                });
     }
 
-    private <T> T write(Supplier<T> operation) {
+    private <T> T write(ToolInvocationRecord record, boolean finalAudit, Supplier<T> operation) {
         try {
-            return transaction.execute(s -> operation.get());
+            validate(record);
+            @SuppressWarnings("unchecked")
+            T confirmedValue = "in_progress".equals(record.status()) ? (T) record : null;
+            return writer.write(
+                    budgets.get(record.turnId()),
+                    finalAudit,
+                    new RetryingAuditWriter.Operation<T>() {
+                        @Override
+                        public T write(Duration timeout) {
+                            return transactions.execute(
+                                    timeout,
+                                    () -> {
+                                        if (!finalAudit) {
+                                            transactions.requireRunning(
+                                                    record.sessionId(), record.turnId());
+                                        }
+                                        return operation.get();
+                                    });
+                        }
+
+                        @Override
+                        public boolean confirmed(Duration timeout) {
+                            return transactions.execute(
+                                    timeout,
+                                    () ->
+                                            find(record)
+                                                    .map(row -> {
+                                                        if (!sameIdentity(row, record)
+                                                                || !sameOutcome(row, record)) {
+                                                            throw new AuditWriteException(
+                                                                    "工具审计载荷冲突");
+                                                        }
+                                                        return true;
+                                                    })
+                                                    .orElse(false));
+                        }
+                    },
+                    confirmedValue);
         } catch (RuntimeException failure) {
-            throw new AuditWriteException("工具审计写入未确认，操作可能已经执行");
+            var budget = budgets.get(record.turnId());
+            if (budget != null) {
+                budget.auditUnconfirmed();
+            }
+            // 仅记关联和固定文案，不输出 SQL、参数、Throwable 或数据库地址。
+            var previous = org.slf4j.MDC.getCopyOfContextMap();
+            org.slf4j.MDC.clear();
+            try {
+                log.atError()
+                        .addKeyValue("sessionId", record.sessionId())
+                        .addKeyValue("turnId", record.turnId())
+                        .addKeyValue("iteration", record.iteration())
+                        .addKeyValue(
+                                "agent",
+                                previous == null ? null : redactor.redact(previous.get("agent")))
+                        .addKeyValue("persistenceStatus", "UNCONFIRMED")
+                        .log("工具审计未确认");
+            } finally {
+                if (previous != null) {
+                    org.slf4j.MDC.setContextMap(previous);
+                }
+            }
+            throw new AuditWriteException(
+                    finalAudit ? "工具执行后的审计未确认，操作可能已经执行" : "工具执行前的审计未确认，未执行本次工具", finalAudit);
         }
     }
 
@@ -112,8 +176,7 @@ public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
     }
 
     private Optional<ToolInvocationEntity> find(ToolInvocationRecord r) {
-        return repository.findByTurnIdAndIterationAndToolCallId(
-                r.turnId(), r.iteration(), r.toolCallId());
+        return repository.findForUpdate(r.turnId(), r.iteration(), r.toolCallId());
     }
 
     private Object input(String raw) {

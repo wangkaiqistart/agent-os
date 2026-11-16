@@ -9,6 +9,29 @@ import org.springframework.data.repository.query.Param;
 
 /** Spring Data 根据接口生成实现；UUID 是 sessions 主键类型，锁查询必须在调用方事务内执行。 */
 public interface SessionRepository extends JpaRepository<SessionEntity, UUID> {
+    /**
+     * 只选失效 RUNNING、终态孤儿工具或终态残留租约所在会话。
+     * 只读 ID 避免锁前实体进入一级缓存；此处是候选筛选，拿锁后必须再次检查。
+     */
+    @Query(
+            value =
+                    """
+                    SELECT s.session_id FROM sessions s
+                    WHERE EXISTS (
+                        SELECT 1 FROM agent_turns t WHERE t.session_id = s.session_id AND (
+                            (t.status = 'RUNNING' AND (
+                                s.lease_owner IS DISTINCT FROM CAST(t.turn_id AS text)
+                                OR s.lease_until IS NULL OR s.lease_until <= clock_timestamp()))
+                            OR (t.status <> 'RUNNING' AND (
+                                s.lease_owner = CAST(t.turn_id AS text)
+                                OR EXISTS (SELECT 1 FROM tool_invocations i
+                                    WHERE i.turn_id = t.turn_id AND i.status = 'in_progress')))
+                        )
+                    ) ORDER BY s.session_id
+                    """,
+            nativeQuery = true)
+    java.util.List<UUID> findRecoveryCandidateIds();
+
     /** 派生查询：方法名中的字段和 And 条件被解析为 SQL，无需手写实现类。 */
     Optional<SessionEntity> findByChannelAndUserIdAndProfileNameAndStatus(
             String channel, String userId, String profileName, String status);

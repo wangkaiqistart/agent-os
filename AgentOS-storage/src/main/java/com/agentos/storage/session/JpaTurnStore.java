@@ -11,21 +11,83 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 轮次存储的 PostgreSQL 实现：用会话行锁协调抢占，用限时租约表示谁正在执行本轮。
  *
  * <p>行锁只持有到短事务结束，模型等待期间靠 leaseOwner/leaseUntil 协调，而不是一直锁表。
- * 本类由 StorageAutoConfiguration 注册，调用方经 Spring 事务代理进入下面的方法。
+ * 本类由 StorageAutoConfiguration 注册，通过 AuditTransactions 模板执行有界短事务。
  */
 public class JpaTurnStore implements TurnStore {
+    // 启动扫描不属于任何单轮：整次最多 30 秒，每次查询/会话恢复最多 5 秒。
+    // 启动不占用任何单轮预算，也不改变 deadline 后共享的一秒清理窗口。
+    private static final Duration RECOVERY_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration RECOVERY_TRANSACTION_TIMEOUT = Duration.ofSeconds(5);
     private final SessionRepository sessions;
     private final AgentTurnRepository turns;
     private final SessionMessageRepository messages;
     private final JdbcTemplate jdbc;
     private final TurnProperties properties;
+    private com.agentos.storage.audit.AuditTransactions transactions;
+    private com.agentos.core.turn.TurnBudgetRegistry budgets;
+
+    public JpaTurnStore(
+            SessionRepository sessions,
+            AgentTurnRepository turns,
+            SessionMessageRepository messages,
+            JdbcTemplate jdbc,
+            TurnProperties properties,
+            com.agentos.storage.audit.AuditTransactions transactions,
+            com.agentos.core.turn.TurnBudgetRegistry budgets) {
+        this(sessions, turns, messages, jdbc, properties);
+        this.transactions = transactions;
+        this.budgets = budgets;
+    }
+
+    private <T> T bounded(Duration timeout, java.util.function.Supplier<T> action) {
+        if (timeout.isZero() || timeout.isNegative()) {
+            throw new com.agentos.core.turn.TurnDeadlineExceededException();
+        }
+        if (transactions == null) {
+            return action.get();
+        }
+        Duration limit =
+                timeout.compareTo(properties.storageTimeout()) > 0
+                        ? properties.storageTimeout()
+                        : timeout;
+        long deadline = System.nanoTime() + limit.toNanos();
+        var task =
+                new FutureTask<T>(() -> {
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0 || Thread.currentThread().isInterrupted()) {
+                        throw new IllegalStateException("轮次存储操作预算已耗尽");
+                    }
+                    return transactions.execute(Duration.ofNanos(remaining), action);
+                });
+        Thread.ofVirtual().name("turn-storage").start(task);
+        try {
+            // 数据库事务尚未开始时也可能卡在连接池；外层等待必须采用相同操作预算。
+            return task.get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("轮次存储操作被中断，提交结果须查证");
+        } catch (TimeoutException failure) {
+            throw new IllegalStateException("轮次存储操作超时，提交结果须查证");
+        } catch (ExecutionException failure) {
+            if (failure.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new IllegalStateException("轮次存储操作失败，提交结果须查证");
+        } finally {
+            // 取消不能证明事务回滚；AuditTransactions 在迟到取连接后及提交前再次检查预算/中断。
+            task.cancel(true);
+        }
+    }
 
     /** 简化测试的构造器；未注入 JDBC 时以进程时间代替数据库时间。 */
     public JpaTurnStore(
@@ -57,8 +119,16 @@ public class JpaTurnStore implements TurnStore {
     }
 
     @Override
-    @Transactional
     public TurnSnapshot startTurn(
+            UUID turnId,
+            SessionKey key,
+            String trigger,
+            String userMessage,
+            TurnExecutionBudget budget) {
+        return bounded(budget.remaining(), () -> start(turnId, key, trigger, userMessage, budget));
+    }
+
+    private TurnSnapshot start(
             UUID turnId,
             SessionKey key,
             String trigger,
@@ -76,6 +146,7 @@ public class JpaTurnStore implements TurnStore {
         if (session.getLeaseUntil() != null && session.getLeaseUntil().isAfter(now)) {
             throw new AgentOSException(ErrorCode.SESSION_BUSY, "会话正有轮次在执行");
         }
+        recoverSession(session, now);
         String owner = turnId.toString();
         Instant until =
                 now.plus(
@@ -85,9 +156,9 @@ public class JpaTurnStore implements TurnStore {
         session.lease(owner, until);
         session.touch(now);
         sessions.save(session);
-        turns.save(
-                new AgentTurnEntity(
-                        turnId, session.getSessionId(), trigger, now, budget.deadline()));
+        // 数据库时间加单调预算余量；不把 Java 墙钟当成数据库时钟。
+        Instant deadline = now.plus(budget.remaining());
+        turns.save(new AgentTurnEntity(turnId, session.getSessionId(), trigger, now, deadline));
         // iteration=0 表示尚未调用模型的用户输入，与 RUNNING 轮次、租约一起提交或一起回滚。
         messages.save(
                 new SessionMessageEntity(
@@ -100,13 +171,15 @@ public class JpaTurnStore implements TurnStore {
                         null,
                         java.util.Map.of(),
                         now));
-        return new TurnSnapshot(
-                turnId, session.getSessionId(), key, owner, budget.deadline(), "RUNNING");
+        return new TurnSnapshot(turnId, session.getSessionId(), key, owner, deadline, "RUNNING");
     }
 
     @Override
-    @Transactional
     public boolean renewLease(TurnSnapshot turn, TurnExecutionBudget budget) {
+        return bounded(budget.remaining(), () -> renew(turn, budget));
+    }
+
+    private boolean renew(TurnSnapshot turn, TurnExecutionBudget budget) {
         // 续租也先锁行；旧 owner 或已经过期的 owner 不允许通过续租“复活”。
         SessionEntity session = sessions.findByIdForUpdate(turn.sessionId()).orElse(null);
         Instant now = databaseNow();
@@ -127,17 +200,29 @@ public class JpaTurnStore implements TurnStore {
     }
 
     @Override
-    @Transactional
     public FinishResult finishAndRelease(
             TurnSnapshot turn, String status, String text, String errorMessage) {
-        return finish(turn, status, text, errorMessage, null);
+        return finishBounded(turn, status, text, errorMessage, null);
     }
 
     @Override
-    @Transactional
     public FinishResult finishAndRelease(
             TurnSnapshot turn, String status, String text, String errorMessage, int iterations) {
-        return finish(turn, status, text, errorMessage, iterations);
+        return finishBounded(turn, status, text, errorMessage, iterations);
+    }
+
+    private FinishResult finishBounded(
+            TurnSnapshot turn,
+            String status,
+            String text,
+            String errorMessage,
+            Integer iterations) {
+        var budget = budgets == null ? null : budgets.get(turn.turnId());
+        Duration remaining =
+                budget == null
+                        ? properties.storageTimeout()
+                        : Duration.ofNanos(budget.remainingHardStopNanos());
+        return bounded(remaining, () -> finish(turn, status, text, errorMessage, iterations));
     }
 
     private FinishResult finish(
@@ -146,14 +231,29 @@ public class JpaTurnStore implements TurnStore {
             String text,
             String errorMessage,
             Integer iterations) {
-        // 收尾独立于模型调用。当前是普通查询，没有使用 startTurn 那样的 FOR UPDATE 行锁。
+        // 所有路径遵守 session → turn 的锁顺序，旧 owner 不能覆盖接管后的终态。
         Instant now = databaseNow();
+        SessionEntity session = sessions.findByIdForUpdate(turn.sessionId()).orElse(null);
         AgentTurnEntity entity = turns.findById(turn.turnId()).orElse(null);
-        SessionEntity session = sessions.findById(turn.sessionId()).orElse(null);
         if (entity == null || session == null) {
             // 返回未确认，交上层区分“业务结果已得到”和“数据库终态已确认”。
             return new FinishResult(status, false, text, errorMessage);
         }
+        if (!"RUNNING".equals(entity.getStatus())) {
+            interruptTools(entity.getTurnId(), now);
+            if (turn.owner().equals(session.getLeaseOwner())) {
+                session.lease(null, null);
+            }
+            return new FinishResult(
+                    entity.getStatus(), true, entity.getFinalText(), entity.getErrorMessage());
+        }
+        if (!turn.owner().equals(session.getLeaseOwner())) {
+            entity.interrupt("会话已被接管", now);
+            interruptTools(entity.getTurnId(), now);
+            return new FinishResult(
+                    entity.getStatus(), true, entity.getFinalText(), entity.getErrorMessage());
+        }
+        interruptTools(entity.getTurnId(), now);
         // 来自循环结果，不靠文本或审计行数推测；与终态一起在本次短事务中保存。
         if (iterations != null) {
             entity.iteration(iterations);
@@ -169,8 +269,18 @@ public class JpaTurnStore implements TurnStore {
     }
 
     @Override
-    @Transactional(readOnly = true)
     public Optional<TurnSnapshot> find(UUID turnId) {
+        return bounded(properties.storageTimeout(), () -> findSnapshot(turnId));
+    }
+
+    @Override
+    public Optional<TurnSnapshot> find(UUID turnId, TurnExecutionBudget budget) {
+        // 查证可能发生在起步失败之后；不能借独立查询重新获得五秒或整轮执行预算。
+        return bounded(
+                Duration.ofNanos(budget.remainingHardStopNanos()), () -> findSnapshot(turnId));
+    }
+
+    private Optional<TurnSnapshot> findSnapshot(UUID turnId) {
         // 只返回跨模块快照，不把受持久化上下文管理的实体暴露给 core。
         return turns.findById(turnId)
                 .flatMap(t ->
@@ -183,29 +293,98 @@ public class JpaTurnStore implements TurnStore {
                                                         s.getChannel(),
                                                         s.getUserId(),
                                                         s.getProfileName()),
-                                                s.getLeaseOwner(),
+                                                t.getTurnId().toString(),
                                                 t.getDeadlineAt(),
                                                 t.getStatus())));
     }
 
     @Override
-    @Transactional
     public int reapInterrupted() {
-        // 这是回收操作本身，尚无定时器自动调用；只处理租约失效或已换 owner 的 RUNNING 轮次。
-        Instant now = databaseNow();
-        int count = 0;
-        for (AgentTurnEntity turn : turns.findByStatus("RUNNING")) {
-            SessionEntity session = sessions.findById(turn.getSessionId()).orElse(null);
-            if (session == null
-                    || session.getLeaseUntil() == null
-                    || !session.getLeaseUntil().isAfter(now)
-                    || !turn.getTurnId().toString().equals(session.getLeaseOwner())) {
-                turn.interrupt("启动收尾回收旧轮次", now);
-                turns.save(turn);
-                count++;
+        long deadline = System.nanoTime() + RECOVERY_TIMEOUT.toNanos();
+        var task = new FutureTask<Integer>(() -> reap(deadline));
+        Thread.ofVirtual().name("turn-recovery").start(task);
+        try {
+            // 连接获取也扣总预算；Future 取消之后，事务入口及提交检查禁止迟到写入。
+            return task.get(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("启动回收被中断，未确认全部恢复完成");
+        } catch (TimeoutException failure) {
+            throw new IllegalStateException("启动回收超过 30 秒，未确认全部恢复完成");
+        } catch (ExecutionException failure) {
+            if (failure.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
             }
+            throw new IllegalStateException("启动回收失败，未确认全部恢复完成");
+        } finally {
+            task.cancel(true);
+        }
+    }
+
+    private <T> T recoveryTransaction(long deadline, java.util.function.Supplier<T> action) {
+        long remaining = deadline - System.nanoTime();
+        if (remaining <= 0 || Thread.currentThread().isInterrupted()) {
+            throw new IllegalStateException("启动回收预算已耗尽");
+        }
+        Duration timeout =
+                Duration.ofNanos(Math.min(remaining, RECOVERY_TRANSACTION_TIMEOUT.toNanos()));
+        return transactions == null ? action.get() : transactions.execute(timeout, action);
+    }
+
+    private int reap(long deadline) {
+        int count = 0;
+        var candidates = recoveryTransaction(deadline, sessions::findRecoveryCandidateIds);
+        for (UUID sessionId : candidates) {
+            // 每个会话独立提交；后续失败不回滚已恢复会话，也不在全量扫描期间持锁。
+            count +=
+                    recoveryTransaction(
+                            deadline,
+                            () -> {
+                                SessionEntity session =
+                                        sessions.findByIdForUpdate(sessionId).orElse(null);
+                                return session == null ? 0 : recoverSession(session, databaseNow());
+                            });
         }
         return count;
+    }
+
+    /** 启动和接管共用：有效 owner 保留；终态孤儿工具也可独立回收。 */
+    private int recoverSession(SessionEntity session, Instant now) {
+        int count = 0;
+        for (AgentTurnEntity turn : turns.findRecoveryCandidates(session.getSessionId(), now)) {
+            boolean active = "RUNNING".equals(turn.getStatus());
+            boolean owns = turn.getTurnId().toString().equals(session.getLeaseOwner());
+            boolean live =
+                    owns && session.getLeaseUntil() != null && session.getLeaseUntil().isAfter(now);
+            if (active && live) {
+                continue;
+            }
+            if (active) {
+                turn.interrupt("租约失效，回收旧轮次", now);
+                turns.save(turn);
+                count++;
+                if (owns) {
+                    session.lease(null, null);
+                }
+            }
+            if (!active && owns) {
+                session.lease(null, null);
+                count++;
+            }
+            count += interruptTools(turn.getTurnId(), now);
+        }
+        return count;
+    }
+
+    private int interruptTools(UUID turnId, Instant now) {
+        if (jdbc == null) {
+            return 0;
+        }
+        return jdbc.update(
+                "update tool_invocations set status='interrupted', error_message=?, updated_at=? where turn_id=? and status='in_progress'",
+                "轮次结束或租约失效，工具执行结果未知",
+                java.sql.Timestamp.from(now),
+                turnId);
     }
 
     private Instant databaseNow() {

@@ -29,6 +29,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
         classes = JpaToolInvocationRecorderTest.App.class,
         properties = {"spring.main.web-application-type=none", "spring.config.import="})
 class JpaToolInvocationRecorderTest extends PostgresIntegrationTest {
+    @jakarta.annotation.Resource com.agentos.core.turn.TurnBudgetRegistry budgets;
     @jakarta.annotation.Resource ToolInvocationRecorder recorder;
     @jakarta.annotation.Resource ToolInvocationRepository repository;
     @jakarta.annotation.Resource TurnStore turns;
@@ -54,12 +55,15 @@ class JpaToolInvocationRecorderTest extends PostgresIntegrationTest {
     }
 
     private TurnSnapshot turn() {
-        return turns.startTurn(
-                UUID.randomUUID(),
-                new SessionKey("test", UUID.randomUUID().toString(), "a"),
-                "test",
-                "hi",
-                TurnExecutionBudget.start(Duration.ofSeconds(10)));
+        var turn =
+                turns.startTurn(
+                        UUID.randomUUID(),
+                        new SessionKey("test", UUID.randomUUID().toString(), "a"),
+                        "test",
+                        "hi",
+                        TurnExecutionBudget.start(Duration.ofSeconds(10)));
+        budgets.register(turn.turnId(), TurnExecutionBudget.start(Duration.ofSeconds(10)));
+        return turn;
     }
 
     @Test
@@ -157,8 +161,11 @@ class JpaToolInvocationRecorderTest extends PostgresIntegrationTest {
         @Bean
         ToolInvocationRecorder testRecorder(
                 ToolInvocationRepository repo,
-                org.springframework.transaction.PlatformTransactionManager manager) {
-            return new JpaToolInvocationRecorder(repo, new Redactor(List::of), manager);
+                com.agentos.storage.audit.AuditTransactions transactions,
+                com.agentos.core.turn.TurnBudgetRegistry budgets,
+                com.agentos.core.config.AuditProperties properties) {
+            return new JpaToolInvocationRecorder(
+                    repo, new Redactor(List::of), transactions, budgets, properties);
         }
     }
 }

@@ -29,7 +29,7 @@ public class AgentTurnEntity {
     @Column(nullable = false)
     private String status;
 
-    // 次数更新方法已预留，但当前主链路尚未调用；数据库中的值不能视为 TurnResult 的次数。
+    // 正常循环次数与终态一起提交；致命异常收口目前按契约记 0，实际调用另查审计。
     @Column(nullable = false)
     private int iterations;
 

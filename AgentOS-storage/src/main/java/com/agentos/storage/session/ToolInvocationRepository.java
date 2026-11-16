@@ -11,6 +11,12 @@ public interface ToolInvocationRepository extends JpaRepository<ToolInvocationEn
     Optional<ToolInvocationEntity> findByTurnIdAndIterationAndToolCallId(
             UUID turnId, int iteration, String toolCallId);
 
+    @org.springframework.data.jpa.repository.Lock(
+            jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query(
+            "select t from ToolInvocationEntity t where t.turnId=:turnId and t.iteration=:iteration and t.toolCallId=:toolCallId")
+    Optional<ToolInvocationEntity> findForUpdate(UUID turnId, int iteration, String toolCallId);
+
     /** 为查询未完成调用预留；工具状态使用 in_progress 等小写值，与轮次状态区分。 */
     List<ToolInvocationEntity> findByTurnIdAndStatus(UUID turnId, String status);
 }

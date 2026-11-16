@@ -40,7 +40,29 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 @ConditionalOnBean(DataSource.class)
 @EntityScan("com.agentos.storage.session")
 @EnableJpaRepositories("com.agentos.storage.session")
+@org.springframework.boot.context.properties.EnableConfigurationProperties(
+        com.agentos.core.config.AuditProperties.class)
 public class StorageAutoConfiguration {
+    @Bean
+    @ConditionalOnMissingBean(com.agentos.core.turn.TurnBudgetRegistry.class)
+    com.agentos.core.turn.TurnBudgetRegistry turnBudgetRegistry() {
+        return new com.agentos.core.turn.TurnBudgetRegistry();
+    }
+
+    @Bean
+    com.agentos.storage.audit.AuditTransactions auditTransactions(
+            org.springframework.transaction.PlatformTransactionManager manager, DataSource source) {
+        return new com.agentos.storage.audit.AuditTransactions(manager, source);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            name = "agentos.runtime.chat",
+            havingValue = "true")
+    TurnReaperRunner turnReaperRunner(TurnStore turns) {
+        return new TurnReaperRunner(new com.agentos.core.turn.TurnReaper(turns));
+    }
+
     /** Bean 默认名称为方法名；对 core 暴露接口类型，隔离 JPA 和 JDBC 细节。 */
     @Bean
     SessionManager sessionManager(
@@ -54,9 +76,11 @@ public class StorageAutoConfiguration {
             AgentTurnRepository turns,
             SessionMessageRepository messages,
             org.springframework.jdbc.core.JdbcTemplate jdbc,
-            TurnProperties properties) {
+            TurnProperties properties,
+            com.agentos.storage.audit.AuditTransactions transactions,
+            com.agentos.core.turn.TurnBudgetRegistry budgets) {
         // 正式路径必须传入 JDBC，以数据库时钟协调跨实例租约。
-        return new JpaTurnStore(sessions, turns, messages, jdbc, properties);
+        return new JpaTurnStore(sessions, turns, messages, jdbc, properties, transactions, budgets);
     }
 
     @Bean
@@ -66,9 +90,14 @@ public class StorageAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(LlmCallRecorder.class)
-    LlmCallRecorder llmCallRecorder(LlmCallRepository repository) {
+    LlmCallRecorder llmCallRecorder(
+            LlmCallRepository repository,
+            com.agentos.storage.audit.AuditTransactions transactions,
+            com.agentos.core.turn.TurnBudgetRegistry budgets,
+            com.agentos.core.tool.Redactor redactor,
+            com.agentos.core.config.AuditProperties properties) {
         // 自定义 Recorder 已存在时退让；这里的条件不意味着发生数据库错误时会回退到日志。
-        return new JpaLlmCallRecorder(repository);
+        return new JpaLlmCallRecorder(repository, transactions, budgets, redactor, properties);
     }
 
     @Bean
@@ -76,8 +105,10 @@ public class StorageAutoConfiguration {
     com.agentos.core.audit.ToolInvocationRecorder toolInvocationRecorder(
             com.agentos.storage.session.ToolInvocationRepository repository,
             com.agentos.core.tool.Redactor redactor,
-            org.springframework.transaction.PlatformTransactionManager manager) {
+            com.agentos.storage.audit.AuditTransactions transactions,
+            com.agentos.core.turn.TurnBudgetRegistry budgets,
+            com.agentos.core.config.AuditProperties properties) {
         return new com.agentos.storage.audit.JpaToolInvocationRecorder(
-                repository, redactor, manager);
+                repository, redactor, transactions, budgets, properties);
     }
 }
