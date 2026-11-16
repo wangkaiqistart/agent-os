@@ -1,6 +1,6 @@
 # AgentOS-web 代码导读
 
-Web 模块负责 HTTP 表达，不负责模型推理。核心原则是所有成功和失败响应都使用统一格式。
+Web 模块负责 HTTP 表达，不负责模型推理。正式 API 的成功和失败响应使用统一格式；可删除的临时调试入口使用自己的调试结果结构。
 
 ```mermaid
 sequenceDiagram
@@ -20,6 +20,7 @@ sequenceDiagram
 | `ApiResponse<T>` | 统一的 `code/message/data/timestamp` 响应信封 |
 | `GlobalExceptionHandler` | 把业务异常和 Spring MVC 异常转成统一响应 |
 | `WebConfig` | 配置 `/api/**` 的 CORS |
+| `dev.AgentLoopDebugController` | 由开关控制的临时同步/SSE 入口，调用统一 `AgentService`，用于断点调试 |
 
 例如：
 
@@ -33,4 +34,10 @@ sequenceDiagram
 ```
 
 当前还没有真正的 `ApiController`，所以这里是 Web 基础设施，而不是完整 REST API。
+
+## 临时调试入口
+
+[AgentLoopDebugController.java](../../AgentOS-web/src/main/java/com/agentos/web/dev/AgentLoopDebugController.java) 的中文注释解释了 JSON 参数、局部事件列表、虚拟线程、SSE 回调和业务终态。启动方式见 [Boot 导读](./AgentOS-boot.md)。它遵循 Controller 位于 web 模块的架构边界，调试主类则位于 boot 模块。
+
+它默认关闭，启用条件为 `agentos.debug.react-loop.enabled=true`。同步请求 `POST /debug/react-loop`，流式请求 `POST /debug/react-loop/stream`，都会真实进入模型与存储链路。HTTP 200 不等于业务成功，应检查 `result.status` 与 `result.persistenceStatus`；SSE 中查看终态事件。调试完成后可删除该 Controller 及 boot 中的临时启动主类。
 

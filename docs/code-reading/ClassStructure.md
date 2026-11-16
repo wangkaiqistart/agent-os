@@ -1,8 +1,8 @@
-# AgentOS 类结构图
+# AgentOS 当前类结构
 
-这份文件记录当前仓库里已经存在的 Java 类，以及它们之间的主要关系。图中的关系以当前源码为准；设计文档里提到但源码中尚未出现的类，不放进“当前类图”。
+这份文件只记录源码中已经存在的主要类。阅读时先沿着请求方向看，再回头看各个端口的实现。
 
-## 一、先看箭头含义
+## 关系含义
 
 ```text
 继承：       子类 --|> 父类
@@ -11,358 +11,132 @@
 组合关系：   A *-- B
 ```
 
-类图里最重要的是先回答三个问题：
-
-1. 谁负责创建对象？
-2. 谁依赖谁？
-3. 哪些类只是接口，哪些类是真正实现？
-
-## 二、当前项目总览
+## 总体结构
 
 ```mermaid
 flowchart TD
     Boot[AgentOSApplication] --> CLI[AgentOSCli]
-    CLI --> Command[AgentOSCommand]
-    Boot --> Config[application.yaml]
-    Config --> ProviderConfig[ProviderAutoConfiguration]
-    ProviderConfig --> Provider[Provider 模块]
-    Provider --> Core[AgentOS-core 契约]
-    Web[AgentOS-web] --> Core
-    CLI --> Core
+    CLI --> Init[InitCommand]
+    CLI --> Chat[ChatCommand]
+    Chat --> Launcher[SpringContextLauncher]
+    Launcher --> CoreAuto[CoreAutoConfiguration]
+    Launcher --> ProviderAuto[ProviderAutoConfiguration]
+    Launcher --> StorageAuto[StorageAutoConfiguration]
+    CoreAuto --> Service[DefaultAgentService]
+    ProviderAuto --> Provider[DefaultProviderService]
+    ProviderAuto --> Catalog[DefaultProviderCatalog]
+    StorageAuto --> Turn[JpaTurnStore]
+    StorageAuto --> Messages[JpaMessageStore]
+    StorageAuto --> Sessions[JpaSessionManager]
+    StorageAuto --> Audit[JpaLlmCallRecorder]
+    Service --> Provider
+    Service --> Turn
+    Service --> Messages
+    Service --> Catalog
 ```
 
-当前代码的方向是：
+依赖方向是：入口依赖 Core，Core 只依赖端口，Provider 和 Storage 实现端口，Boot 通过 Spring 自动配置把它们放在一起。Core 不应该反向依赖 JPA 或具体模型 SDK。
 
-```text
-boot 负责组装
-cli / web 负责接收请求
-core 负责定义契约
-provider 负责连接外部模型
-```
-
-## 三、AgentOS-core 类图
+## 一次请求的对象关系
 
 ```mermaid
 classDiagram
-    class ErrorCode {
-        <<enumeration>>
-        INVALID_ARGUMENT
-        NOT_FOUND
-        SESSION_BUSY
-        PROVIDER_UNAVAILABLE
-        INTERNAL_ERROR
+    class AgentService {
+        <<interface>>
+        +process(ProcessRequest) TurnResult
+        +process(ProcessRequest, TurnSink) TurnResult
     }
-
-    class AgentOSException {
-        -ErrorCode errorCode
-        +getErrorCode() ErrorCode
+    class DefaultAgentService {
+        -AgentLoader loader
+        -ProviderCatalog providers
+        -SessionManager sessions
+        -TurnStore turns
+        -ReActLoop loop
+        +process(...)
     }
-
-    class Profile {
-        +String provider
-        +String model
-        +String reasoningEffort
-        +Integer maxOutputTokens
-        +Double temperature
+    class ReActLoop {
+        +run(TurnSnapshot, LoadedAgent, String, TurnExecutionBudget, TurnSink) Result
     }
-
-    class CallCorrelation {
-        +UUID sessionId
-        +UUID turnId
-        +Integer iteration
-        +none() CallCorrelation
-    }
-
-    class ProviderRequest {
-        +Profile profile
-        +List~Message~ messages
-        +List~ToolCallback~ tools
-        +Map~String,Object~ toolContext
-        +Instant deadline
-        +CallCorrelation correlation
-        +springToolContext() ToolContext
-    }
-
     class ProviderService {
         <<interface>>
         +call(ProviderRequest) ProviderResult
         +stream(ProviderRequest, Consumer) ProviderResult
     }
-
-    class ProviderResult {
-        +ChatResponse response
-        +List~LlmCallRecord~ calls
-    }
-
-    class LlmCallRecord {
-        +UUID sessionId
-        +String provider
-        +String requestedModel
-        +CallMode mode
-        +int attempt
-        +boolean success
-        +FailureKind failureKind
-        +long durationMs
-    }
-
-    class LlmCallRecorder {
+    class TurnStore {
         <<interface>>
-        +record(LlmCallRecord)
+        +startTurn(...)
+        +renewLease(...)
+        +finishAndRelease(...)
     }
-
-    class ProviderCallException {
-        +List~LlmCallRecord~ calls
-        +getCalls() List~LlmCallRecord~
+    class MessageStore {
+        <<interface>>
+        +append(...)
+        +recentTurns(...)
     }
+    class DefaultProviderService
+    class JpaTurnStore
+    class JpaMessageStore
 
-    class CallMode {
-        <<enumeration>>
-        CALL
-        STREAM
-    }
-
-    class FailureKind {
-        <<enumeration>>
-        RATE_LIMITED
-        SERVER_ERROR
-        CONNECTION
-        AUTH
-        INVALID_REQUEST
-        PROTOCOL
-        CANCELLED
-    }
-
-    AgentOSException --> ErrorCode : carries
-    Profile ..> AgentOSException : validates
-    ProviderRequest *-- Profile
-    ProviderRequest *-- CallCorrelation
-    ProviderService ..> ProviderRequest : receives
-    ProviderService ..> ProviderResult : returns
-    ProviderResult *-- LlmCallRecord
-    LlmCallRecorder ..> LlmCallRecord : records
-    ProviderCallException --|> AgentOSException
-    ProviderCallException *-- LlmCallRecord
-    LlmCallRecord --> CallMode
-    LlmCallRecord --> FailureKind
-```
-
-最核心的阅读顺序是：
-
-```text
-Profile
-  ↓
-ProviderRequest
-  ↓
-ProviderService
-  ↓
-ProviderResult
-  ↓
-LlmCallRecord / LlmCallRecorder
-```
-
-`ProviderService` 是接口，所以 `core` 不知道底层到底是 OpenAI、DeepSeek 还是测试服务器。
-
-## 四、Provider 模块类图
-
-```mermaid
-classDiagram
-    class ProviderAutoConfiguration {
-        +loggingLlmCallRecorder() LlmCallRecorder
-        +providerService(...) ProviderService
-    }
-
-    class ProviderConnectionAssembler {
-        +assemble() Map~String,ProviderConnection~
-    }
-
-    class RequestValidator {
-        +resolve(Profile) Resolved
-    }
-
-    class DefaultProviderService {
-        +call(ProviderRequest) ProviderResult
-        +stream(ProviderRequest, Consumer) ProviderResult
-    }
-
-    class ChatModelFactory {
-        +create(Connection) OpenAiChatModel
-    }
-
-    class ProviderProperties {
-        +String defaultProvider
-        +Map~String,Connection~ providers
-    }
-
-    class Connection {
-        +String type
-        +String baseUrl
-        +String apiKey
-        +Duration timeout
-        +Duration retryMinRemaining
-        +Duration retryMaxWait
-    }
-
-    class EmbeddingProperties {
-        +boolean enabled
-        +String baseUrl
-        +String apiKey
-        +String model
-        +int dimensions
-        +int maxBatchSize
-        +Duration timeout
-    }
-
-    class ConnectionType {
-        <<enumeration>>
-        OPENAI
-        DEEPSEEK
-        +parse(String) ConnectionType
-        +applyOutputLimit(Builder, Integer) Builder
-    }
-
-    class ProviderConnection {
-        +String name
-        +ConnectionType type
-        +Duration timeout
-        +boolean available
-        +OpenAiChatModel chatModel
-    }
-
-    class LoggingLlmCallRecorder {
-        +record(LlmCallRecord)
-    }
-
-    class ToolCallingManager {
-        <<Spring AI Bean>>
-    }
-
-    class ObservationRegistry {
-        <<Micrometer Bean>>
-    }
-
-    class OpenAiChatModel {
-        <<Spring AI class>>
-    }
-
-    ProviderAutoConfiguration --> ProviderProperties : enables
-    ProviderAutoConfiguration --> EmbeddingProperties : enables
-    ProviderAutoConfiguration ..> LoggingLlmCallRecorder : creates default
-    ProviderAutoConfiguration ..> ProviderConnectionAssembler : validates and builds
-    ProviderAutoConfiguration ..> DefaultProviderService : registers as ProviderService
-    ProviderConnectionAssembler --> ChatModelFactory : creates models
-    ProviderConnectionAssembler ..> ProviderConnection : produces
+    DefaultAgentService ..|> AgentService
+    DefaultAgentService --> ReActLoop
+    DefaultAgentService --> TurnStore
+    DefaultAgentService --> MessageStore
+    DefaultAgentService --> ProviderService
+    ReActLoop --> ProviderService
+    ReActLoop --> MessageStore
     DefaultProviderService ..|> ProviderService
-    DefaultProviderService --> RequestValidator : validates first
-    DefaultProviderService --> LlmCallRecorder : records each attempt
-    RequestValidator --> ProviderConnection : looks up by name
-    ChatModelFactory --> ToolCallingManager : injects
-    ChatModelFactory --> ObservationRegistry : injects
-    ChatModelFactory --> ProviderProperties : reads Connection
-    ChatModelFactory --> OpenAiChatModel : creates, not Bean
-    ProviderProperties *-- Connection : contains map values
-    ProviderConnection --> ConnectionType
-    LoggingLlmCallRecorder ..|> LlmCallRecorder
-    LoggingLlmCallRecorder ..> LlmCallRecord
+    JpaTurnStore ..|> TurnStore
+    JpaMessageStore ..|> MessageStore
 ```
 
-这里的关键是：
+## Core 中的三条关键线
 
 ```text
-application.yaml
-    ↓
-ProviderProperties / EmbeddingProperties
-    ↓
-ProviderAutoConfiguration
-    ↓ ProviderConnectionAssembler 校验并建连接
-Spring 容器中的 ProviderService（只有它，没有 ChatModel Bean）
+AgentProfile / AgentSettings
+  -> LoadedAgent
+  -> PromptBuilder
+  -> ProviderRequest
 ```
 
-## 五、启动、CLI 与 Web 类图
+```text
+SessionKey
+  -> SessionManager.findActive
+  -> TurnStore.startTurn
+  -> TurnSnapshot
+  -> TurnGuard.renewLease
+  -> TurnStore.finishAndRelease
+```
+
+```text
+ProviderRequest
+  -> ProviderService
+  -> ProviderResult / ProviderCallException
+  -> LlmCallRecord
+  -> LlmCallRecorder
+```
+
+## Storage 的实体关系
 
 ```mermaid
-classDiagram
-    class AgentOSApplication {
-        +main(String[]) void
-    }
-
-    class AgentOSCli {
-        +execute(String...) int
-    }
-
-    class AgentOSCommand {
-        +run() void
-    }
-
-    class VersionInfo {
-        +getVersion() String[]
-    }
-
-    class ApiResponse~T~ {
-        +String code
-        +String message
-        +T data
-        +Instant timestamp
-        +ok(T) ApiResponse
-        +error(ErrorCode, String) ApiResponse
-    }
-
-    class GlobalExceptionHandler {
-        +handleAgentOS(AgentOSException)
-        +handleUnexpected(Exception)
-        +toHttpStatus(ErrorCode) HttpStatus
-    }
-
-    class WebConfig {
-        +addCorsMappings(CorsRegistry)
-    }
-
-    class ResponseEntityExceptionHandler {
-        <<Spring class>>
-    }
-
-    class WebMvcConfigurer {
-        <<Spring interface>>
-    }
-
-    AgentOSApplication --> AgentOSCli : delegates
-    AgentOSCli --> AgentOSCommand : creates
-    AgentOSCommand --> VersionInfo : versionProvider
-    GlobalExceptionHandler --|> ResponseEntityExceptionHandler
-    GlobalExceptionHandler --> ApiResponse : returns
-    GlobalExceptionHandler --> ErrorCode : maps
-    WebConfig ..|> WebMvcConfigurer
+erDiagram
+    sessions ||--o{ agent_turns : contains
+    agent_turns ||--o{ session_messages : contains
+    agent_turns ||--o{ llm_calls : audits
+    agent_turns ||--o{ tool_invocations : audits
 ```
 
-当前实际启动链路仍然是：
+`SessionEntity` 保存租约；`AgentTurnEntity` 保存轮次状态；`SessionMessageEntity` 保存用户和助手消息；`LlmCallEntity` 保存一次模型尝试的结构化审计。Core 只拿 `SessionSnapshot`、`TurnSnapshot` 和 `HistoryTurn`，不拿 JPA 实体。
 
-```text
-AgentOSApplication.main
-    ↓
-AgentOSCli.execute
-    ↓
-AgentOSCommand
-    ↓
-显示帮助或执行子命令
+## 入口模块
+
+```mermaid
+flowchart LR
+    I[stdin] --> CC[CliChannel]
+    CC --> Request[ProcessRequest]
+    Chat[ChatCommand] --> Request
+    Request --> AS[AgentService]
+    AS --> Result[TurnResult]
+    Result --> Output[CLI 输出]
 ```
 
-`GlobalExceptionHandler` 目前已经可以工作，但真正的 `ApiController` 还没有加入。
-
-## 六、当前不存在的类
-
-以下类在设计文档中出现，但当前源码中还没有实现，因此没有画进“当前类图”：
-
-```text
-ReActLoop
-AgentService
-ToolExecutor
-MemoryService
-SessionManager
-LongTermMemoryStore
-ToolRegistry
-Sandbox
-ApiController
-Repository
-```
-
-等这些类真正加入源码后，再把它们补进对应模块的类图。
-
+`CliIdentity` 把 `cli + 登录用户名 + Agent 名` 组成 `SessionKey`。`CliChannel` 只处理输入、`/exit`、空行和输出，不参与模型调用。

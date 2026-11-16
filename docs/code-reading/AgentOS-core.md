@@ -1,99 +1,119 @@
 # AgentOS-core 代码导读
 
-`AgentOS-core` 是项目地基。它定义规则和数据结构，尽量不依赖具体 Provider、数据库或 HTTP。
+`AgentOS-core` 是业务规则和端口所在的模块。它知道 Agent 如何加载、一次轮次如何受预算约束、模型调用需要哪些字段，但不知道 PostgreSQL 表结构，也不直接创建 OpenAI 模型。
+
+## 先看自动配置
+
+入口：[CoreAutoConfiguration.java](../../AgentOS-core/src/main/java/com/agentos/core/config/CoreAutoConfiguration.java)
+
+它显式创建：
+
+```text
+WorkspaceProperties -> AgentLoader / ContextLoader
+ContextLoader -> PromptBuilder
+TurnStore -> TurnGuard
+TurnRunner、TurnBudgetRegistry
+ProviderService + ProviderCatalog + SessionManager + TurnStore + MessageStore
+    -> DefaultAgentService
+```
+
+`AgentService` 只有在 Provider、ProviderCatalog、Storage 端口都存在时才创建。这保证只有测试或 CLI 需要的组件装配完整后，才会出现真正的业务入口。
+
+## `DefaultAgentService`：一轮请求的总编排
+
+文件：[DefaultAgentService.java](../../AgentOS-core/src/main/java/com/agentos/core/turn/DefaultAgentService.java)
 
 ```mermaid
-flowchart LR
-    P[Profile] --> R[ProviderRequest]
-    M[Messages] --> R
-    T[Tools / ToolContext] --> R
-    R --> S[ProviderService]
-    S --> O[ProviderResult]
-    S --> L[LlmCallRecord]
-    L --> A[LlmCallRecorder]
-    S -.全部失败.-> X[ProviderCallException]
+sequenceDiagram
+    participant C as CLI/入口
+    participant A as DefaultAgentService
+    participant L as AgentLoader/ContextLoader
+    participant V as ProviderCatalog
+    participant T as TurnStore
+    participant R as ReActLoop
+    participant P as ProviderService
+    participant M as MessageStore
+
+    C->>A: process(request, sink)
+    A->>L: load agent + 每轮读取 Bootstrap
+    A->>V: validate(profile)
+    A->>T: startTurn(session, turn, user message)
+    A->>R: run(turn, agent, message, budget, sink)
+    R->>P: call 或 stream
+    R->>M: append assistant message
+    A->>T: finishAndRelease(status, text, error)
+    A-->>C: TurnResult
 ```
 
-## 类的职责
+实现顺序值得注意：ProviderCatalog 在 `startTurn` 前校验，所以未知 Provider 不会先创建 session/turn；空白消息也在建轮次前拒绝。`startTurn` 成功后才注册预算和 MDC，最终在 `finally` 中移除预算、清理 MDC。
 
-| 类 | 作用 |
-|---|---|
-| `ErrorCode` | 稳定的业务错误类型，如 `SESSION_BUSY` |
-| `AgentOSException` | 携带 `ErrorCode` 的统一业务异常 |
-| `Profile` | 一次模型调用的模型和生成参数 |
-| `ProviderRequest` | 发给 Provider 的完整请求 |
-| `ProviderService` | 同步或流式调用模型的接口 |
-| `ProviderResult` | 模型响应加全部调用记录 |
-| `LlmCallRecord` | 一次实际模型请求的审计记录 |
-| `LlmCallRecorder` | 审计记录的输出扩展点 |
-| `FailureKind` | 判断错误是否适合重试 |
-| `ProviderCallException` | 所有重试都失败后的异常 |
-| `CallCorrelation` | 关联 Session、Turn、Iteration |
-| `CallMode` | `CALL` 一次性返回，`STREAM` 流式返回 |
-| `EmbeddingService` | 文本转向量的接口 |
-| `EmbeddingStatus` | Embedding 当前状态和原因 |
+终态由 `TurnStore.finishAndRelease` 持久化确认结果决定：业务状态仍是 `SUCCEEDED`、`FAILED` 或 `TIMED_OUT`，另外返回 `PersistenceStatus.CONFIRMED` 或 `UNCONFIRMED`。终结回调发生在持久化收尾之后，回调异常只记安全日志，不改变已经确定的业务结果。
 
-## `CallCorrelation` 详解
+## Agent 配置和 Prompt
 
-文件：[`CallCorrelation.java`](../../AgentOS-core/src/main/java/com/agentos/core/provider/CallCorrelation.java)
+入口：[AgentLoader.java](../../AgentOS-core/src/main/java/com/agentos/core/agent/AgentLoader.java)
 
-它给一次模型调用标记业务位置：
+每次读取 `.AgentOS/agents/<name>/AGENT.md` 时会检查：
 
-```java
-public record CallCorrelation(
-        UUID sessionId,
-        UUID turnId,
-        Integer iteration) {}
+- 名称不能为空，不能含 `..`、`/` 或 `\\`，目录不能是越界软链接；
+- frontmatter 使用 SnakeYAML `SafeConstructor`；
+- `name` 必须等于目录名，`provider.model` 必填；
+- `settings` 缺省为 `maxIterations=10`、`maxHistoryTurns=20`、`maxHistoryTokens=32000`、`turnTimeout=300s`；
+- 未声明 `tools` 时使用空列表，并打 INFO；认识但尚未实现的键只打 WARN。
+
+`ContextLoader` 在每轮重新读取 `AGENTS.md`、`SOUL.md`、`USER.md`，日期通过可注入 `Clock` 生成。`PromptBuilder` 按固定顺序生成一个系统消息：
+
+```text
+Agent 正文
+-> Bootstrap AGENTS.md
+-> Bootstrap SOUL.md
+-> Bootstrap USER.md
+-> 数据安全说明
+-> 当地日期
+-> 历史消息（当前调用方传入时）
+-> 当前 UserMessage
 ```
 
-三个字段的关系是：
+系统消息只进入 ProviderRequest，不写入 MessageStore。
 
-```mermaid
-flowchart TD
-    S[Session 一整段连续会话] --> T1[Turn 1 一次用户请求]
-    S --> T2[Turn 2 另一次用户请求]
-    T1 --> I1[Iteration 1]
-    T1 --> I2[Iteration 2]
-    T1 --> I3[Iteration 3]
-```
+三个 Bootstrap 文件位于运行工作区 `.AgentOS/` 内，与仓库根目录给 Codex 使用的 `AGENTS.md` 不同。缺失时 `ContextLoader` 打 WARN 并跳过，仍可继续执行；在仓库根目录运行 `java -jar AgentOS-boot/target/AgentOS.jar init` 可用默认模板补齐，已有文件不会覆盖，也不会连接数据库。
 
-| 字段 | 含义 | 变化规律 |
+当前 `DefaultAgentService.process` 会先调用一次 `ContextLoader.load`；随后 `TurnRunner` 在虚拟线程中执行 `ReActLoop`，`PromptBuilder.build` 再读取一次 Bootstrap。因此同一次请求可能在两个线程各出现一组缺失警告，这本身不表示模型调用了两次。调试时可在这两个加载点下断点，比较 `LoadedAgent.bootstrap()` 和最终的系统消息。
+
+## 最小 ReAct 循环
+
+入口：[ReActLoop.java](../../AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java)
+
+当前版本的一次循环只有一次模型请求：
+
+1. 用 PromptBuilder 生成输入；
+2. `TurnGuard.checkpoint` 检查截止时间并续租；
+3. 构造 `ProviderRequest`，带 `CallCorrelation(sessionId, turnId, 1)`；
+4. 根据 `TurnSink.streaming()` 选择 `ProviderService.call` 或 `stream`；
+5. 再次 checkpoint；
+6. 空回答或工具调用返回 `FAILED`；普通文本追加一条助手消息并返回 `SUCCEEDED`。
+
+工具列表当前固定为空，工具调用不会被执行。后续工具执行器接入后，循环才会扩展为多 iteration。
+
+## 时间预算和租约
+
+入口：[TurnExecutionBudget.java](../../AgentOS-core/src/main/java/com/agentos/core/turn/TurnExecutionBudget.java)、[TurnGuard.java](../../AgentOS-core/src/main/java/com/agentos/core/turn/TurnGuard.java)、[TurnRunner.java](../../AgentOS-core/src/main/java/com/agentos/core/turn/TurnRunner.java)
+
+`TurnExecutionBudget` 用 `System.nanoTime()` 计算本地剩余时长，同时保存给 Provider 的绝对 `Instant deadline`，并额外预留 1 秒 hard stop。`TurnRunner` 使用虚拟线程执行任务，超过 hard stop 就取消任务并转成 `TurnDeadlineExceededException`。
+
+`TurnGuard` 在模型调用前后检查：预算是否过期、是否还能续租。预算通过方法参数和 `TurnBudgetRegistry(turnId -> budget)` 显式传递，不使用 `ThreadLocal`。
+
+## 端口表
+
+| 端口 | 作用 | 当前实现 |
 |---|---|---|
-| `sessionId` | 整段连续对话的 ID | 同一会话的多个 Turn 通常相同 |
-| `turnId` | 一次用户请求的轮次 ID | 同一 Turn 的多次模型调用相同 |
-| `iteration` | 当前 Turn 内第几次模型调用 | 在同一个 Turn 中逐次变化 |
+| `ProviderCatalog` | 建轮次前校验 Provider/Profile | `DefaultProviderCatalog` |
+| `ProviderService` | 一次同步或流式模型调用 | `DefaultProviderService` |
+| `SessionManager` | 查找活动会话、按空闲状态归档 | `JpaSessionManager` |
+| `TurnStore` | 原子起轮、续租、终态和回收 | `JpaTurnStore` |
+| `MessageStore` | 追加消息、读取历史轮次 | `JpaMessageStore` |
+| `LlmCallRecorder` | 保存结构化模型调用记录 | 日志记录器或 `JpaLlmCallRecorder` |
 
-例如一次用户请求需要先让模型判断、再调用工具、最后组织答案：
+## 测试怎么读
 
-```text
-Session S100
-└── Turn T200
-    ├── Iteration 1：模型决定调用天气工具
-    ├── Iteration 2：模型读取工具结果
-    └── Iteration 3：模型生成最终答案
-```
-
-这三次调用的 `sessionId` 和 `turnId` 相同，`iteration` 分别是 1、2、3。
-
-`CallCorrelation.none()` 返回三个 `null`，表示这次调用没有会话、轮次和循环上下文，例如独立测试或简单 CLI 调用。这里使用 `Integer` 而不是 `int`，就是为了允许“未知”状态；`null` 比用 `0` 表示未知更清楚。
-
-这个对象会先放进 `ProviderRequest`，之后复制到 `LlmCallRecord`，这样审计记录可以回答：
-
-```text
-这次模型调用属于哪个会话？
-属于哪个用户请求？
-是该请求中的第几次模型调用？
-```
-
-## 最重要的边界
-
-```text
-core 只定义“需要什么能力”
-provider 负责“如何连接模型”
-web / cli 负责“如何接收和返回请求”
-```
-
-`ProviderRequest` 不负责 ReAct 循环。它只描述一次模型调用；要不要继续下一轮，由更上层的 Agent 引擎决定。
-
-源码入口：[`ProviderRequest.java`](../../AgentOS-core/src/main/java/com/agentos/core/provider/ProviderRequest.java)、[`ProviderService.java`](../../AgentOS-core/src/main/java/com/agentos/core/provider/ProviderService.java)。
-
+优先读 `AgentLoaderTest`、`PromptBuilderTest`、`ReActLoopTest`，再读 `AgentServiceTest`。测试夹具在 `AgentOS-core/src/test/.../support/`，包括内存 Session/Turn/Message 实现、脚本化 Provider 和事件记录 Sink。它们让 Core 测试不启动 Spring、不连接数据库，也不发送真实模型请求。
