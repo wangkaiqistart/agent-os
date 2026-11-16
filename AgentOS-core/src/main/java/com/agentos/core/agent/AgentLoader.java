@@ -18,7 +18,15 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
-/** 安全读取 .AgentOS/agents 下的 Agent 文档。每轮调用都会重新读取。 */
+/**
+ * 从工作区 agents 目录读取指定 Agent，把 AGENT.md 分成运行配置和任务正文。
+ *
+ * <p>frontmatter 中的 provider/settings 等字段派生为不可变值对象；正文交给 PromptBuilder
+ * 作为系统指令。本类不调用模型，也不加载工作区共享 Bootstrap，那部分由 ContextLoader 负责。
+ *
+ * <p>每轮重新读取，不缓存文件。这里使用 SnakeYAML，未走 Spring Environment，
+ * 所以正文和模型名里的环境变量占位符不会自动按 Spring 的规则展开。
+ */
 public final class AgentLoader {
     private static final Logger log = LoggerFactory.getLogger(AgentLoader.class);
     private static final List<String> KNOWN_UNSUPPORTED =
@@ -30,6 +38,10 @@ public final class AgentLoader {
                 Objects.requireNonNull(agentsRoot, "agentsRoot").toAbsolutePath().normalize();
     }
 
+    /**
+     * 按目录名定位 Agent，拒绝带路径片段的名称与末级软链接目录/文件。
+     * 这些检查限制本入口的文件定位，不代替未来工具执行所需的完整沙箱。
+     */
     public LoadedAgent load(String name) {
         if (name == null
                 || name.isBlank()
@@ -38,6 +50,7 @@ public final class AgentLoader {
                 || name.contains("\\")) {
             throw new AgentOSException(ErrorCode.INVALID_ARGUMENT, "Agent 名称不合法");
         }
+        // 名称只能是一个目录名，不能通过 ../ 或路径分隔符选择其他文件。
         Path dir = agentsRoot.resolve(name).normalize();
         if (!dir.startsWith(agentsRoot) || !Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)) {
             throw new AgentOSException(ErrorCode.NOT_FOUND, "Agent 目录不存在：" + name);
@@ -50,6 +63,7 @@ public final class AgentLoader {
             String source = Files.readString(file, StandardCharsets.UTF_8);
             Frontmatter parsed = parse(source, file);
             Map<String, Object> root = parsed.values();
+            // 请求名称、目录名称和配置 name 必须一致，避免“加载 A 却以 B 身份运行”。
             String frontName = text(root.get("name"));
             if (!name.equals(frontName)) {
                 throw new AgentOSException(ErrorCode.INVALID_ARGUMENT, "字段 name 必须等于目录名：" + file);
@@ -60,6 +74,7 @@ public final class AgentLoader {
                 throw new AgentOSException(
                         ErrorCode.INVALID_ARGUMENT, "字段 provider.model 必填：" + file);
             }
+            // Provider 名称可留空让 Catalog 使用默认连接；模型名必须由 Agent 明确给出。
             Profile profile =
                     new Profile(
                             text(provider.get("name")),
@@ -72,6 +87,7 @@ public final class AgentLoader {
             if (tools.isEmpty()) {
                 log.info("Agent {} 未声明工具，按无工具权限加载", name);
             }
+            // 某些设计字段尚未实现：提醒用户而非静默宣称这些配置已经生效。
             for (String key : root.keySet()) {
                 if (KNOWN_UNSUPPORTED.contains(key)) {
                     log.warn("Agent {} 的配置键 {} 暂不支持", name, key);
@@ -82,6 +98,7 @@ public final class AgentLoader {
                     parsed.body(),
                     Map.of());
         } catch (IOException | RuntimeException e) {
+            // 业务异常保留原错误码；底层解析细节只保留在 cause，不作为公开错误文案直接拼出。
             if (e instanceof AgentOSException a) {
                 throw a;
             }
@@ -89,6 +106,7 @@ public final class AgentLoader {
         }
     }
 
+    /** 缺省值与 AgentSettings.defaults 保持同一口径；数字、时长先转换，再由值对象校验。 */
     private static AgentSettings settings(Map<String, Object> values) {
         return new AgentSettings(
                 integer(values.getOrDefault("max_iterations", 10)),
@@ -97,6 +115,7 @@ public final class AgentLoader {
                 duration(values.getOrDefault("turn_timeout", "300s")));
     }
 
+    /** 解析文件开头由 --- 包围的 YAML；后面的 Markdown 保持为任务指令文本。 */
     private static Frontmatter parse(String source, Path file) {
         if (!source.startsWith("---")) {
             throw new AgentOSException(ErrorCode.INVALID_ARGUMENT, "缺少 frontmatter：" + file);
@@ -107,6 +126,7 @@ public final class AgentLoader {
         }
         String yaml = source.substring(3, end);
         try {
+            // SafeConstructor 读取基础数据类型，不允许 YAML 自行构造任意 Java 对象。
             Object value = new Yaml(new SafeConstructor(new LoaderOptions())).load(yaml);
             if (!(value instanceof Map<?, ?> raw)) {
                 throw new IllegalArgumentException("frontmatter 必须是对象");
@@ -120,6 +140,7 @@ public final class AgentLoader {
         }
     }
 
+    /** 配置段缺失或不是对象时视为空段，必填字段的错误由上层按业务含义报告。 */
     private static Map<String, Object> map(Object value) {
         if (!(value instanceof Map<?, ?> raw)) {
             return Map.of();
@@ -129,6 +150,7 @@ public final class AgentLoader {
         return result;
     }
 
+    /** 工具名只从列表读取；空项清掉，授权与工具是否存在由后续工具目录负责。 */
     private static List<String> strings(Object value) {
         if (!(value instanceof List<?> list)) {
             return List.of();
@@ -165,6 +187,7 @@ public final class AgentLoader {
                         : Double.parseDouble(String.valueOf(value));
     }
 
+    /** 支持 250ms、300s、5m 等简写；其他值交给 ISO-8601 Duration 解析。 */
     private static java.time.Duration duration(Object value) {
         String raw = String.valueOf(value).trim().toLowerCase(Locale.ROOT);
         try {
