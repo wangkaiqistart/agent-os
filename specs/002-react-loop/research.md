@@ -94,6 +94,8 @@
 - 模型审计每次LlmCallRecorder.record入口生成一次UUID write_id，单次重试复用；数据库UNIQUE write_id，冲突读取并比对相同payload后视为成功，不同payload报错。工具begin复用(turn,iteration,tool_call_id)唯一键；complete对同一行幂等更新；不重发模型、不重复执行工具。不改US-1的调用逻辑。
 - `TurnExecutionBudget`用单调时间，TurnBudgetRegistry按turnId显式提供给只有LlmCallRecord参数的记录器。TurnRunner有界等待到deadline+1s，到hardStop必要持久化仍未确认时取消并返回UNCONFIRMED，仅终结通知未返回则保留已确认结果；移除登记后迟到record失败关闭，不能拿到新预算。
 - 0.7秒只是退避总和，不包含3次SQL；每次audit最多250ms且受剩余预算限制。deadline后停止新外呼、工具begin和普通审计退避；deadline前已开始调用返回后的最终模型审计/工具终态也从共享最后1秒出预算，每项最多一次写尝试，提交未知仅有界查证、不重放；它与工具收尾、轮次终态和释放租约共用hardStop。正常超时且必要审计/收尾确认为TIMED_OUT+CONFIRMED。连接/锁/SQL/socket等待必须有界，外层取消不能代替JDBC超时，必须做故障注入验证。
+- 远程数据库往返回归补充（2026-11-17）：statement_timeout/lock_timeout在一条SQL内设置；新随机write_id的正常模型审计直接INSERT，依赖唯一约束去重，异常后再查证完整载荷。查到不同载荷立即失败，不把冲突当作未提交继续重试。减少往返而不扩大250ms上限；独立PostgreSQL测试按每次SQL/提交注入等待，同时验证可完成及超过预算两条路径。
+- 扩大验证发现工具路径也需要减少往返：begin/skipped直接INSERT并在异常后核对唯一键与完整载荷；requireRunning通过MATERIALIZED CTE顺序取会话锁、读取父轮次，再检查当前数据库时间。真实FOR UPDATE竞争测试确认等锁期间deadline到达后会拒绝；complete继续锁工具行，不能覆盖回收终态。新回归同时验证十轮历史和一次审计失败后同一会话的下一轮恢复。
 - 正常收尾在一个短事务写轮次终态、终结in_progress工具并释放本owner租约。持续数据库故障不可能保证立即持久化，返回安全失败及persistenceStatus=UNCONFIRMED，停止外呼，不伪装已入库，也不承诺恢复缺失模型记录；数据库恢复后由租约失效回收收敛。
 - **Alternatives**: 对所有写入自动重试会重复消息和审计、误判lease；使用线程局部变量传deadline违反宪章；增补持久化补偿队列超出本story，均不采用。
 

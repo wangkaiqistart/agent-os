@@ -2,7 +2,7 @@
 
 **Plan**: [plan.md](plan.md) | 行为契约见 [contracts/](contracts/)，表结构见 [data-model.md](data-model.md)
 
-**2026-11-16 当前状态**：默认主 Agent 的 Phase 10 已完成（第 9.5 节）；Phase 4 工具闭环、Phase 5 安全上限和 Phase 6 历史/新会话已完成（第 10–12 节）。Docker 已启动，本次全量质量门和真实 PostgreSQL Testcontainers 测试均通过；`python3 scripts/check_db_test_reports.py` 返回 0。真实天气仍等待 US5 审计恢复。
+**2026-11-17 当前状态**：Phase 10 默认主 Agent、Phase 4 工具闭环、Phase 5 安全上限、Phase 6 历史/新会话和 Phase 7 审计恢复均已完成（第 9.5、10–13 节）。扩大验证后 `mvn -B -ntp verify` 的 427 项测试全部通过，真实 PostgreSQL Testcontainers 与数据库报告检查均通过。真实模型完成五轮普通文本对话及跨进程历史恢复验收（第 13.8 节）；Phase 8/9 与真实天气 Demo 尚未验收。
 
 ## 前置条件
 
@@ -394,3 +394,108 @@ Phase 5 的本地合成测试、配置检查和非数据库质量门均通过；
 本轮代码验证：`mvn -B -ntp spotless:apply` 通过；core 46、storage 21、CLI 31 项定向测试全部通过。Docker 启动后重新执行 `mvn -B -ntp verify`，结果为 **BUILD SUCCESS**，全仓 **382 tests / 0 failures / 0 errors / 0 skipped**（core 46、provider 220、tool 23、storage 21、web 11、channel-cli 3、CLI 31、boot 27）。`python3 scripts/check_db_test_reports.py` 返回 0：“数据库连通性测试已执行并通过。”真实 PostgreSQL 迁移、JPA 契约、消息历史/归档和 Boot ReAct 链路均已执行；真实模型、真实天气和 US5 故障恢复仍为 **NOT_RUN**。
 
 慢 HTTP 超时场景确认模型和工具各实际调用一次，并以 `TIMED_OUT + CONFIRMED` 收尾；异常收口路径的 `TurnResult.iterations` 和轮次表值按当前契约为 0，调用次数由模型/工具审计记录确认。未启用 `llm` profile，未读取开发 `.env`，未连接共享库，也未发送真实天气请求。
+
+## 13. Phase 7 审计完整性与故障恢复（2026-11-16）
+
+本阶段范围为 T070–T079。模型/工具审计遇到瞬时 SQL 故障时，只重试审计；真实外部请求不会被 Recorder 重新执行。每次尝试使用独立 REQUIRES_NEW，最多三次，事务结束之后才退避 200/500ms。校验/约束失败不重试，连接中断或等待超时先查证，不能把查不到暂时未提交的行当作明确回滚。
+
+### 13.1 实现与确认规则
+
+- 模型每次 record 入口生成随机 write_id，同次 SQL 重试复用。两个摘要完全相同的实际模型请求仍各写一行。查证比较完整载荷，时间先统一到微秒；不吞唯一键冲突。
+- 工具 begin 必须先确认 in_progress，才执行真实工具；complete 只更新原行，并锁行防止覆盖 recovery 的 interrupted。begin 未确认提示未执行本次工具；complete 未确认提示操作可能已经执行。未知工具、非法参数、沙箱拒绝、次数超限沿用统一 Recorder。
+- RetryingAuditWriter 使用本轮 TurnExecutionBudget。业务 deadline 后不再 begin/普通退避，在途调用最终审计可使用同一 hardStop 的剩余一秒，只有一次写尝试及有界查证；不是每项另加一秒。任何必要审计未确认都会使最终 persistenceStatus 保持 UNCONFIRMED。
+- AuditTransactions 设置 PostgreSQL statement_timeout/lock_timeout 和 JDBC networkTimeout，提交前再次按剩余时长限制，完成后恢复连接设置；迟到取得连接的任务先查本次时限。外层等待也有界，不只依赖 Future.cancel。
+- finishAndRelease、启动恢复与接管统一按 session → turn 锁顺序，在单个会话的短事务内收敛父轮次/遗留工具/本 owner 租约。启动先筛选待恢复会话ID，再逐会话独立提交，不逐条更新正常历史；拿锁后重新检查有效 owner。启动总预算30秒、候选查询和单会话事务最多5秒，不改变单轮收尾的一秒上限。有效 owner 的 RUNNING 不回收；失效 owner 不等 deadline；终态父轮次的孤儿工具也会清理。已终态不改写，不清新 owner。
+- chat launcher 设置 agentos.runtime.chat=true，启动时运行一次 TurnReaperRunner；纯 Recorder 测试和无此属性的上下文不运行。没有新定时任务、ShedLock 调度或补偿队列。
+- DefaultAgentService 实现 AutoCloseable，Context 关闭时取消在途预算并中断等待，所有轮次共用最多一秒关闭窗口。CLI EOF、/exit 正常关闭 Context，Ctrl-C 依靠 Spring shutdown hook；强杀不能保证 hook 执行，交给下次启动/接管恢复。
+- 模型审计只有一个落库 Recorder；确认后每次 record 一条完整 llm_call 日志，失败为 ERROR + write_id + UNCONFIRMED。结构化字段与 MDC 隔离，避免 Boot JSON 同名键冲突；日志不包含 Prompt、响应体、工具参数/结果或原始 JDBC cause。Provider 的调用/重试逻辑未修改。
+
+### 13.2 可复验的故障证据
+
+| 场景 | 测试及断言 |
+|---|---|
+| 红灯先行 | RetryingAuditWriterTest 初始 5 项出现 3 failures/2 errors；TurnReaperTest 初始 3 项均为状态断言失败；AuditTransactionTest 初始两项分别暴露相同摘要唯一键冲突和缺少瞬时重试；不是 Docker 跳过 |
+| 审计总三次/事务隔离 | RetryingAuditWriterTest 验证 200/500ms 与非瞬时不重试；AuditTransactionTest 从真实 txid_current() 断言三次不同事务、同一 write_id、最终只有一行 |
+| 提交成功但丢响应 | AuditTransactionTest 在真实 manager.commit 成功后注入响应丢失，按原键完整载荷查证，saveAndFlush 仅一次、最终一行；另一个用例注入不同 response_model，必须 UNCONFIRMED，不能吞冲突 |
+| deadline 后最终审计 | core 预算测试和 PostgreSQL finalAuditAfterDeadlineTriesOnceWithoutBackoffOrReplay：零普通写入、最终审计只一次，失败没有退避重放 |
+| SQL/锁/连接池故障 | AuditTransactionTest 用 pg_sleep、真实 FOR UPDATE 竞争、2 连接池耗尽检验有界返回；归还连接后仍可查询，不产生迟到模型记录 |
+| 网络/退避不持连接 | LlmAuditIntegrationTest 在模型 HTTP 收到请求时检查 Hikari active=0、pg_stat_activity 无 idle in transaction；ReActApplicationTest 在工具 HTTP 收到请求时检查 active=0，且已有已提交 in_progress；AuditTransactionTest 在退避回调中检查无事务且 active=0，并成功使用小池再查询 |
+| 模型每次尝试一行 | LlmAuditIntegrationTest：429 后成功两行，attempt=1/2；503 最终失败仍保留两行。JpaStorageContractTest 验证 NULL/0、缓存、输出 cap、correlation 和完整字段映射 |
+| Recorder 不重发模型 | LlmAuditIntegrationTest 注入审计约束失败：模型真实 HTTP 计数=1、审计行数=0、FAILED + UNCONFIRMED、安全 ERROR；不能把失败日志当成功落库 |
+| 工具执行前/后失败 | AuditFailureTest：begin 失败真实工具=0；complete 失败工具=1、无重执行、提示可能已执行、异常不含合成密钥和 cause |
+| 启动/接管/孤儿恢复 | TurnReaperTest 3 项、TurnReaperStartupTest 1 项：未来 deadline 的失效 RUNNING 也中断，工具一并收尾；有效 owner 保持；接管和正常结束同样清理，迟到 finish 不覆盖、不清新 owner；第二次恢复修改数为0 |
+| 关闭/结束失败 | AgentServiceFailureTest：关闭取消在途 loop、有界返回 INTERRUPTED 并调用自身收尾；结束写入失败停止循环且 UNCONFIRMED；起步未知不重放/不发模型；已回收终态优先于迟到成功或超时 |
+| 日志与装配 | LlmAuditIntegrationTest：恰好一个 JpaLlmCallRecorder；每次完整 29 个结构化键（event、26 调用字段、write_id、persistenceStatus）；Throwable/MDC/字段无合成 Prompt、响应体和 key。既有 LlmCallJsonLogTest、ToolAuditRedactionTest 继续验证后备日志和工具脱敏 |
+
+CorePropertiesTest 另以行为红灯确认 cleanup 原先可以扩成两秒，现已校验固定一秒；configuration 契约键名同步为实际绑定的 `agentos.turn.cleanup`。
+
+任务原定的 TransactionBoundaryTest/AuditAutoConfigurationTest 验证已合并进上述真实链路测试，避免另建只反射注解的重复测试；TurnReaperTest 实际位于 storage/session/。完整质量门结果见下方最终记录。
+
+### 13.3 手动观察与物理边界
+
+启动普通 chat 后，日志出现“启动回收完成，处理记录数=...”。建议在独立测试库中观察审计，不在共享库手工制造断网/锁表故障。可先运行以下确定性用例，无需真实模型凭证：
+
+```bash
+mvn -B -ntp -pl AgentOS-storage -am -Dtest=AuditTransactionTest,TurnReaperTest,TurnReaperStartupTest -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -B -ntp -pl AgentOS-boot -am -Dtest=LlmAuditIntegrationTest,ReActApplicationTest,AgentServiceFailureTest,AuditFailureTest -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+数据库持续不可用时无法保证立即保存终态、释放租约或补齐模型审计。系统停止推进并返回原 turnId + UNCONFIRMED；恢复后，失效租约的旧 RUNNING 和遗留工具由启动/接管收敛。不承诺缺失的模型审计自动重建，不把本地日志算作已落库。没有启用 llm profile，不读取开发 .env、不连接共享库、不发送真实天气请求；真实模型/真实天气 Demo 为 NOT_RUN，Phase 8 并发隔离专项与 Phase 9 Polish 仍待办。
+
+### 13.4 最终质量门
+
+**PASS**：`mvn -B -ntp spotless:apply`、`mvn -B -ntp verify` 均成功；最后一次全量验证结束于 **2026-11-16 23:51:00 +08:00**，耗时 **1:39**。Surefire 合计 **411 tests / 0 failures / 0 errors / 0 skipped**：core 57、provider 220、tool 25、storage 33、web 11、channel-cli 3、CLI 31、boot 31。Spotless、Checkstyle、SpotBugs/FindSecBugs、Enforcer、ArchUnit 均通过；`python3 scripts/check_db_test_reports.py` 返回 0，确认 PostgreSQL 测试实际执行且通过。临时诊断日志位于 `/tmp/agentos-phase7-verify.log`，可复验的长期证据为测试源码和本记录。
+
+T070–T079 已完成并勾选；全表 109 项中完成 95 项，T080–T093 共14项保持待办。constitution、checklist 和 Provider 调用实现均未修改。`.specify/extensions.yml` 不存在，实施前后无 hooks 需要执行。未自动提交、推送、合并或发布。
+
+### 13.5 chat 启动回收超时回归修复（2026-11-17）
+
+实际 chat 启动暴露 `TransactionTimedOutException → JpaTurnStore.interruptTools → recoverSession → reapInterrupted`：旧实现将全部会话及历史轮次扫描放在同一个一秒事务中，连正常终态历史也逐条执行工具 UPDATE。数据库往返较慢或历史较多时，在接受用户输入前就会超时。13.4 的测试通过记录保留，但它未覆盖这类历史/延迟组合。
+
+修复为：先只取待恢复会话UUID，再逐会话开启独立事务，锁内重新读取数据库时间和当前 owner，只查询需要回收的轮次。单会话内父轮次、孤儿工具及本 owner 租约仍原子收敛；后续会话失败不撤销已提交恢复。启动总预算30秒、候选查询和每个会话事务最多5秒；外层等待覆盖连接获取，取消/迟到事务在入口及提交前检查截止时间。`AuditTransactions` 的 Spring 秒级 timeout 按传入预算向上取整，毫秒级 SQL/锁/socket 上限继续有效。单轮 deadline 后共享的一秒清理窗口未扩大。
+
+新增三个 PostgreSQL 回归先红后绿：正常历史使用语句级拒绝触发器证明不发工具 UPDATE；两个会话各用 `pg_sleep(1.1)` 证明恢复不受旧全局一秒事务限制；第二个会话写失败时，第一个会话保持已提交，失败会话整体回滚。原真实 chat 启动测试也加入1.1秒工具写入延迟，确认启动 runner 完成恢复后才返回。触发器仅创建在独立 Testcontainers 数据库。
+
+**PASS**：`mvn -B -ntp spotless:apply`；`mvn -B -ntp verify` 于 **2026-11-17 00:10:28 +08:00** 完成，耗时 **1:38**，合计 **414 tests / 0 failures / 0 errors / 0 skipped**（storage从33增至36，其余同13.4）；`python3 scripts/check_db_test_reports.py` 通过。日志 `/tmp/agentos-reaper-red.log`、`/tmp/agentos-reaper-targeted.log`、`/tmp/agentos-reaper-verify.log`。实际用户数据库重启和真实模型调用未执行；未提交代码。
+
+全量验证已更新可执行JAR，可在仓库根目录重试：
+
+```bash
+java -jar AgentOS-boot/target/AgentOS.jar chat
+```
+
+预期出现“启动回收完成，处理记录数=...”后进入输入提示。首次可能回收遗留记录，后续没有新遗留时应为0；有效租约仍会保留，不能据此期待强杀后立刻清理所有RUNNING。
+
+### 13.6 输入后起步未确认的存储预算修复（2026-11-17）
+
+用户启动回收成功后输入“你好”，返回“轮次是否建立尚未确认，未调用模型”。该结果只能证明起步没有得到提交确认，单凭这段输出不能区分数据库超时、连接问题或其他故障。检查发现普通起步事务仍错误套用一秒上限，异常后查证仅250ms，且没有安全诊断日志。新增真实 PostgreSQL 触发器回归：轮次/会话写入各延迟1.1秒时，旧代码在模型调用前返回FAILED；350ms的查证SQL也触发旧上限。
+
+普通存储改为独立 `agentos.turn.storage-timeout`，默认5秒，可配置正Duration；起步/续租取执行余量、查证/收尾取同一hardStop余量。查证增加显式预算重载，不为重试查询重建整轮预算。连接获取使用相同操作时限的外层等待，SQL/锁/socket/提交继续受事务剩余预算限制。超时取消并不等于确认回滚，起步仍只按原turnId查证，不重放。deadline后共享一秒、审计每次最多250ms均未扩大。
+
+起步异常现在记录安全WARN：turnId、`stage=start`、failureType、elapsedMs；查证仍未确认记录ERROR：turnId、`stage=confirm`、confirmation、UNCONFIRMED。日志不打印原始异常文本、堆栈、用户消息、SQL参数或连接凭证。若实际环境仍失败，保留同一turnId的这两条日志继续诊断，不将测试通过当作用户数据库已验证。
+
+回归证据：`ReActApplicationTest` 慢写入用例确认模型调用恰好一次、USER消息恰好一条、SUCCEEDED + CONFIRMED及自身租约已释放；`TurnStorageBudgetTest` 5项覆盖350ms查证、整轮执行余量不足的原子回滚、deadline后收尾及取消后查证不扩大hardStop、小连接池耗尽按2秒操作配置返回且归还连接后没有迟到续租；`CorePropertiesTest` 验证配置绑定与非法值，`AgentServiceFailureTest` 验证安全阶段日志及起步不重放。
+
+**PASS**：格式检查与 `mvn -B -ntp verify`，于 **2026-11-17 00:25:00 +08:00** 完成，耗时 **1:55**。合计 **421 tests / 0 failures / 0 errors / 0 skipped**：core58、provider220、tool25、storage41、web11、channel-cli3、CLI31、boot32。`python3 scripts/check_db_test_reports.py` 通过。日志：`/tmp/agentos-turn-storage-red.log`、`/tmp/agentos-turn-budget-red.log`、`/tmp/agentos-turn-pool-red.log`、`/tmp/agentos-turn-storage-targeted.log`、`/tmp/agentos-turn-storage-verify.log`。Boot JAR已重建，仍按13.5命令重启；实际用户数据库与真实模型调用未执行，未提交代码。
+
+### 13.7 第二轮模型审计遇到远程往返延迟（2026-11-17）
+
+用户日志中首轮“你好”已得到回答；第二轮在 `JpaLlmCallRecorder → findByWriteId` 处出现 `SocketException: Closed by interrupt`，随后返回模型审计未确认。这次失败阶段是模型审计写入，超时取消中断了JDBC等待；不能仅根据SQLSTATE 08006判断数据库宕机。此前的本机低延迟数据库质量门未覆盖多个远程往返累积到250ms的情况。
+
+优化保留审计250ms上限：两次事务局部超时设置合并为一条SQL；正常模型审计直接INSERT，不先按新随机write_id查存在性。数据库唯一约束仍阻止重复，异常后才按原键核对完整26字段载荷。查到不同载荷立即失败，不能视为暂未写入再尝试。正常路径省去两次应用显式查询；未知提交仍不重放，模型请求不会因Recorder失败而重发。失败控制台正文补充turnId、attemptTimeoutMs和UNCONFIRMED，结构化29个字段保持完整，不附带原始异常或业务文本。
+
+`AuditLatencyTest` 使用独立真实PostgreSQL，由测试JDBC包装器在每次SQL执行和提交前注入往返等待，不是对用户数据库做网络故障注入。60/65/60ms的连续三次审计在旧实现中失败，优化后各写一行且write_id互异；100ms等待超过本次操作预算时仍安全失败、不重放插入、不放宽总预算。该证据是模拟往返延迟，不代表已验证用户真实网络的时延或抖动。实际环境若无法在250ms内完成必要往返，仍按契约返回UNCONFIRMED。
+
+定向验证同时通过 `AuditTransactionTest` 的真实提交丢响应/载荷冲突、`LlmAuditIntegrationTest` 的HTTP请求次数与脱敏日志、`TurnStorageBudgetTest` 的整轮与清理边界。红灯日志 `/tmp/agentos-audit-latency-red.log`；定向日志 `/tmp/agentos-audit-latency-targeted.log`。
+
+**PASS**：`mvn -B -ntp spotless:apply`、`mvn -B -ntp verify`，最终验证于 **2026-11-17 00:43:41 +08:00** 完成，耗时 **1:55**。合计 **423 tests / 0 failures / 0 errors / 0 skipped**（storage43，其余同13.6）；`python3 scripts/check_db_test_reports.py` 通过，Boot JAR已重建。全量日志 `/tmp/agentos-audit-latency-verify.log`。用户实际远程数据库和真实模型未在本次自动化验证中调用；未提交代码。退出旧chat进程后按13.5命令重新启动，再验证连续多轮。
+
+### 13.8 扩大验证与真实多轮验收（2026-11-17）
+
+按“详细验证、发现问题持续修复”的要求增加工具审计往返延迟、十轮连续对话、失败后同会话恢复及等锁后deadline检查。工具begin在50ms逐次等待下先出现红灯，随后修复：begin/skipped直接INSERT，异常后完整查证；`requireRunning` 用两个MATERIALIZED CTE在同一条SQL中顺序取会话锁、读取父轮次，最后检查当前数据库时间。complete继续锁工具行，原有唯一键、完整载荷和回收终态保护保持有效。
+
+最新全量 **PASS**：`mvn -B -ntp verify` 于 **2026-11-17 01:03:12 +08:00** 完成，耗时 **1:59**，**427 tests / 0 failures / 0 errors / 0 skipped**（storage45、boot34，其余同13.6）；数据库测试执行检查通过。
+
+进一步显式启用 `llm` profile，用独立测试身份 `phase7-01d4f63c0420` 运行现有main Agent，使用应用现有真实模型与数据库配置。首次三轮通过（22.888秒）；随后退出并重启，同身份再验两轮通过（17.212秒），新进程能正确恢复上一进程的测试暗号。合计5轮、1会话、5条CONFIRMED模型审计，没有持久化未确认。真实配置验收只做普通文本请求，没有对用户库注入故障，没有归档或删除用户原会话。
+
+详细场景、环境和证据见 [验证报告](../../docs/testing/phase7-validation-2026-11-17.md)。真实外网工具/天气Demo未在本次真实配置验收中执行，工具链路在独立环境验证。代码未提交；Phase 8/9任务保持原记录。

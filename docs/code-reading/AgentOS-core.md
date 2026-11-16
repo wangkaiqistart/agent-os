@@ -93,7 +93,7 @@ Agent 正文
 
 循环不自己遍历执行 callback，`ToolExecutor` 是唯一调用 `executeToolCalls` 的生产类。`ToolCallLedger` 维护每个工具名的 ID 队列和全局原顺序；还持有捕获 turn/budget 的 checkpoint 闭包，治理与 HTTP 跳转可复用租约检查，而不更改 TurnContext 签名或引入 ThreadLocal。
 
-本阶段已共享整轮时间预算，但 `maxIterations` 判定、超限补审计与最终文本请求由 Phase 5 交付。不能把 Phase 4 当作全部上限与恢复机制已就绪。
+Phase 5 已实现 `maxIterations` 判定与超限补审计，达到上限不发送额外总结请求。Phase 7 的审计故障会停止循环，保留已执行操作的不确定性。
 
 ### 输出端为什么也要治理
 
@@ -125,3 +125,13 @@ Agent 正文
 ## 测试怎么读
 
 优先读 `AgentLoaderTest`、`PromptBuilderTest`、`ReActLoopTest`，再读 `AgentServiceTest`。测试夹具在 `AgentOS-core/src/test/.../support/`，包括内存 Session/Turn/Message 实现、脚本化 Provider 和事件记录 Sink。大部分测试不启动 Spring；Manager 契约测试使用轻量 ApplicationContextRunner 获取官方自动配置 Bean。全部 Core 测试不连接数据库、不发送真实模型请求。
+
+## Phase 7：审计失败与关闭时怎么收口
+
+`RetryingAuditWriter` 只接收审计写入/查证函数，没有模型或工具执行能力。它负责总三次尝试、200/500ms 事务外等待，以及同一个 TurnExecutionBudget 的业务 deadline/hardStop；数据库实现负责每次独立事务与 JDBC 时限。`TurnBudgetRegistry` 缺少预算时直接拒写，不偷偷生成新预算。
+
+`DefaultAgentService` 把起步也交给有界 TurnRunner。起步提交未知时只按原 turnId 查询，不重复建轮次/消息；仍查不清返回 FAILED + UNCONFIRMED，不发模型请求。确认开始后 finally 成对移除预算与 MDC。任何必要审计未确认都会在 budget 留下标志，即使轮次收尾成功也不能再返回 CONFIRMED；存储已回收的终态优先于迟到的本地结果。
+
+服务实现 AutoCloseable：关闭后拒绝新轮次，取消现有预算并中断调用方等待，最多共享一秒等候收尾。取消缩短剩余 hardStop，不重置整轮计时。最后一次短收尾暂时清除、随后恢复中断标志，争取写 INTERRUPTED 并释放自己的 lease。虚拟线程执行器在 finally shutdownNow；不合作的 I/O 仍靠客户端超时限制。强杀不能保证关闭钩子执行，由下次 chat 启动或会话接管的 TurnReaper 恢复。
+
+调试顺序：`RetryingAuditWriter.write` 看 retry/confirmed → `JpaLlmCallRecorder.record` 看 write_id → `GovernedToolCallback.call` 比较 begin 与 complete 失败 → `JpaTurnStore.recoverSession` 看父轮次/工具/owner 的原子变化。故障测试入口为 AgentServiceFailureTest、RetryingAuditWriterTest 和 storage 的 AuditTransactionTest，不要在共享库制造故障。

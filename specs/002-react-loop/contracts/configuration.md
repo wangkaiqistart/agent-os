@@ -11,9 +11,10 @@ agentos:
   workspace:
     root: .AgentOS
   turn:
+    storage-timeout: 5s              # 普通起步/续租/查证/正常收尾上限，仍扣同一整轮预算
     lease-ttl: 150s                  # 最短TTL，不是逻辑调用最长时限
     lease-grace: 30s                 # 租约至少覆盖剩余整轮预算再加这个余量
-    cleanup-timeout: 1s              # deadline后所有收尾共享的总预算
+    cleanup: 1s              # deadline后所有收尾共享的总预算
   audit:
     write-retries: 2                 # 最多3次尝试，不保证预算内一定重试满
     retry-backoff: [200ms, 500ms]
@@ -66,7 +67,8 @@ spring:
 | 配置/输入 | 规则 |
 |-----------|------|
 | lease-ttl、lease-grace、工具timeout | 必须为正Duration；按上述动态公式覆盖逻辑调用，不再按一次Provider timeout做WARN判定 |
-| cleanup-timeout | 固定1秒，与SC-006一致，不提供扩大容差的配置 |
+| cleanup | 固定1秒，与SC-006一致，不提供扩大容差的配置 |
+| turn.storage-timeout | 正Duration，默认5秒；普通轮次存储操作上限，不是额外整轮时长，也不扩大审计尝试或清理窗口 |
 | audit.write-retries | 0到2；超过2拒绝，避免无限重试 |
 | audit.retry-backoff | 必须有write-retries个正Duration，默认200/500ms；总和不能替代预算判断 |
 | audit.attempt-timeout | 正数且不大于250ms |

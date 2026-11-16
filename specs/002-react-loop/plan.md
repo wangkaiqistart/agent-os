@@ -8,6 +8,8 @@
 
 **Phase 4 实施状态（2026-11-16）**：T036–T051 已完成，工具/沙箱/安全解析、先记后做、完整历史回填和有界终结通知已接通。统一质量门 359 项测试通过、无数据库跳过，详见 quickstart 第 10 节；Phase 5–6 之后的 US5–US6、完整数据库故障恢复与真实天气 Demo 仍未完成。复用 session/ 下已有工具仓库；正常循环次数通过 TurnStore 的兼容收尾重载与终态一起落库。
 
+**Phase 7 实施状态（2026-11-16）**：T070–T079 已完成，前述 Phase 4 记录保留为历史。审计有限重试、write_id/完整载荷查证、毫秒级数据库 I/O、工具执行前后失败区分、启动/接管原子恢复及关闭取消已接通。最终质量门 411 项测试通过，无失败/错误/跳过，详见 quickstart 第 13 节；Phase 8 并发专项与 Phase 9 Polish、真实模型/天气 Demo 仍未完成。
+
 ## Summary
 
 统一入口 `AgentService.process` 接收一条消息：找到或创建活跃会话、取得会话租约、开始轮次，然后由 `ReActLoop` 迭代。`PromptBuilder` 组装提示词，`ProviderService`（US-1）调用一次模型；响应没有工具调用就结束，有就交给 `ToolExecutor`，它调用容器注入的 `ToolCallingManager` 执行，结果追加进历史再进入下一次迭代。契约放 `AgentOS-core`；工具与沙箱在 `AgentOS-tool`；会话、轮次、消息和两张审计表的 JPA 实现与迁移脚本在 `AgentOS-storage`；`AgentOS init` 与 `AgentOS chat` 在 `AgentOS-cli` 与 `AgentOS-channel-cli`；`AgentOS-boot` 只负责装配和启动上下文。Provider调用/重试逻辑不改；新增只读ProviderCatalog实现，复用RequestValidator在轮次开始前验证Profile。
@@ -170,7 +172,10 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 - 只对审计瞬时写故障重试；llm_calls新增write_id UUID唯一键，单次record重试复用；工具记录复用原唯一键并校验payload。消息追加、lease与建轮次不统一重试（R14）。
 - ToolCatalog和ProviderCatalog为core端口；ToolRegistry和现有Provider校验分别实现。账本在模型响应后才建，给Manager的Prompt含累计历史与内部上下文。
 - TurnRunner/TurnExecutionBudget/TurnBudgetRegistry使用同一单调deadline，调用方有界等到deadline+1s；正常审计受执行预算限制，收尾最后1秒共用，数据库连接/锁/语句/socket也有界。预算查找显式按turnId，移除后迟到审计拒绝。
-- 数据库持续不可用是不能即时保证持久化的物理边界：停止外呼、返回安全失败/turnId/UNCONFIRMED，不称终态已确认，也不承诺恢复模型审计缺行。恢复后经租约失效收尾数据库状态。CONFIRMED只在终态和释放事务确认时返回。
+- 数据库持续不可用是不能即时保证持久化的物理边界：停止外呼、返回安全失败/turnId/UNCONFIRMED，不称终态已确认，也不承诺恢复模型审计缺行。恢复后经租约失效收尾数据库状态。CONFIRMED只在必要审计、终态和本owner租约清理均确认时返回。
+- 启动恢复补充边界（2026-11-17）：只查待恢复会话ID及异常轮次，逐会话独立提交；启动总预算30秒、候选查询及单会话事务最多5秒，拿锁后重新检查数据库时钟/owner。单轮收尾仍固定一秒，不借启动预算延长。后续会话失败保留此前提交，启动失败不误报全部恢复。
+- 普通轮次存储预算修正（2026-11-17）：`agentos.turn.storage-timeout`默认5秒，起步/续租按执行余量、查证/收尾按同一hardStop余量压短；连接获取的外层等待也受操作时限限制。审计仍最多250ms，deadline后共享一秒不变。起步异常按原turnId查证且不重放，增加安全阶段日志用于区分起步异常、查无行和查证失败。
+- 模型审计往返修正（2026-11-17）：合并两项事务局部超时设置，移除正常INSERT前的存在性查询；异常后按原write_id查证，完整载荷冲突立即失败。增加连续审计的数据库往返延迟回归，审计上限仍250ms，控制台失败日志增加安全关联和配置时限。
 - 异常工具ID整批执行前失败；致命中止未开始的后续工具不记作limit_skipped、不纳入实际执行分母；本次未完整返回的助手/工具消息不保存，保留工具审计与此前迭代消息。
 - 流式正常路径五类事件与唯一终结回调有单独测试；history上限0与正token预算90%规则可测。真实模型/真实天气调用次数不硬编码，脚本替身才断言精确次数。
 

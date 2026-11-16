@@ -29,6 +29,8 @@
 
 “暂时查询不到turnId”不能单独证明未提交。原事务及查询同样要受数据库I/O和本地hardStop约束。
 
+普通起步/续租/查证/正常收尾的操作时限为 `agentos.turn.storage-timeout`（默认5秒），同时取当前轮次剩余预算的较小值。起步与续租扣执行预算；查证与收尾可使用同一hardStop的剩余时间，deadline后最多仍是共享一秒。连接获取、SQL/行锁、socket和提交都须有界；不能把审计的250ms上限或deadline后一秒清理窗口套到正常起步事务上。起步异常只按原turnId查证，不重放；日志仅记录阶段、turnId、异常类型、耗时和确认状态，不打印原始异常文本/SQL参数/凭证。
+
 开始前的参数/租约错误以及已确认未提交的起步故障抛安全异常；已开始轮次或起步是否提交仍未知时，以TurnResult返回。结果带turnId/status/text/iterations/persistenceStatus。CONFIRMED仅表示必要审计与数据库终态、工具收尾、本owner租约清理均已确认，不表示任务成功；UNCONFIRMED表示至少一项仍未确认。数据库已有确认终态时不得返回一个与其相反的“已确认”本地状态。
 
 ### finishAndRelease的条件更新未命中
@@ -79,5 +81,6 @@ SUCCEEDED还原完整消息；其他终态只保留用户消息加一条脱敏�
 - 终结回调抛异常或超时，只记录通知失败，不改写已确定的业务status/persistenceStatus、不再次调用onError。其等待/取消也包含在同一hardStop内；详细线程和取消边界见configuration，不以回调任意阻塞为由延长整轮。
 - MDC的sessionId/turnId/agent/iteration从TurnContext写入，虚拟线程重新写，finally移除；业务不读MDC。
 - `TurnReaper` 在chat启动时执行一次；每次取得过期会话租约时也在同一事务中回收它的旧轮次。回收RUNNING的条件是**没有匹配owner的有效租约**，不要求deadline已经过期；活跃有效租约不回收。
+- 启动回收只查询失效RUNNING、终态孤儿工具或终态残留自身租约所在的会话ID，再逐会话独立事务恢复；拿锁后按数据库时间重新检查。单会话内父轮次、工具和自身租约原子收敛；后续会话失败不回滚已完成会话。启动总预算30秒，候选查询及每个会话事务最多5秒并扣总预算；包含连接获取的外层等待有界，超时或失败不得宣称全部恢复完成。此启动预算独立于单轮deadline后的固定一秒清理窗口。
 - 额外扫描终态轮次遗留的in_progress工具记录，改interrupted，不改变父轮次终态，不清新owner的租约。正常finally也尽力做同样的工具收尾，重复执行无副作用。
 - `--new` 仅在空闲时归档；旧owner失效但旧轮次未清理时，先按上述规则收尾再归档，不删除旧消息和审计。

@@ -27,7 +27,7 @@ Boot 只把 `SpringContextLauncher` 注入 CLI。`init/help/version` 不会因�
 
 ```java
 builders.get().web(WebApplicationType.NONE)
-        .run("--agentos.workspace.root=" + workspaceRoot);
+        .run("--agentos.workspace.root=" + workspaceRoot, "--agentos.runtime.chat=true");
 ```
 
 这个参数属于 Spring 的 commandLineArgs，优先于普通文件/环境配置。它不会被 shell 再解释，也不修改 JVM 的 System properties。CoreAutoConfiguration 继续用同一个 WorkspaceProperties.root 创建 AgentLoader 和 ContextLoader，所以候选选择与实际 Agent/Bootstrap 加载一致。
@@ -93,3 +93,11 @@ agentos:
 测试放置冲突默认目录与低优先级 workspace 配置，检查实际模型请求的模型名、空工具定义和所选 Bootstrap 标记；结束后检查上下文关闭、1 个 main 会话、1 个 SUCCEEDED 轮次、2 条消息、1 条 llm_call、0 条工具审计及租约释放。LocalModelServer 的请求捕获只存在于测试源码，不增加生产 prompt 日志。
 
 `SpringContextLauncherTest` 用最小真实上下文固定 NONE 模式、命令行属性优先级、Path 校验和 close。两类测试证明的是本地模型替身与真实 PostgreSQL，不等于真实模型服务验收。
+
+## Phase 7：启动与关闭验证
+
+chat 的命令行参数开启一次性 TurnReaperRunner，SpringApplication 的启动 runners 完成后 launcher 才返回。模型审计的唯一 Bean 是 Storage 提供的 JpaLlmCallRecorder；Provider 调用/重试逻辑没有修改，也不会在数据库失败时退回日志实现。
+
+`LlmAuditIntegrationTest` 用 localhost 模型替身 + PostgreSQL 验证 429 后两行、最终失败保留、Recorder 异常不重发模型、完整结构化日志及脱敏；模型收到 HTTP 时检查 Hikari 活跃连接为零。`ReActApplicationTest` 在工具 HTTP 收到请求时也检查无连接，并读回已提交的 in_progress 意图。Storage 的 AuditTransactionTest 检查退避期间无连接，构成实际运行中的事务边界证据。
+
+Context 的关闭会调用 DefaultAgentService.close，先取消轮次再销毁数据源等依赖。正常 EOF、/exit 与 ChatCommand 的 try-with-resources 关闭同一个 Context；Ctrl-C 使用 Spring 注册的 JVM shutdown hook。SIGKILL 不会执行该 hook，不能承诺即时收尾。

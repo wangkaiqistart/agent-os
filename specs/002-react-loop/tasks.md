@@ -189,16 +189,16 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 
 **Independent Test**: 注入数据库瞬时故障、响应丢失与持续故障，对照调用次数；构造过期 RUNNING/in_progress 记录并启动收尾；查数据库核对状态与脱敏。
 
-- [ ] T070 [P] [US5] 编写审计重试测试：总3次、间隔200/500ms、只重试瞬时故障、每次新事务、不把不合法数据当瞬时故障；恢复后仅一行、持续失败明确中止；begin 失败真实工具零执行，complete 失败提示可能已执行；事务提交结果不确定时不得制造重复行或重发外部调用；截止时间耗尽不能继续睡眠；在途调用最终审计与全部cleanup共用最后1秒，每项最终审计最多一次写尝试、提交未知仅预算内查证、不退避重放；SQL/连接/锁等待故障都纳入，UNCONFIRMED不当已落库（FR-031；SC-015） in BOOT-TEST/TransactionBoundaryTest.java、STORE-TEST/audit/AuditTransactionTest.java、CORE-TEST/audit/RetryingAuditWriterTest.java、TOOL-TEST/govern/AuditFailureTest.java
-- [ ] T071 [P] [US5] 编写模型审计集成测试：429后成功2行、最终失败保留失败行、correlation/attempt/cache/cap/nullable字段完整，RecordException 不触发模型重试；断言数据库用量 null 与0，审计/日志无Prompt与key（FR-034、FR-036、FR-037；SC-007、SC-008） in BOOT-TEST/LlmAuditIntegrationTest.java
-- [ ] T072 [P] [US5] 编写 TurnReaper 与结束失败测试：没有匹配owner有效租约的旧RUNNING被中断（即使deadline未过），关联 in_progress 工具一起更新；有效owner/未过期租约不被清掉，终态不二次改写；终态FAILED/INTERRUPTED父轮次的in_progress孤儿记录独立收尾；接管也清理，不仅启动；重入清理幂等；数据库写终态/释放失败也停止外呼并留恢复证据（FR-006、FR-031；SC-010） in STORE-TEST/TurnReaperTest.java、CORE-TEST/turn/AgentServiceFailureTest.java
-- [ ] T073 [US5] 实现 `RetryingAuditWriter` 并接入两类记录器：退避等待在事务外、总3次尝试、执行预算不足时不再普通重试，但在途调用最终审计可用剩余cleanup预算一次写尝试；hardStop到立即停止；stable 工具唯一键确保 begin 重试不双插、complete 仅更新原行；模型记录record入口生成write_id UUID、同次重试复用，事务成功响应丢失时按唯一键和相同payload确认，不以吞唯一键异常掩盖字段不一致（依赖 T070、T071，FR-031、FR-034、FR-035；SC-015） in CORE/audit/RetryingAuditWriter.java、CORE/audit/AuditWriteException.java、STORE/audit/JpaLlmCallRecorder.java、STORE/audit/JpaToolInvocationRecorder.java
-- [ ] T074 [US5] 完成工具异常/限次/更新失败的统一落库与 ERROR 报告：所有审计路径包括未知工具、非法参数、被拒/跳过均覆盖，不重试工具；用户说明区分执行前/执行后写失败，原始数据库异常与凭证不外露；线程与 MDC 清理有 finally（依赖 T070 ~ T073，FR-030、FR-031、FR-035 ~ FR-037） in TOOL/govern/GovernedToolCallback.java、TOOL/govern/UnknownToolResolver.java、CORE/turn/ToolExecutor.java、CORE/turn/AgentService.java
-- [ ] T075 [US5] 实现启动收尾 core 逻辑、JpaTurnStore 原子清理与一次性 Runner：只处理没有有效owner租约的旧RUNNING（不等deadline）、终态父轮次in_progress孤儿；RUNNING→INTERRUPTED，工具→interrupted；启动与接管共享同一幂等收尾，终态/工具/lease清理一次短事务；不能清新owner、不能把正常终态改中断；启动Runner仅在chat上下文触发，会话创建/接管由TurnStore.startTurn事务内调用相同收尾逻辑，SessionManager只读查询/空闲归档，不让纯Recorder测试和无DataSource开发上下文误装配；不实现周期任务/ShedLock调度（依赖 T072，FR-006、FR-035；SC-010） in CORE/turn/TurnReaper.java、STORE/session/JpaTurnStore.java、STORE/TurnReaperRunner.java、STORE/StorageAutoConfiguration.java
-- [ ] T076 [US5] 完善 context 关闭时在途轮次收尾：CLI Ctrl-C/launcher close 取消在途等待、尽力中断轮次和释放自身租约，不能清他人租约；不能依赖关闭钩子“必然完成”，强杀恢复交给 T075；明确 daemon/background 资源生命周期（依赖 T072、T075，FR-006） in BOOT/SpringContextLauncher.java、CORE/turn/AgentService.java、CHANNEL/CliChannel.java
-- [ ] T077 [US5] 运行T070已先写并确认红灯的事务边界集成测试，补充全链路复验：模型阻塞、工具等待、审计退避时确认没有包住网络调用的事务/持有连接；小连接池下独立审计写入仍可用，数据库超时消耗也计入截止时间；不要仅用注解反射判断（FR-019、FR-038；SC-006） in BOOT-TEST/TransactionBoundaryTest.java、STORE-TEST/audit/AuditTransactionTest.java
-- [ ] T078 [US5] 核对并完成记录器替换装配测试与审计日志约定：恰好一个落库 recorder，Provider 调用逻辑无修改；落库确认后恰好一条脱敏llm_call日志，SQL重试不重打；失败写ERROR并带脱敏结构化调用元数据、write_id和persistenceStatus=UNCONFIRMED，不输出原响应/Prompt/key，也不能当审计落库成功，既有 LlmCallJsonLogTest 仍验证独立日志实现；全链路敏感信息断言含 throwable、结构化字段与MDC（FR-012、FR-034、FR-036、FR-037；SC-008） in BOOT-TEST/AuditAutoConfigurationTest.java、BOOT-TEST/ToolAuditRedactionTest.java、AgentOS-boot/src/test/java/com/agentos/boot/LlmCallJsonLogTest.java
-- [ ] T079 [US5] 跑 US5 全部故障路径与质量门，记录先记后做、数据库恢复后的行数、不确定提交的去重证据、启动收尾和持久故障限制；共享库不可用于破坏性故障测试 in specs/002-react-loop/quickstart.md
+- [X] T070 [P] [US5] 编写审计重试测试：总3次、间隔200/500ms、只重试瞬时故障、每次新事务、不把不合法数据当瞬时故障；恢复后仅一行、持续失败明确中止；begin 失败真实工具零执行，complete 失败提示可能已执行；事务提交结果不确定时不得制造重复行或重发外部调用；截止时间耗尽不能继续睡眠；在途调用最终审计与全部cleanup共用最后1秒，每项最终审计最多一次写尝试、提交未知仅预算内查证、不退避重放；SQL/连接/锁等待故障都纳入，UNCONFIRMED不当已落库（FR-031；SC-015） in BOOT-TEST/TransactionBoundaryTest.java、STORE-TEST/audit/AuditTransactionTest.java、CORE-TEST/audit/RetryingAuditWriterTest.java、TOOL-TEST/govern/AuditFailureTest.java
+- [X] T071 [P] [US5] 编写模型审计集成测试：429后成功2行、最终失败保留失败行、correlation/attempt/cache/cap/nullable字段完整，RecordException 不触发模型重试；断言数据库用量 null 与0，审计/日志无Prompt与key（FR-034、FR-036、FR-037；SC-007、SC-008） in BOOT-TEST/LlmAuditIntegrationTest.java
+- [X] T072 [P] [US5] 编写 TurnReaper 与结束失败测试：没有匹配owner有效租约的旧RUNNING被中断（即使deadline未过），关联 in_progress 工具一起更新；有效owner/未过期租约不被清掉，终态不二次改写；终态FAILED/INTERRUPTED父轮次的in_progress孤儿记录独立收尾；接管也清理，不仅启动；重入清理幂等；数据库写终态/释放失败也停止外呼并留恢复证据（FR-006、FR-031；SC-010） in STORE-TEST/TurnReaperTest.java、CORE-TEST/turn/AgentServiceFailureTest.java
+- [X] T073 [US5] 实现 `RetryingAuditWriter` 并接入两类记录器：退避等待在事务外、总3次尝试、执行预算不足时不再普通重试，但在途调用最终审计可用剩余cleanup预算一次写尝试；hardStop到立即停止；stable 工具唯一键确保 begin 重试不双插、complete 仅更新原行；模型记录record入口生成write_id UUID、同次重试复用，事务成功响应丢失时按唯一键和相同payload确认，不以吞唯一键异常掩盖字段不一致（依赖 T070、T071，FR-031、FR-034、FR-035；SC-015） in CORE/audit/RetryingAuditWriter.java、CORE/audit/AuditWriteException.java、STORE/audit/JpaLlmCallRecorder.java、STORE/audit/JpaToolInvocationRecorder.java
+- [X] T074 [US5] 完成工具异常/限次/更新失败的统一落库与 ERROR 报告：所有审计路径包括未知工具、非法参数、被拒/跳过均覆盖，不重试工具；用户说明区分执行前/执行后写失败，原始数据库异常与凭证不外露；线程与 MDC 清理有 finally（依赖 T070 ~ T073，FR-030、FR-031、FR-035 ~ FR-037） in TOOL/govern/GovernedToolCallback.java、TOOL/govern/UnknownToolResolver.java、CORE/turn/ToolExecutor.java、CORE/turn/AgentService.java
+- [X] T075 [US5] 实现启动收尾 core 逻辑、JpaTurnStore 原子清理与一次性 Runner：只处理没有有效owner租约的旧RUNNING（不等deadline）、终态父轮次in_progress孤儿；RUNNING→INTERRUPTED，工具→interrupted；启动与接管共享同一幂等收尾，终态/工具/lease清理一次短事务；不能清新owner、不能把正常终态改中断；启动Runner仅在chat上下文触发，会话创建/接管由TurnStore.startTurn事务内调用相同收尾逻辑，SessionManager只读查询/空闲归档，不让纯Recorder测试和无DataSource开发上下文误装配；不实现周期任务/ShedLock调度（依赖 T072，FR-006、FR-035；SC-010） in CORE/turn/TurnReaper.java、STORE/session/JpaTurnStore.java、STORE/TurnReaperRunner.java、STORE/StorageAutoConfiguration.java
+- [X] T076 [US5] 完善 context 关闭时在途轮次收尾：CLI Ctrl-C/launcher close 取消在途等待、尽力中断轮次和释放自身租约，不能清他人租约；不能依赖关闭钩子“必然完成”，强杀恢复交给 T075；明确 daemon/background 资源生命周期（依赖 T072、T075，FR-006） in BOOT/SpringContextLauncher.java、CORE/turn/AgentService.java、CHANNEL/CliChannel.java
+- [X] T077 [US5] 运行T070已先写并确认红灯的事务边界集成测试，补充全链路复验：模型阻塞、工具等待、审计退避时确认没有包住网络调用的事务/持有连接；小连接池下独立审计写入仍可用，数据库超时消耗也计入截止时间；不要仅用注解反射判断（FR-019、FR-038；SC-006） in BOOT-TEST/TransactionBoundaryTest.java、STORE-TEST/audit/AuditTransactionTest.java
+- [X] T078 [US5] 核对并完成记录器替换装配测试与审计日志约定：恰好一个落库 recorder，Provider 调用逻辑无修改；落库确认后恰好一条脱敏llm_call日志，SQL重试不重打；失败写ERROR并带脱敏结构化调用元数据、write_id和persistenceStatus=UNCONFIRMED，不输出原响应/Prompt/key，也不能当审计落库成功，既有 LlmCallJsonLogTest 仍验证独立日志实现；全链路敏感信息断言含 throwable、结构化字段与MDC（FR-012、FR-034、FR-036、FR-037；SC-008） in BOOT-TEST/AuditAutoConfigurationTest.java、BOOT-TEST/ToolAuditRedactionTest.java、AgentOS-boot/src/test/java/com/agentos/boot/LlmCallJsonLogTest.java
+- [X] T079 [US5] 跑 US5 全部故障路径与质量门，记录先记后做、数据库恢复后的行数、不确定提交的去重证据、启动收尾和持久故障限制；共享库不可用于破坏性故障测试 in specs/002-react-loop/quickstart.md
 
 **Checkpoint**: 瞬时故障不丢/不重记；持续故障不静默继续，已执行工具的记录在故障恢复后可识别。
 
@@ -345,7 +345,7 @@ T095 与 T096 在 T094 完成后可并行，分别写 CLI 和 core 的测试文�
 | 同根真实加载、无需手写 Agent 的 CLI→模型→数据库闭环 | T104/T105 → T106 → T107 | US1-8/13；FR-040；SC-018/021 |
 | 运行证据、教学文档与实施后漂移 | T107 → T108 → T109 | SC-014/018–022；不替代原完整故事验收 |
 
-本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）、Phase 5（T052–T061）和 Phase 6（T062–T069）已完成并独立验证，证据见 quickstart 第 10–12 节。当前全表共 109 项（完成 85、待办 24）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实天气演示仍受 US5 审计恢复前置条件约束，后续继续 Phase 7。
+本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）、Phase 5（T052–T061）、Phase 6（T062–T069）和 Phase 7（T070–T079）已完成并独立验证，证据见 quickstart 第 10–13 节。当前全表共 109 项（完成 95、待办 14）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实模型普通文本对话及跨进程历史恢复已验收（见 quickstart 第 13.8 节），真实天气 Demo 未运行；Phase 8 并发隔离专项与 Phase 9 Polish 继续保持待办。
 
 
 **Phase 4 实施记录（2026-11-16）**：T036–T051 已完成，前置行为红灯与最终 359 tests / 0 failures / 0 errors / 0 skipped、数据库回读及实施后分析见 quickstart 第 10 节。保留 T001–T035、T094–T109 历史记录；未勾选 T052–T093。T051 的真实天气演示按原要求延期到 US3 安全上限与 US5 审计恢复完成后，本次只做本地替身天气闭环。
@@ -354,3 +354,9 @@ T095 与 T096 在 T094 完成后可并行，分别写 CLI 和 core 的测试文�
 
 
 **Phase 6 实施记录（2026-11-16）**：T062–T069 已完成。PromptBuilder 按完整轮次同时应用 `max_history_turns` 与 90% floor 的 token 预算，工具请求/结果不拆分；RUNNING 轮次排除且不占已完成历史配额，失败轮次只恢复用户消息和固定安全说明。JPA 消息存储保留工具调用 ID、参数、结果和 metadata；CLI `--new` 使用原子空闲归档并在无活跃会话时直接开始，重启后的新 Spring 上下文沿同一 active 会话恢复历史。新增 core、storage、CLI 和 boot 集成测试；本机 Docker 未运行，PostgreSQL/真实 boot 重启验收按项目约定跳过，详见 quickstart 第 12 节。未提交、推送或发布。
+
+
+**Phase 7 实施记录（2026-11-16）**：T070–T079 完成。411 tests / 0 failures / 0 errors / 0 skipped，真实 PostgreSQL 故障注入、启动恢复和数据库报告检查通过，见 quickstart 第 13 节。原定 TransactionBoundaryTest/AuditAutoConfigurationTest 的动态边界与装配断言集中在 LlmAuditIntegrationTest、ReActApplicationTest；TurnReaperTest 位于 storage/session/，另有真实启动的 TurnReaperStartupTest。保留所有历史完成记录，不勾选 T080–T093；不自动提交、推送或运行真实模型。
+
+
+**Phase 7 扩大验证（2026-11-17）**：修复启动回收、普通存储预算及审计往返延迟问题后，427 tests / 0 failures / 0 errors / 0 skipped，数据库报告检查通过。真实模型与数据库完成首次三轮、重启后两轮，累计五条 CONFIRMED 模型审计，历史跨进程恢复；真实天气 Demo 尚未执行。详细证据见 quickstart 第 13.8 节与 docs/testing/phase7-validation-2026-11-17.md。

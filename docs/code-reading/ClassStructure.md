@@ -188,3 +188,19 @@ flowchart LR
 ```
 
 Provider 请求阶段只有 TurnContext；响应后才建 ToolCallLedger。全部工具共享同一 TurnExecutionBudget，callback 的参数通过 ToolContext 显式注入，不依赖日志 MDC。具体先后顺序和断点见 AgentOS-tool 导读。
+
+## Phase 7 新增协作关系
+
+```mermaid
+flowchart LR
+    Service[DefaultAgentService] --> Budget[TurnExecutionBudget / TurnBudgetRegistry]
+    Llm[JpaLlmCallRecorder] --> Retry[RetryingAuditWriter]
+    Tool[JpaToolInvocationRecorder] --> Retry
+    Retry --> Tx[AuditTransactions: 独立短事务与 I/O 上限]
+    Launcher[chat launcher] --> Runner[TurnReaperRunner]
+    Runner --> Reaper[core TurnReaper]
+    Reaper --> Store[JpaTurnStore.recoverSession]
+    Start[startTurn 接管] --> Store
+```
+
+审计重试不拥有外部回调，因此不会重发模型或工具。恢复逻辑依据数据库 owner/lease 和终态，既清理失效 RUNNING，也清理终态父轮次的孤儿工具。关闭时 DefaultAgentService 只尝试有限清理；强杀交给下一次启动或接管恢复。
