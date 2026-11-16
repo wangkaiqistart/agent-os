@@ -12,6 +12,8 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 
 **Organization**: `[US1]` ~ `[US6]` **仅指本 spec 内部的六个用户故事**，整份任务属于项目五部分路线图的 **US-2（ReAct）**，不是再开发路线图 US-1 ~ US-6。
 
+**2026-11-16 增量**：默认主 Agent 的任务追加为 T094–T109（文末 Phase 10，归属 US1/P1）。原 T001–T035 的完成状态及任务正文保留，原 T036–T093 不重编号；仅将未完成 T092 的最终验收计数从 17 条 SC 同步为 22 条。编号表示追加顺序，实际执行在原 US1 完成后、原 Phase 4 之前，见依赖图；生成清单本身不代表实施或 review；本次 Phase 10 的实际确认与实施证据见 quickstart 第 9.5 节。
+
 ## Format 与路径
 
 所有任务使用 `- [ ] Tnnn [P?] [USn?] 描述 + 文件路径`。`[P]` 表示所属小节的共同前置条件已完成后，可以与同小节的其他独立任务并行；不是可以越过测试或依赖先做。
@@ -227,7 +229,7 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 - [ ] T089 编写真实模型闭环测试，`@Tag("llm")` 且按 AGENTOS_LLM_API_KEY 条件启用：真实primary+本地天气替身+Testcontainers库，检验SUCCEEDED、工具调用和消息/审计关联，执行次数是否精确按脚本行为核对；费用与外部数据发送在运行前说明，不把跳过当通过（SC-001、SC-003、SC-007） in BOOT-TEST/smoke/ReActWeatherSmokeTest.java
 - [ ] T090 在临时工作目录执行真实天气 Demo：使用met.no HTTPS和白名单、手写weather Agent、chat --message与 --new；先确认目标数据库与迁移授权，不在共享库做clean或故障注入；记录真实模型、真实数据源、最终建议、工具/模型/消息行数与脱敏证据。说明模型可能多次取数，不能未经实测宣称必为2次模型调用（SC-001） in specs/002-react-loop/quickstart.md
 - [ ] T091 更新官网中英文状态和运行文档，只把实际已验收项标已实现，区分US-2、后续Memory/Tool/Web；不把本地测试SSE写成正式API，保留真实Demo尚未运行时的说明 in website/docs/react-loop.md、website/en/docs/react-loop.md、website/docs/quick-start.md、website/en/docs/quick-start.md、website/docs/roadmap.md、website/en/docs/roadmap.md
-- [ ] T092 运行 `mvn spotless:apply`、`mvn -B verify`；有Docker时数据库测试实际执行、CI不跳过；运行官网 `npm run verify`；按需求核对42条FR和17条SC，生成明确通过/失败/未运行结果，任何失败不勾完成（SC-014） in specs/002-react-loop/quickstart.md、specs/002-react-loop/tasks.md
+- [ ] T092 运行 `mvn spotless:apply`、`mvn -B verify`；有Docker时数据库测试实际执行、CI不跳过；运行官网 `npm run verify`；按需求核对42条FR和22条SC，生成明确通过/失败/未运行结果，任何失败不勾完成（SC-014） in specs/002-react-loop/quickstart.md、specs/002-react-loop/tasks.md
 - [ ] T093 检查spec/plan/tasks/实现漂移、全部待办和临时探针、产物里无密钥与正式SSE接口；运行 `/speckit-analyze` 形成只读报告，必要修复须另获授权。当前不自动提交、推送、合并，用户要求后再做 in specs/002-react-loop/spec.md、specs/002-react-loop/plan.md、specs/002-react-loop/tasks.md
 
 ---
@@ -240,12 +242,13 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 Setup T001~T006
   └─ Foundational T007~T017
        └─ US1 T018~T035（纯文本 CLI MVP）
-            └─ US2 T036~T051（工具闭环）
-                 └─ US3 T052~T061（硬上限与超时）
-                      └─ US4 T062~T069（历史与 --new）
-                           └─ US5 T070~T079（故障恢复审计）
-                                └─ US6 T080~T086（并发加固）
-                                     └─ Polish T087~T093
+            └─ US1 增量 T094~T109（默认 main；追加编号，优先执行）
+                 └─ US2 T036~T051（工具闭环）
+                      └─ US3 T052~T061（硬上限与超时）
+                           └─ US4 T062~T069（历史与 --new）
+                                └─ US5 T070~T079（故障恢复审计）
+                                     └─ US6 T080~T086（并发加固）
+                                          └─ Polish T087~T093（最终覆盖22条SC）
 ```
 
 - 阶段内先测试再实现。T039包含T047安全注册的前置测试，T037包含T048正常流式前置测试，T070包含T073审计事务前置测试；T049/T060/T077只做集成复验。T007~T011 按引用类型先后定义（T008需要T007，T009需要T008），不标成无条件并行；T012 依赖这些契约，T013/T014 依赖 T012/T004。T015/T016 必须顺序改同一个迁移文件。T017 需要 T007~T010 的类型，但不依赖运行循环。
@@ -254,12 +257,14 @@ Setup T001~T006
 - US2 的 T036~T040 可并行；实现中的 T041/T043/T045 在各自测试红灯与基础设施就绪后可独立推进，T046/T047 等共同依赖完成再装配。
 - US3、US4、US5、US6 理论上有部分独立文件，但都修改 ReActLoop/AgentService/存储端口，默认按上述顺序串行，不为了并行复制一条执行链。
 - US1/US2 是开发阶段的纵向检查点，不是提前交付全部生产保证；真实外部工具演示必须等 US3 和 US5 闸门通过。
+- 默认 main 增量只依赖已完成的 Setup、Foundational、US1，不依赖 T036–T093；先执行 T094–T109，再恢复原 Phase 4，不能因它写在文末就等到全部 Polish 之后。增量不实现 `--new`，原 US4 任务继续负责归档语义。
 
 ### 并行执行示例（每个故事）
 
 | 故事 | 可同时启动的任务 | 共同前置/合流 |
 |------|------------------|---------------|
 | US1 | T018 Agent解析、T019 Prompt、T020循环、T021 CLI、T022 JPA测试 | Phase2完成；红灯后T023/T029等分别实现，T032装配合流 |
+| US1 默认 main 增量 | T095 模型来源测试、T096 Agent 本地校验测试 | T094完成；文件不同可并行，T097/T098各在对应行为红灯后实现；之后初始化、选择、启动器按文末依赖串行合流 |
 | US2 | T036脱敏、T037 Manager/账本、T038HTTP、T039治理、T040记录器测试 | US1完成；T046需工具/审计/脱敏均就绪 |
 | US3 | T052迭代上限、T053工具限次、T054截止时间、T055HTTP body预算 | US2完成；T060全链路验证 |
 | US4 | T062历史预算、T063存储/CLI追加测试 | US3完成；T068重启/归档数据库验证 |
@@ -272,10 +277,72 @@ Setup T001~T006
 
 1. Setup、Foundational（数据库spike真实通过）。
 2. US1：init和纯文本chat，1次模型调用、1个成功轮次、2条消息、1条模型审计落库；这就是最小纵向MVP。
-3. 停下验证，不在这一刻执行未受约束的工具循环。
+3. US1 默认 main 增量：T094–T109，无需手写第一个 Agent，初始化后直接 chat；仍为无工具纯文本 MVP，不要求先完成 US2–US6。
+4. 停下验证，不在这一刻执行未受约束的工具循环。
 
 ### 增量交付
 
 US2 加本地替身工具闭环 → US3 加全部次数/时间上限 → US4 加历史和新会话 → US5 加持久故障和崩溃恢复 → US6 加数据库竞争验证 → 真实天气阶段Demo与全质量门。
 
 每个阶段完成后更新任务复选框和真实验证结果。数据库测试、真实模型和真实天气演示是三类不同证据：完成其中一类不代表另外两类通过。
+
+---
+
+## Phase 10: [US1] 初始化默认主 Agent（P1，2026-11-16 增量；执行于 Phase 3 后、Phase 4 前）
+
+**Goal**: `init` 生成普通、无工具权限的 `main`，已有外部连接配置可用时无需手写 Agent 或指定 profile 即可聊天；自定义工作区从初始化到实际 Agent/Bootstrap 加载保持一致。
+
+**Independent Test**: 临时目录 + 合成模型输入完成离线初始化；再经真实 CLI init/chat、真实 boot launcher、本地模型替身和 Testcontainers PostgreSQL 完成一条纯文本消息，核对 main 身份、指定目录指令及 1 session / 1 successful turn / 2 messages / 1 llm_call / 0 tool_invocations。无需真实模型、真实天气或后续用户故事实现。
+
+**前置与边界**：依赖已完成 T001–T035；实施前由 T094 核对本次增量 plan 的人工 review。参考 plan“默认主 Agent 增量设计”、research R20–R24、data-model 增量节、workspace/configuration 契约和 quickstart 第 9 节。不新增表/迁移、通用 ConfigLoader、Profile 管理命令、默认模型常量或第二条模型/工具执行入口；不实现 `--new`。
+
+### 设计核对与模型来源（先确认行为红灯）
+
+- [X] T094 [US1] 核对默认 main 增量 plan 的人工 review 与实施范围，确认模型来源优先级、空工具权限、无模型零写入、create-new 幂等、Path 启动器、高优先级工作区绑定和隔离验收已明确；旧 T001 的 review 不替代本次 review，缺少确认或发现宪章冲突时先报告，不擅自改变设计；在验收记录中注明核对结果，不重开旧任务（依赖 T035） in specs/002-react-loop/plan.md、specs/002-react-loop/quickstart.md
+- [X] T095 [P] [US1] 编写模型来源/初始化选项测试：`--model` > 进程 `AGENTOS_LLM_MODEL` > 执行目录合成 `.env`，区分未提供与无效所选值，空白/占位符不回退、高优先级已提供则不读低优先级；覆盖可选非空白 provider、UTF-8 properties 转义/续行/重复键最后生效、无 shell/export/插值语义、I/O 与语法错误安全分类、仅投影目标键及秘密标记不泄露。新类型仅允许先补最小可编译契约，必须观察断言行为失败而非编译失败；测试不读真实 `.env`、不依赖本机环境（依赖 T094；US1-9/14，SC-019/022） in CLI-TEST/InitModelResolverTest.java、CLI/InitModelResolver.java、CLI/DefaultAgentOptions.java
+- [X] T096 [P] [US1] 追加 Agent 本地校验测试，固定默认 main 文件的“name 必须等于 main”“model 为具体非空白值且无未解析占位符”；其他 Agent 仍按 name 等于各自目录名校验。覆盖损坏 frontmatter、目录/文件类型冲突、末级链接及合法自定义 Agent；对尚未拒绝的模型占位符先观察行为红灯，不调用 Provider 或数据库、不修改 Profile 签名（依赖 T094；US1-10/11，FR-025/026，SC-019） in CORE-TEST/agent/AgentLoaderTest.java
+- [X] T097 [US1] 实现 `DefaultAgentOptions` 与 `InitModelResolver`：字段仅 `String model`、可空 `String providerName`，“只包含非敏感值，不含环境 Map、连接串、key、密码”；模型“具体非空白值且无未解析占位符”，可选 provider 提供时非空白。注入环境查询函数和执行目录，按 T095 矩阵惰性解析，JDK Properties + UTF-8 Reader 仅保留 `AGENTOS_LLM_MODEL` 投影，不执行 shell、不展开变量、不持有/输出其他配置或底层异常原文；不得新增通用配置系统或 dotenv 依赖（依赖 T095；FR-039，research R21） in CLI/DefaultAgentOptions.java、CLI/InitModelResolver.java
+- [X] T098 [US1] 在既有 AgentLoader 补齐未解析模型占位符的本地拒绝规则，错误只指明文件/字段；保留既有名称、类型、链接和设置校验，不进行环境展开、远端连接探测，不修改 US-1 Profile 或 Provider call/stream/retry（依赖 T096；FR-025/026/039，research R20/R22） in CORE/agent/AgentLoader.java
+
+### 默认 main 文件与 init 入口
+
+- [X] T099 [US1] 先扩展初始化/命令行为测试：空工作区生成可加载 main；名称固定 main、中文通用指令、`tools: []`，未提供 --provider 时省略 provider.name，始终不写温度和连接凭据；特殊 YAML 输入 round-trip；缺模型时任何工作区写入为 0；已有合法 main 不读取新模型来源、传不同模型也不覆盖；损坏 main 返回 2、路径/链接冲突与 I/O 返回 1；create-new 竞争保留赢家、可控中途失败及重试只补缺项。验证新建/跳过输出、无 Spring/模型/数据库调用和合成秘密标记不泄露；更新原“无模型 init 成功”断言为合法前提。必要时仅补测试注入点/空签名，确认行为红灯（依赖 T097、T098；US1-4/7/9/10/14，SC-013/018/019/022） in CLI-TEST/WorkspaceInitializerTest.java、CLI-TEST/AgentOSCliTest.java、CLI/WorkspaceInitializer.java、CLI/InitCommand.java
+- [X] T100 [US1] 扩展 WorkspaceInitializer：所有路径类型/已有 main 本地校验及必要模型解析先于任何写入；仅 main 缺失时使用 DefaultAgentOptions，已有合法 main 直接保留；结构化 YAML 序列化 `name: main`、具体 model、可选 provider.name 和 `tools: []`，附中文正文、不写连接/凭据/温度。目录必须是目录、文件必须是普通文件，拒绝受管理链接冲突，逐文件 CREATE_NEW，竞争者已创建则校验后跳过或报错；中途失败保留成功内容，不伪事务回滚或自动覆盖坏文件。Result 保留 `List<Path> created`、`List<Path> skipped`，“不放文件正文或配置”；CLI 直接引用 SnakeYAML 时显式声明既有受管依赖，不新增库或版本（依赖 T099；FR-039，research R22） in CLI/WorkspaceInitializer.java、AgentOS-cli/pom.xml
+- [X] T101 [US1] 为 InitCommand 接入 `--model`/`--provider`、可注入模型来源和执行目录，`--workspace` 默认 `.AgentOS`、相对执行目录规范化为绝对根；已有 main 时跳过新的模型解析，无模型且 main 缺失则写入前安全失败。明确成功 0、无效输入/坏 Agent/非法 properties 2、文件 I/O 1，输出新建/跳过与仅本地文件已准备，不拼接异常原文、值、密钥或堆栈；保留 help/version 和独立 CLI，不启动 Spring（依赖 T100；FR-039/042，research R21/R24） in CLI/InitCommand.java、CLI/AgentOSCli.java、CLI/AgentOSCommand.java
+
+### Agent 选择与工作区装配（测试先于对应实现）
+
+- [X] T102 [US1] 扩充 ChatCommand 选择与退出码测试：显式 profile > main > 无 main 时唯一 Agent，多个列候选、零个提示 init；损坏/缺文件 main、显式无效 Agent 和路径片段不回退、不调用 launcher/service；只校验选中项，其他坏 Agent 不阻断显式有效选择。验证空消息不建轮次、已有单消息/交互行为、启动失败 1、用法错误 2、轮次不成功 3、已打开上下文正常/异常均关闭；使用临时合法 Agent 文件修正原目录空夹具，确认新增选择行为红灯（依赖 T101；US1-11/12，FR-040/042，SC-020） in CLI-TEST/ChatCommandTest.java、CLI-TEST/AgentOSCliTest.java
+- [X] T103 [US1] 实现 main 优先及旧工作区兼容选择；main 路径存在即校验而不因损坏过滤后回退，只校验最终选中 Agent，复用 AgentLoader、关闭 Files.list Stream、候选遵守末级链接限制；选择/文件错误在启动器前返回 2，运行时错误按既有契约安全映射，保持消息/交互处理及 close。保留 `--new` 参数与原任务，不在本增量实现或冒报归档功能（依赖 T102；FR-040/042，research R23/R24） in CLI/ChatCommand.java、CLI/AgentOSCli.java
+- [X] T104 [US1] 编写工作区端口和真实 launcher 绑定的前置测试，验证 Path 非空/规范化、CLI 传入同一根、NONE 模式与关闭行为、CLI 工作区优先于冲突普通配置；扩展测试 LocalModelServer 捕获合成请求。可先将 ContextLauncher 契约迁移到 `launch(Path workspaceRoot)` 并同步仓库内全部调用者/假实现，以及 boot 包内构建工厂的最小注入接口，使测试可编译；此时 boot 保持原启动行为，不提前实现 `.run` 工作区覆盖，必须观察实际绑定行为红灯。工厂仅供测试隔离 Environment，配置源低于 commandLineArgs、高于普通环境/文件，关闭 `.env` 导入；禁止新增用户测试选项或全局系统属性（依赖 T103；FR-040，research R23） in CLI/ContextLauncher.java、CLI/ChatCommand.java、CLI-TEST/ChatCommandTest.java、CLI-TEST/AgentOSCliTest.java、BOOT/SpringContextLauncher.java、BOOT-TEST/SpringContextLauncherTest.java、BOOT-TEST/support/LocalModelServer.java
+- [X] T105 [US1] 编写默认 main 的真实 CLI 装配测试并确认行为红灯：使用已有 db 环境检测、`pgvector/pgvector:pg17` 和本地模型替身，经 CLI init 创建 main 后不手写 main、不传 profile 调 CLI chat + 真实 SpringContextLauncher；提供不同的低优先级 workspace 与冲突默认目录，断言实际请求模型、无 tools、所选 main/Bootstrap 标记及默认目录未读写；空库核对 main 的 1 session、1 SUCCEEDED turn、2 messages、1 llm_call、0 tool_invocations、持久化确认与资源关闭。禁用真实 `.env`/Embedding/外部连接，不以假 launcher 收到 Path 或直接调 AgentService 替代；Docker 被跳过不算红灯或通过（依赖 T104；US1-8/13，SC-018/021） in BOOT-TEST/DefaultAgentCliIntegrationTest.java、BOOT-TEST/support/LocalModelServer.java、BOOT-TEST/BootDatabaseTestEnvironment.java
+- [X] T106 [US1] 落实 Path 启动器的实际传递：CLI 只规范化一次并传同一根，boot 在 NONE `.run(...)` 传单个 `--agentos.workspace.root=<绝对路径>`，优先于普通环境/文件，不用低优先级 builder 默认属性或 System.setProperty；移除忽略路径的无参回退。完成包内构建工厂的隔离测试支持但保持生产行为，core 两个加载器继续共享 WorkspaceProperties.root，无需改造循环或存储；让 T104/T105 绑定与真实请求断言转绿（依赖 T104、T105；FR-040，research R23/R24） in CLI/ContextLauncher.java、CLI/ChatCommand.java、BOOT/SpringContextLauncher.java、BOOT/AgentOSApplication.java
+
+### 独立验收与文档
+
+- [X] T107 [US1] 按 quickstart 第 9 节执行临时目录初始化烟测及新增自动化矩阵，运行 `mvn -B -ntp verify`、`python3 scripts/check_db_test_reports.py`，核对新增数据库集成测试实际出现在报告中且执行未跳过；不重复发送真实模型请求。逐项记录 SC-018–SC-022 的 PASS/FAIL/NOT_RUN、测试名称/数量、退出码与数据库执行/跳过原因；无 Docker 时可记录文件层通过，但真实装配仍 NOT_RUN，不能勾完整验收；CI 不得跳过。仅在代码变化/失败修复后重跑受影响验证（依赖 T097、T098、T101、T103、T106；SC-014/018–022） in specs/002-react-loop/quickstart.md、scripts/check_db_test_reports.py、AgentOS-boot/target/surefire-reports/TEST-com.agentos.boot.DefaultAgentCliIntegrationTest.xml
+- [X] T108 [US1] 基于实际实现与 T107 证据更新 CLI/boot 代码导读、结构图及技术方案 8.1/8.2 的初始化用法，明确共享 AGENTS 是指令、main 是普通 Profile、模型来源只用于创建、init 仅本地就绪和实际 workspace 传递；新增生产代码具备中文意图/边界注释，不把未验证行为标已实现。保留 quickstart 2.1 历史和旧完成记录，说明默认 main 无工具、weather 需显式选择；同步本次增量的设计/实施状态，不宣称整个 ReAct 已交付（依赖 T107） in docs/code-reading/AgentOS-cli.md、docs/code-reading/AgentOS-boot.md、docs/code-reading/ClassStructure.md、docs/TechnicalSolution.md、specs/002-react-loop/plan.md、specs/002-react-loop/contracts/workspace-and-cli.md、specs/002-react-loop/quickstart.md
+- [X] T109 [US1] 在本次增量实施后运行 `/speckit-analyze` 并核对 FR-039/FR-040、US1-7–14、SC-018–SC-022 的 spec/plan/data-model/contracts/tasks/代码与实测证据；本增量新增漂移须修复并重验受影响检查，原 Phase 4–9 未完成项单列，不当成新增 main 已完成或因此改勾历史。确认无密钥/通用配置系统/新迁移/新工具入口/冒报 --new，记录收口结论，不自动提交、推送或发布（依赖 T108） in specs/002-react-loop/spec.md、specs/002-react-loop/plan.md、specs/002-react-loop/data-model.md、specs/002-react-loop/contracts/workspace-and-cli.md、specs/002-react-loop/contracts/configuration.md、specs/002-react-loop/tasks.md、specs/002-react-loop/quickstart.md
+
+**Checkpoint**: T107 的真实 CLI + 替身 + PostgreSQL 验收实际通过，且 T109 漂移检查闭合后，默认主 Agent 的最小增量可独立验收；原 T036–T093 仍保持各自待办，不视作工具闭环或完整 ReAct 完成。
+
+### 增量依赖、覆盖与并行
+
+```text
+T035 → T094
+         ├─ T095 → T097 ─┐
+         └─ T096 → T098 ─┴─ T099 → T100 → T101 → T102 → T103
+T103 → T104 → T105 → T106 → T107 → T108 → T109
+```
+
+T095 与 T096 在 T094 完成后可并行，分别写 CLI 和 core 的测试文件，不共享修改。其余任务默认串行，尤其 T099/T102/T104 都追加 CLI 测试，不能同时覆盖；T104 的签名迁移一次同步所有引用，避免跨模块半迁移。
+
+| 验收范围 | 测试任务 → 实现/验证 | 对应需求 |
+|----------|----------------------|----------|
+| 模型来源、合法输入与字段约束 | T095/T096 → T097/T098 | FR-039、FR-025/026；SC-019 |
+| 首次 main、幂等、无模型零写入、类型/I/O/竞争与敏感数据 | T099 → T100/T101 → T107 | US1-7/9/10/14；FR-039；SC-013/018/019/022 |
+| 显式/main/旧工作区选择与错误安全 | T102 → T103 → T107 | US1-11/12；FR-040/042；SC-020 |
+| 同根真实加载、无需手写 Agent 的 CLI→模型→数据库闭环 | T104/T105 → T106 → T107 | US1-8/13；FR-040；SC-018/021 |
+| 运行证据、教学文档与实施后漂移 | T107 → T108 → T109 | SC-014/018–022；不替代原完整故事验收 |
+
+本次新增 16 项全部归属 US1，Phase 10 已完成；全表共 109 项（完成 51、待办 58）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。下一阶段为原 Phase 4（T036 起），须按用户后续指定范围继续，不能把本次 main 增量当成工具故事完成。

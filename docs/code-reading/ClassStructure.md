@@ -17,8 +17,12 @@
 flowchart TD
     Boot[AgentOSApplication] --> CLI[AgentOSCli]
     CLI --> Init[InitCommand]
+    Init --> Workspace[WorkspaceInitializer]
+    Workspace --> Resolver[InitModelResolver]
+    Resolver --> Options[DefaultAgentOptions]
+    Workspace --> Main[agents/main/AGENT.md]
     CLI --> Chat[ChatCommand]
-    Chat --> Launcher[SpringContextLauncher]
+    Chat -->|同一规范化工作区 Path| Launcher[SpringContextLauncher]
     Launcher --> CoreAuto[CoreAutoConfiguration]
     Launcher --> ProviderAuto[ProviderAutoConfiguration]
     Launcher --> StorageAuto[StorageAutoConfiguration]
@@ -140,3 +144,24 @@ flowchart LR
 ```
 
 `CliIdentity` 把 `cli + 登录用户名 + Agent 名` 组成 `SessionKey`。`CliChannel` 只处理输入、`/exit`、空行和输出，不参与模型调用。
+
+## 默认主 Agent 初始化与加载
+
+`InitModelResolver` 只在 main 缺失时生成 `DefaultAgentOptions(model, providerName)`；WorkspaceInitializer 用 SnakeYAML 写普通 AGENT.md。根部 AGENTS.md 是共享指令，不是 Profile。main 没有独立引擎或数据库表。
+
+```mermaid
+flowchart LR
+    Init[InitCommand] --> Files[WorkspaceInitializer]
+    Files --> Main[agents/main/AGENT.md]
+    Chat[ChatCommand] --> Local[AgentLoader 本地校验]
+    Local --> Port[ContextLauncher.launch Path]
+    Port --> Boot[SpringContextLauncher]
+    Boot --> Property[commandLineArgs workspace.root]
+    Property --> Core[WorkspaceProperties.root]
+    Core --> Loader[AgentLoader]
+    Core --> Context[ContextLoader]
+    Loader --> Main
+    Context --> Shared[AGENTS / SOUL / USER]
+```
+
+选择规则是显式 Agent、main、旧工作区唯一 Agent。文件错误在启动器前失败；真实 Provider 校验仍在统一服务链路里。默认 main 无工具，工具闭环和 --new 继续属于后续未完成阶段。

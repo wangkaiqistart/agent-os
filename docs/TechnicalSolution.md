@@ -853,10 +853,11 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 ```
 .AgentOS/
 ├── agents/            # 每个子目录 = 一个 Agent（AGENT.md + skills/软连接 + scripts/ REFERENCE.md）
+│   └── main/AGENT.md   # init 生成的默认主 Agent，普通 Profile、无工具权限
 ├── skills/            # 公共 Skill 实体库（SKILL.md + 可选附属资源）
 ├── memory/
 │   └── MEMORY.md      # 长期记忆
-├── mcp_servers.yaml   # MCP 配置
+├── mcp_servers.yaml   # MCP 配置目标（002 当前 init 不生成）
 ├── output/            # Agent 产出物
 ├── logs/              # 日志
 ├── AGENTS.md
@@ -866,9 +867,13 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 
 创建目录、写默认模板、生成默认 Profile。Session、审计、定时任务等数据在 PostgreSQL 里，不在工作区目录中；`init` 只操作文件，不连接数据库。
 
+**002 当前实现（2026-11-16，Phase 10 已验证）。** `init [--workspace <根目录>] [--model <模型>] [--provider <连接名>]` 在创建缺失 main 时按 `--model` > 进程 `AGENTOS_LLM_MODEL` > 执行目录 `.env` 同名项解析具体模型；无效所选值不回退，缺模型在任何工作区写入前失败。已有合法 main 保留，不读取新模型来源。main 包含通用中文助手正文和 `tools: []`，不写温度、连接地址或凭据。路径预检查后逐文件 CREATE_NEW，竞争者内容经校验后跳过；部分失败保留已创建项，损坏 main 不自动覆盖。init 仅代表本地文件准备完毕，不证明外部服务可用。
+
 ### 8.2 Profile 配置
 
 **`AgentLoader` 模块。** 扫 `.AgentOS/agents/` 各子目录，`deriveProfile` 把每个 `AGENT.md` 的 frontmatter 派生成一个 `Profile`，注册到 `ProfileRegistry`。启动时做合法性校验：Provider 是否存在、Tool 是否注册、Channel 是否支持、Bootstrap 文件是否存在。校验失败的 Agent 不阻断启动但记录错误日志。
+
+**002 当前加载路径。** main 和其他 Agent 一样由 AgentLoader 从 frontmatter 派生 Profile，每轮重新读取。CLI 选择显式 `--profile` > main > 无 main 时唯一旧 Agent；坏 main 不静默回退。`--workspace` 同时用于选择与实际加载，经 `ContextLauncher.launch(Path)` 传到 Boot 的高优先级 `--agentos.workspace.root` 参数，AgentLoader/ContextLoader 共享同一 root。根部 AGENTS.md 是共享行为指令，不承载 Profile 配置。下述 ProfileRegistry 是总体目标，不代表 002 已实现注册表或缓存；当前仅支持该 spec 的字段，其余识别字段提示未支持。
 
 **`ProfileRegistry` 模块。** Agent 派生 `Profile` 的内存索引，按 name 提供快速查找。Channel 接收消息时通过它拿到具体 Profile。派生自 `AGENT.md` frontmatter 的字段：`name`、`description`、`identity`（`agent_name`、`prompt`）、`provider`（`name`、`model`、`temperature`、`reasoning_effort`）、`tools`、`mcp_servers`、`channels`、`schedules`、`bootstrap`、`settings`（`max_iterations`、`max_history_turns`、`max_history_tokens`、`turn_timeout`、`tool_search`、`always_tools`）。`notify_channels` 不属于 Profile 或 frontmatter；通知渠道由数据库全局注册表管理，Agent 只在正文中按名称引用。核心阶段支持多个 Agent 并存，同一实例上同时可用，这是"OS"在核心阶段的最小体现。
 
