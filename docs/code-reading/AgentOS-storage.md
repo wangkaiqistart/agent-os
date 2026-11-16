@@ -70,7 +70,7 @@ Core 只接收快照和消息值对象，不暴露 JPA 实体或懒加载关系�
 
 入口：[JpaMessageStore.java](../../AgentOS-storage/src/main/java/com/agentos/storage/session/JpaMessageStore.java)
 
-消息按 iteration 追加，不更新历史行。Phase 4 把 ASSISTANT 的 toolCalls、TOOL 的 responses 分别写入 JSONB；本轮后续模型使用 Manager 的内存完整历史，不依赖数据库重新读取。读取时按 session 消息 ID 排序，重新组装成 `HistoryTurn`；当前最小实现按 turn 分组并返回 USER/ASSISTANT 消息，系统提示词从不写入消息表。
+消息按 iteration 追加，不更新历史行。Phase 4 把 ASSISTANT 的 toolCalls、TOOL 的 responses 分别写入 JSONB；本轮后续模型使用 Manager 的内存完整历史。跨轮恢复时先排除 RUNNING，再按已完成轮次选取最近窗口，最后按 session 消息 ID 顺序重新组装完整 `HistoryTurn`，因此工具请求与结果不会被消息行限制拆开；系统提示词从不写入消息表。
 
 ## `JpaLlmCallRecorder`：模型审计
 

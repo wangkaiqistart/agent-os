@@ -16,7 +16,7 @@ import org.hibernate.type.SqlTypes;
  * session_messages 表映射：消息逐条保存，通过 sessionId、turnId、iteration 还原所属位置。
  *
  * <p>USER 在创建轮次时以 iteration=0 写入，ASSISTANT/TOOL 使用实际模型迭代序号。
- * 工具结构字段已由 JpaMessageStore 写入；跨轮完整恢复由后续历史阶段接入。
+ * 工具结构字段由 JpaMessageStore 写入，并可按完整轮次恢复。
  */
 @Entity
 @Table(name = "session_messages")

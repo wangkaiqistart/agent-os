@@ -1,6 +1,7 @@
 package com.agentos.boot;
 
 import com.agentos.cli.ContextLauncher;
+import com.agentos.core.session.SessionManager;
 import com.agentos.core.turn.AgentService;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -43,6 +44,11 @@ public final class SpringContextLauncher implements ContextLauncher {
             public AgentService agentService() {
                 // 从容器取得已装配服务，避免手动 new 绕过依赖注入与存储事务代理。
                 return context.getBean(AgentService.class);
+            }
+
+            @Override
+            public SessionManager sessionManager() {
+                return context.getBean(SessionManager.class);
             }
 
             @Override

@@ -60,8 +60,8 @@ public class StorageAutoConfiguration {
     }
 
     @Bean
-    MessageStore messageStore(SessionMessageRepository messages) {
-        return new JpaMessageStore(messages);
+    MessageStore messageStore(SessionMessageRepository messages, AgentTurnRepository turns) {
+        return new JpaMessageStore(messages, turns);
     }
 
     @Bean

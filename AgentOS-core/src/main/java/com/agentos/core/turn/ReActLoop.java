@@ -5,7 +5,9 @@ import com.agentos.core.agent.LoadedAgent;
 import com.agentos.core.provider.CallCorrelation;
 import com.agentos.core.provider.ProviderRequest;
 import com.agentos.core.provider.ProviderService;
+import com.agentos.core.session.HistoryTurn;
 import com.agentos.core.session.MessageStore;
+import com.agentos.core.session.SessionSnapshot;
 import com.agentos.core.session.TurnSnapshot;
 import com.agentos.core.tool.Redactor;
 import com.agentos.core.tool.ToolCatalog;
@@ -22,7 +24,7 @@ import org.springframework.ai.chat.messages.ToolResponseMessage;
 
 /**
  * 模型思考 → 官方 Manager 执行工具 → 完整结果回填的单轮循环。
- * 只依赖 core 端口，模型、工具实现和数据库均由装配层注入；跨用户消息的历史恢复仍属后续阶段。
+ * 只依赖 core 端口，模型、工具实现和数据库均由装配层注入；跨用户消息按完整轮次恢复。
  */
 public final class ReActLoop {
     private static final Logger log = LoggerFactory.getLogger(ReActLoop.class);
@@ -109,7 +111,17 @@ public final class ReActLoop {
             TurnExecutionBudget budget,
             TurnSink sink,
             String trigger) {
-        List<Message> history = promptBuilder.build(agent, List.of(), userMessage);
+        // startTurn 已经把当前用户消息写入存储；读取历史时明确排除 RUNNING 轮次，避免当前消息重复。
+        SessionSnapshot session =
+                new SessionSnapshot(
+                        turn.sessionId(), turn.sessionKey(), "active", turn.owner(), null);
+        List<HistoryTurn> previousTurns =
+                agent.profile().settings().maxHistoryTurns() == 0
+                                || agent.profile().settings().maxHistoryTokens() == 0
+                        ? List.of()
+                        : messages.recentTurns(
+                                session, agent.profile().settings().maxHistoryTurns());
+        List<Message> history = promptBuilder.build(agent, previousTurns, userMessage);
         var callbacks = catalog.callbacks(agent.profile());
         MDC.put("sessionId", turn.sessionId().toString());
         MDC.put("turnId", turn.turnId().toString());

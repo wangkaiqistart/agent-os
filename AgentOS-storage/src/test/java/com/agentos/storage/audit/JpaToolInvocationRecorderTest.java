@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.agentos.core.audit.AuditWriteException;
 import com.agentos.core.audit.ToolInvocationRecord;
 import com.agentos.core.audit.ToolInvocationRecorder;
+import com.agentos.core.config.TurnProperties;
 import com.agentos.core.session.SessionKey;
 import com.agentos.core.session.TurnSnapshot;
 import com.agentos.core.session.TurnStore;
@@ -147,6 +148,12 @@ class JpaToolInvocationRecorderTest extends PostgresIntegrationTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration(excludeName = "com.agentos.core.config.CoreAutoConfiguration")
     static class App {
+        /** 审计契约不加载 CoreAutoConfiguration，补齐 TurnStore 的默认时限依赖。 */
+        @Bean
+        TurnProperties turnProperties() {
+            return new TurnProperties(null, null, null);
+        }
+
         @Bean
         ToolInvocationRecorder testRecorder(
                 ToolInvocationRepository repo,

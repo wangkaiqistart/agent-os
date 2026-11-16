@@ -170,14 +170,14 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 
 **Independent Test**: 预置含工具的成功轮次和各种失败轮次，检查下一轮 Prompt；改变日期/Agent 文件，下一轮立即更新；归档后新会话不带旧历史。
 
-- [ ] T062 [P] [US4] 编写 Prompt 历史测试：20轮/32000 token 两道限制、边界相等、最旧整轮丢弃、单轮过大丢历史但当前用户保留；工具请求/响应不拆；所有失败终态只取用户+安全未完成说明；系统指令顺序稳定、日期跨零点更新（FR-020、FR-022、FR-023；SC-011） in CORE-TEST/turn/PromptHistoryTest.java
-- [ ] T063 [P] [US4] 追加契约/CLI 测试：recentTurns 按轮次和消息顺序；重新启动 chat 沿同一 active；--new 空会话不报错、旧行/审计零修改、归档时间被写、新 UUID、旧历史零进入；正文和 Bootstrap 改完下一轮生效（FR-002、FR-024、FR-032、FR-040、FR-041；SC-012、SC-017） in CORE-TEST/contract/MessageStoreContractTest.java、CORE-TEST/contract/SessionManagerContractTest.java、CLI-TEST/ChatCommandTest.java、CORE-TEST/agent/ContextLoaderTest.java
-- [ ] T064 [US4] 实现 PromptBuilder 的历史恢复和按完整轮次双限截断，使用 JTokkitTokenCountEstimator；明确历史预算只作用于历史、不偷偷截断系统/当前用户；未完成原因脱敏简短，数据库原消息不改（依赖 T062，FR-020、FR-022、FR-023） in CORE/turn/PromptBuilder.java
-- [ ] T065 [US4] 实现 JpaMessageStore 的 recentTurns：先选轮次再读全轮消息，不能对消息行直接 LIMIT 截断；消息 codec 保留工具调用ID/参数/结果/metadata；exclude 当前 RUNNING 避免重复带入本条用户（依赖 T063、T064，FR-022、FR-032） in STORE/session/JpaMessageStore.java、STORE/session/MessageCodec.java
-- [ ] T066 [US4] 实现 archiveIfIdle 与 CLI --new：归档仅从 active 到 archived，不可逆，不改旧记录；归档用 SQL 条件保证只在空闲生效，不能先读再写；默认不开新会话，--new 与 --message 组合工作（依赖 T063，FR-002、FR-040、FR-041；SC-017） in STORE/session/JpaSessionManager.java、CLI/ChatCommand.java、CHANNEL/CliChannel.java
-- [ ] T067 [US4] 确保每一条新用户消息重新加载 Agent 与 Bootstrap、重新校验工具名单，不在同轮每次迭代重读文件改变运行配置；不缓存 LoadedAgent 到整个 CLI 生命周期（依赖 T063、T064、T066，FR-024） in CORE/turn/AgentService.java、CORE/agent/ContextLoader.java、CLI/ChatCommand.java
-- [ ] T068 [US4] 编写数据库重启/新上下文测试：在同一容器保留数据、关第一个上下文再开第二个，接回旧会话；--new 之后查询旧记录一致、Prompt 不带旧历史；重跑 JPA/内存两版契约（FR-032、FR-040；SC-017） in BOOT-TEST/ConversationResumeTest.java、STORE-TEST/session/JpaMessageStoreContractTest.java、STORE-TEST/session/JpaSessionManagerContractTest.java
-- [ ] T069 [US4] 通过 US4 独立验收并更新多轮、热更新、--new 的验证步骤与实际结果，历史上限0、正token预算90% floor均有证据，用户标识不写死到测试用例外 in specs/002-react-loop/quickstart.md
+- [X] T062 [P] [US4] 编写 Prompt 历史测试：20轮/32000 token 两道限制、边界相等、最旧整轮丢弃、单轮过大丢历史但当前用户保留；工具请求/响应不拆；所有失败终态只取用户+安全未完成说明；系统指令顺序稳定、日期跨零点更新（FR-020、FR-022、FR-023；SC-011） in CORE-TEST/turn/PromptHistoryTest.java
+- [X] T063 [P] [US4] 追加契约/CLI 测试：recentTurns 按轮次和消息顺序；重新启动 chat 沿同一 active；--new 空会话不报错、旧行/审计零修改、归档时间被写、新 UUID、旧历史零进入；正文和 Bootstrap 改完下一轮生效（FR-002、FR-024、FR-032、FR-040、FR-041；SC-012、SC-017） in CORE-TEST/contract/MessageStoreContractTest.java、CORE-TEST/contract/SessionManagerContractTest.java、CLI-TEST/ChatCommandTest.java、CORE-TEST/agent/ContextLoaderTest.java
+- [X] T064 [US4] 实现 PromptBuilder 的历史恢复和按完整轮次双限截断，使用 JTokkitTokenCountEstimator；明确历史预算只作用于历史、不偷偷截断系统/当前用户；未完成原因脱敏简短，数据库原消息不改（依赖 T062，FR-020、FR-022、FR-023） in CORE/turn/PromptBuilder.java
+- [X] T065 [US4] 实现 JpaMessageStore 的 recentTurns：先选轮次再读全轮消息，不能对消息行直接 LIMIT 截断；消息 codec 保留工具调用ID/参数/结果/metadata；exclude 当前 RUNNING 避免重复带入本条用户（依赖 T063、T064，FR-022、FR-032） in STORE/session/JpaMessageStore.java、STORE/session/MessageCodec.java
+- [X] T066 [US4] 实现 archiveIfIdle 与 CLI --new：归档仅从 active 到 archived，不可逆，不改旧记录；归档用 SQL 条件保证只在空闲生效，不能先读再写；默认不开新会话，--new 与 --message 组合工作（依赖 T063，FR-002、FR-040、FR-041；SC-017） in STORE/session/JpaSessionManager.java、CLI/ChatCommand.java、CHANNEL/CliChannel.java
+- [X] T067 [US4] 确保每一条新用户消息重新加载 Agent 与 Bootstrap、重新校验工具名单，不在同轮每次迭代重读文件改变运行配置；不缓存 LoadedAgent 到整个 CLI 生命周期（依赖 T063、T064、T066，FR-024） in CORE/turn/AgentService.java、CORE/agent/ContextLoader.java、CLI/ChatCommand.java
+- [X] T068 [US4] 编写数据库重启/新上下文测试：在同一容器保留数据、关第一个上下文再开第二个，接回旧会话；--new 之后查询旧记录一致、Prompt 不带旧历史；重跑 JPA/内存两版契约（FR-032、FR-040；SC-017） in BOOT-TEST/ConversationResumeTest.java、STORE-TEST/session/JpaMessageStoreContractTest.java、STORE-TEST/session/JpaSessionManagerContractTest.java
+- [X] T069 [US4] 通过 US4 独立验收并更新多轮、热更新、--new 的验证步骤与实际结果，历史上限0、正token预算90% floor均有证据，用户标识不写死到测试用例外 in specs/002-react-loop/quickstart.md
 
 **Checkpoint**: 历史工具调用/结果零拆分；失败历史不会把半截工具链再次送给模型。
 
@@ -324,7 +324,7 @@ US2 加本地替身工具闭环 → US3 加全部次数/时间上限 → US4 加
 - [X] T108 [US1] 基于实际实现与 T107 证据更新 CLI/boot 代码导读、结构图及技术方案 8.1/8.2 的初始化用法，明确共享 AGENTS 是指令、main 是普通 Profile、模型来源只用于创建、init 仅本地就绪和实际 workspace 传递；新增生产代码具备中文意图/边界注释，不把未验证行为标已实现。保留 quickstart 2.1 历史和旧完成记录，说明默认 main 无工具、weather 需显式选择；同步本次增量的设计/实施状态，不宣称整个 ReAct 已交付（依赖 T107） in docs/code-reading/AgentOS-cli.md、docs/code-reading/AgentOS-boot.md、docs/code-reading/ClassStructure.md、docs/TechnicalSolution.md、specs/002-react-loop/plan.md、specs/002-react-loop/contracts/workspace-and-cli.md、specs/002-react-loop/quickstart.md
 - [X] T109 [US1] 在本次增量实施后运行 `/speckit-analyze` 并核对 FR-039/FR-040、US1-7–14、SC-018–SC-022 的 spec/plan/data-model/contracts/tasks/代码与实测证据；本增量新增漂移须修复并重验受影响检查，原 Phase 4–9 未完成项单列，不当成新增 main 已完成或因此改勾历史。确认无密钥/通用配置系统/新迁移/新工具入口/冒报 --new，记录收口结论，不自动提交、推送或发布（依赖 T108） in specs/002-react-loop/spec.md、specs/002-react-loop/plan.md、specs/002-react-loop/data-model.md、specs/002-react-loop/contracts/workspace-and-cli.md、specs/002-react-loop/contracts/configuration.md、specs/002-react-loop/tasks.md、specs/002-react-loop/quickstart.md
 
-**Checkpoint**: T107 的真实 CLI + 替身 + PostgreSQL 验收实际通过，且 T109 漂移检查闭合后，默认主 Agent 的最小增量可独立验收；原 T036–T093 仍保持各自待办，不视作工具闭环或完整 ReAct 完成。
+**Checkpoint**: T107 的真实 CLI + 替身 + PostgreSQL 验收实际通过，且 T109 漂移检查闭合后，默认主 Agent 的最小增量可独立验收；Phase 6 已完成，T070–T093 仍保持各自待办，不视作完整 ReAct 完成。
 
 ### 增量依赖、覆盖与并行
 
@@ -345,9 +345,12 @@ T095 与 T096 在 T094 完成后可并行，分别写 CLI 和 core 的测试文�
 | 同根真实加载、无需手写 Agent 的 CLI→模型→数据库闭环 | T104/T105 → T106 → T107 | US1-8/13；FR-040；SC-018/021 |
 | 运行证据、教学文档与实施后漂移 | T107 → T108 → T109 | SC-014/018–022；不替代原完整故事验收 |
 
-本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）和 Phase 5（T052–T061）已完成并独立验证，证据见 quickstart 第 10、11 节。全表共 109 项（完成 77、待办 32）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实天气演示仍受 US5 审计恢复前置条件约束，后续按用户指定继续 Phase 6。
+本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）、Phase 5（T052–T061）和 Phase 6（T062–T069）已完成并独立验证，证据见 quickstart 第 10–12 节。当前全表共 109 项（完成 85、待办 24）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实天气演示仍受 US5 审计恢复前置条件约束，后续继续 Phase 7。
 
 
 **Phase 4 实施记录（2026-11-16）**：T036–T051 已完成，前置行为红灯与最终 359 tests / 0 failures / 0 errors / 0 skipped、数据库回读及实施后分析见 quickstart 第 10 节。保留 T001–T035、T094–T109 历史记录；未勾选 T052–T093。T051 的真实天气演示按原要求延期到 US3 安全上限与 US5 审计恢复完成后，本次只做本地替身天气闭环。
 
 **Phase 5 实施记录（2026-11-16）**：T052–T061 已完成。实现模型调用上限、官方 Manager 工具限次与 `limit_skipped` 审计、共享 deadline/hard stop、HTTP body 消费截止和动态租约；新增 core/tool deadline 与限次测试、真实 Boot Manager/慢工具集成场景、配置断言及治理收尾测试。完整质量门已通过；本机 Docker 未运行，storage 9 项和 boot 6 项 Testcontainers 测试按项目约定跳过，数据库质量门未验证，CI 仍须实际执行。未提交、推送或发布。
+
+
+**Phase 6 实施记录（2026-11-16）**：T062–T069 已完成。PromptBuilder 按完整轮次同时应用 `max_history_turns` 与 90% floor 的 token 预算，工具请求/结果不拆分；RUNNING 轮次排除且不占已完成历史配额，失败轮次只恢复用户消息和固定安全说明。JPA 消息存储保留工具调用 ID、参数、结果和 metadata；CLI `--new` 使用原子空闲归档并在无活跃会话时直接开始，重启后的新 Spring 上下文沿同一 active 会话恢复历史。新增 core、storage、CLI 和 boot 集成测试；本机 Docker 未运行，PostgreSQL/真实 boot 重启验收按项目约定跳过，详见 quickstart 第 12 节。未提交、推送或发布。

@@ -13,7 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 会话查询与归档适配器，按 channel + userId + profileName 查找活跃会话。
  *
- * <p>当前主链路通过 TurnStore 创建会话，本类不负责模型调用，也不自动为每条消息归档旧会话。
+ * <p>主链路通过 TurnStore 创建会话，本类不负责模型调用；CLI --new 通过本类原子归档空闲会话。
  */
 public class JpaSessionManager implements SessionManager {
     private final SessionRepository sessions;
@@ -47,7 +47,13 @@ public class JpaSessionManager implements SessionManager {
     @Override
     @Transactional
     public boolean archiveIfIdle(SessionKey key) {
-        // 当前查询没有 FOR UPDATE，事务注解本身不会把“查询后判断”变成并发互斥。
+        // 条件更新在数据库内原子判断租约并写入归档时间，避免“先读后写”的竞争窗口。
+        if (jdbc != null
+                && sessions.archiveActiveIfIdle(key.channel(), key.userId(), key.profileName())
+                        > 0) {
+            return true;
+        }
+        // 未归档时只读取当前状态用于区分“没有会话”和“仍被占用”；不再根据读取结果写回。
         SessionEntity entity =
                 sessions.findByChannelAndUserIdAndProfileNameAndStatus(
                                 key.channel(), key.userId(), key.profileName(), "active")
@@ -56,10 +62,14 @@ public class JpaSessionManager implements SessionManager {
             return false;
         }
         Instant now = databaseNow();
-        // 有效租约代表仍有轮次占用，不能把它当作空闲会话归档。
         if (entity.getLeaseUntil() != null && entity.getLeaseUntil().isAfter(now)) {
             throw new AgentOSException(ErrorCode.SESSION_BUSY, "上一条消息还在处理");
         }
+        if (jdbc != null) {
+            // 正式路径只接受上面的条件更新结果，避免这里的读取再次打开写入竞争窗口。
+            return false;
+        }
+        // 没有 JdbcTemplate 的隔离构造器仍保持可测试，但正式装配不会走这里。
         entity.archive(now);
         sessions.save(entity);
         return true;

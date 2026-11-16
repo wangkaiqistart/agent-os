@@ -24,14 +24,14 @@ import org.slf4j.MDC;
  * 因而这里不处理终端、Servlet 或 SSE 细节；这些差异通过 ProcessRequest 和 TurnSink 适配。
  *
  * <p>本类不加整方法事务：模型调用可能等待很久，事务只在注入的存储端口内短暂开启。
- * 当前已支持工具循环；跨轮历史恢复和新会话语义仍待后续阶段接入。
+ * 当前已支持工具循环；每条新用户消息都会重新加载 Agent 与 Bootstrap，历史由循环按轮次恢复。
  */
 public final class DefaultAgentService implements AgentService {
     private static final Logger log = LoggerFactory.getLogger(DefaultAgentService.class);
     private final AgentLoader loader;
     private final ContextLoader contextLoader;
     private final ProviderCatalog providers;
-    // 会话管理依赖已预留；当前 process 的会话创建直接由 TurnStore 完成，尚未使用它归档旧会话。
+    // 会话管理用于 CLI --new 归档；本轮的创建、租约和收尾仍由 TurnStore 原子完成。
     private final SessionManager sessions;
     private final TurnStore turns;
     private final ReActLoop loop;

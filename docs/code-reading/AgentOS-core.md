@@ -84,7 +84,7 @@ Agent 正文
 
 入口：[ReActLoop.java](../../AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java)。纯文本仍只调用一次模型；工具分支会在同一轮内继续迭代：
 
-1. PromptBuilder 生成 system + 当前 USER；前轮历史读取仍待 Phase 6。
+1. ReActLoop 先从 MessageStore 读取同一 active 会话的已完成轮次；PromptBuilder 生成 system + 完整历史 + 当前 USER，并按轮数和 90% token 预算截断。
 2. 从 ToolCatalog 取得本 Agent 授权 callbacks，checkpoint 后请求模型。ProviderRequest 只带 TurnContext，此时还没有本次响应的调用 ID，不建账本。
 3. 普通文本回答追加 ASSISTANT 并返回。工具响应先整批校验 ID 非空且唯一，违规整批零执行。
 4. 发布脱敏后的 `onToolCall`，交给 ToolExecutor。它在模型返回后建立 FIFO 账本，使用固定内部键把 TurnContext、账本、同一预算放进官方 Manager 的 Prompt。

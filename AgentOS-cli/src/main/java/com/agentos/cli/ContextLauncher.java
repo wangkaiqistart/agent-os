@@ -1,5 +1,6 @@
 package com.agentos.cli;
 
+import com.agentos.core.session.SessionManager;
 import com.agentos.core.turn.AgentService;
 import java.nio.file.Path;
 
@@ -17,6 +18,11 @@ public interface ContextLauncher {
     /** 只暴露业务入口和关闭能力，CLI 无需持有 Spring 的 ApplicationContext 类型。 */
     interface RunningContext extends AutoCloseable {
         AgentService agentService();
+
+        /** --new 需要在同一 Spring 上下文中调用会话归档端口；轻量测试实现可返回 null。 */
+        default SessionManager sessionManager() {
+            return null;
+        }
 
         // 假实现可以不持有资源；boot 的真实实现覆盖它并关闭 Spring 容器。
         @Override

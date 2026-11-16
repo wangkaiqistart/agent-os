@@ -2,7 +2,7 @@
 
 **Owner**: `AgentOS-cli`（命令）、`AgentOS-core`（`AgentLoader`、`ContextLoader`） | **Spec**: FR-024 ~ FR-027、FR-039 ~ FR-042
 
-**Updated**: 2026-11-16，默认主 Agent 增量已在 Phase 10 实施并通过本地文件、真实 CLI/启动器与 PostgreSQL 验收；证据见 quickstart 第 9.5 节。`--new` 等原 Phase 4–9 功能仍待实施，不改变既有任务完成记录。
+**Updated**: 2026-11-16，默认主 Agent 增量已在 Phase 10 实施；跨轮历史与 `--new` 已在 Phase 6 接入，证据见 quickstart 第 12 节。US5/US6 的故障恢复与并发加固仍待后续阶段。
 
 ## AgentOS init
 
@@ -81,7 +81,7 @@ AgentOS chat [--workspace <路径>] [--profile <name>] [--message "<文本>"] [-
 - **启动器端口**：CLI 的 `ContextLauncher.launch(Path workspaceRoot)` 接收规范化绝对路径；boot 用高优先级 `--agentos.workspace.root=<path>` 启动 NONE 上下文，两个加载器复用同一 root。选中 Agent 的文件/字段本地校验在启动器前完成；无效选择不启动上下文、不调用模型。Provider/数据库错误仍由运行时安全报告。
 - **启动**：用 `ContextLauncher` 启动无 Web 容器的应用上下文，执行启动收尾，再进入对话（research R12）。数据库连接缺失或不可用，打印一句话的原因，不发出任何模型请求。
 - **会话标识**：渠道 `cli`，用户标识取本机登录用户名，加 Agent 名（FR-041）。默认接着已有的活跃会话。
-- **`--new`**（后续 US4 的目标；当前明确返回 2，提示尚未实现）：先把该 Agent 当前的活跃会话归档，再开始新会话。有轮次正在运行时拒绝，提示"上一条消息还在处理"，不归档。当前没有活跃会话时直接开始。
+- **`--new`**：启动时先按 CLI 会话键把该 Agent 当前的活跃会话归档，再由 `startTurn` 创建新 UUID 会话。有轮次正在运行时拒绝，提示"上一条消息还在处理"，不归档；当前没有活跃会话时直接开始。归档只更新会话状态/时间和租约，不修改旧轮次、消息或审计。
 - **`--message`**：发这一条、打印回答后退出。省略时进入交互循环，每行输入一条消息，输入 `/exit` 或 EOF（Ctrl-D）结束。空行不创建轮次，直接提示（FR-042）。
 - **输出**：回答打印到标准输出；错误说明打印到标准错误，不含内部细节、堆栈和密钥。
 - **日志**：控制台只显示 WARN 及以上，避免打断对话；完整日志照常写文件。

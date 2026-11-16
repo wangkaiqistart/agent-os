@@ -49,7 +49,7 @@ flowchart TD
 4. `JpaLlmCallRecorder.record` → `JpaMessageStore.append`：分别看外呼审计与助手消息写入。
 5. `JpaTurnStore.finishAndRelease`：看终态确认与租约释放，再回到渠道的终态回调。
 
-注释中写明“预留”“尚未接入”的字段或接口，不表示对应功能已实现；例如跨轮历史恢复、`--new`、审计重试和部分配置项。实体的普通 getter 不逐一重复解释，重点放在字段含义、状态变化与事务边界。
+注释中写明“预留”“尚未接入”的字段或接口，不表示对应功能已实现；当前仍待后续阶段的是审计重试、故障恢复和部分配置项。跨轮历史恢复与 `--new` 已在 Phase 6 接入。实体的普通 getter 不逐一重复解释，重点放在字段含义、状态变化与事务边界。
 
 ## 一次 `chat --message` 的最小路径
 
@@ -70,7 +70,7 @@ AgentOSApplication
   -> TurnResult
 ```
 
-当前 US1 仍然是无工具最小链路：模型返回工具调用时，`ReActLoop` 返回失败；工具执行、历史预算、完整工具账本和更高阶恢复属于后续阶段。`chat --new` 已保留参数，但当前没有实现新会话语义。
+当前默认 main 仍是无工具最小链路；显式声明工具的 Agent 走 Phase 4 的工具闭环。每条新消息会从 active 会话恢复已完成历史，PromptBuilder 按完整轮次和 token 预算截断；`chat --new` 先归档空闲旧会话，再开始新 UUID 会话。审计重试、故障恢复和并发接管仍属于后续阶段。
 
 ## 验证入口
 

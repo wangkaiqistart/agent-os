@@ -164,7 +164,7 @@ flowchart LR
     Context --> Shared[AGENTS / SOUL / USER]
 ```
 
-选择规则是显式 Agent、main、旧工作区唯一 Agent。文件错误在启动器前失败；真实 Provider 校验仍在统一服务链路里。默认 main 无工具；Phase 4 已接通显式授权的 http_get 工具闭环，--new 仍待后续阶段。
+选择规则是显式 Agent、main、旧工作区唯一 Agent。文件错误在启动器前失败；真实 Provider 校验仍在统一服务链路里。默认 main 无工具；Phase 4 已接通显式授权的 http_get 工具闭环，Phase 6 的 `--new` 会先归档空闲会话，历史恢复由 ReActLoop/MessageStore/PromptBuilder 完成。
 
 
 ## Phase 4 工具对象关系

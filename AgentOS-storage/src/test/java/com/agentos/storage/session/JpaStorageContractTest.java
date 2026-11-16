@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.agentos.core.audit.AuditWriteException;
+import com.agentos.core.config.TurnProperties;
 import com.agentos.core.provider.CallMode;
 import com.agentos.core.provider.FailureKind;
 import com.agentos.core.provider.LlmCallRecord;
@@ -59,16 +60,18 @@ class JpaStorageContractTest extends PostgresIntegrationTest {
                         TurnExecutionBudget.start(Duration.ofSeconds(10)));
 
         assertThat(sessions.findActive(key)).isPresent();
-        List<HistoryTurn> history = messages.recentTurns(sessions.findActive(key).orElseThrow(), 1);
-        assertThat(history).hasSize(1);
-        assertThat(history.getFirst().messages())
-                .extracting(m -> m.getText())
-                .containsExactly("hello");
+        // 当前 RUNNING 轮次不应重复注入下一次模型请求；只有收尾后才进入历史。
+        assertThat(messages.recentTurns(sessions.findActive(key).orElseThrow(), 1)).isEmpty();
 
         messages.append(turn, 1, List.of(new AssistantMessage("answer")));
         long before = jdbc.queryForObject("select count(*) from session_messages", Long.class);
         assertThat(turns.finishAndRelease(turn, "SUCCEEDED", "answer", null).persistenceConfirmed())
                 .isTrue();
+        List<HistoryTurn> history = messages.recentTurns(sessions.findActive(key).orElseThrow(), 1);
+        assertThat(history).hasSize(1);
+        assertThat(history.getFirst().messages())
+                .extracting(m -> m.getText())
+                .containsExactly("hello", "answer");
         assertThat(jdbc.queryForObject("select count(*) from session_messages", Long.class))
                 .isEqualTo(before);
         assertThat(turns.find(turnId))
@@ -180,6 +183,49 @@ class JpaStorageContractTest extends PostgresIntegrationTest {
     }
 
     @Test
+    void archiveStartsFreshSessionWithoutChangingOldMessages() {
+        SessionKey key = key("new");
+        TurnSnapshot first =
+                turns.startTurn(
+                        UUID.randomUUID(),
+                        key,
+                        "cli",
+                        "old question",
+                        TurnExecutionBudget.start(Duration.ofSeconds(10)));
+        messages.append(first, 1, List.of(new AssistantMessage("old answer")));
+        turns.finishAndRelease(first, "SUCCEEDED", "old answer", null);
+        long oldMessageCount =
+                jdbc.queryForObject(
+                        "select count(*) from session_messages where session_id = ?",
+                        Long.class,
+                        first.sessionId());
+
+        assertThat(sessions.archiveIfIdle(key)).isTrue();
+        assertThat(
+                        jdbc.queryForObject(
+                                "select status from sessions where session_id = ?",
+                                String.class,
+                                first.sessionId()))
+                .isEqualTo("archived");
+
+        TurnSnapshot second =
+                turns.startTurn(
+                        UUID.randomUUID(),
+                        key,
+                        "cli",
+                        "new question",
+                        TurnExecutionBudget.start(Duration.ofSeconds(10)));
+        assertThat(second.sessionId()).isNotEqualTo(first.sessionId());
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from session_messages where session_id = ?",
+                                Long.class,
+                                first.sessionId()))
+                .isEqualTo(oldMessageCount);
+        assertThat(messages.recentTurns(sessions.findActive(key).orElseThrow(), 20)).isEmpty();
+    }
+
+    @Test
     void renewLeaseWaitsForSessionRowLockAndRejectsLeaseExpiredWhileBlocked() throws Exception {
         SessionKey key = key("lock");
         TurnSnapshot turn =
@@ -231,5 +277,11 @@ class JpaStorageContractTest extends PostgresIntegrationTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration(excludeName = "com.agentos.core.config.CoreAutoConfiguration")
     @EntityScan("com.agentos.storage.session")
-    static class TestApplication {}
+    static class TestApplication {
+        /** 存储契约隔离了 CoreAutoConfiguration，显式提供 TurnStore 所需的默认时限。 */
+        @org.springframework.context.annotation.Bean
+        TurnProperties turnProperties() {
+            return new TurnProperties(null, null, null);
+        }
+    }
 }

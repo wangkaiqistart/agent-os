@@ -115,6 +115,23 @@ class DefaultAgentCliIntegrationTest {
             assertThat(messages)
                     .contains("CHOSEN_BOOTSTRAP_MARKER", "助手")
                     .doesNotContain("WRONG_WORKSPACE_MARKER");
+
+            // 关闭第一个 Spring 上下文后重新启动；第二条消息应沿同一 active 会话恢复第一轮历史。
+            assertThat(
+                            AgentOSCli.execute(
+                                    launcher,
+                                    directory,
+                                    key -> null,
+                                    "chat",
+                                    "--workspace",
+                                    chosen.toString(),
+                                    "--message",
+                                    "继续刚才的话题"))
+                    .isZero();
+            assertThat(model.calls()).isEqualTo(2);
+            var resumed = JsonMapper.builder().build().readTree(model.requests().get(1));
+            assertThat(resumed.path("messages").toString())
+                    .contains("你好", "local answer", "继续刚才的话题");
             var jdbc =
                     new JdbcTemplate(
                             new DriverManagerDataSource(
@@ -127,15 +144,18 @@ class DefaultAgentCliIntegrationTest {
             assertThat(jdbc.queryForObject("select lease_owner from sessions", String.class))
                     .isNull();
             assertThat(jdbc.queryForObject("select count(*) from agent_turns", Integer.class))
-                    .isOne();
-            assertThat(jdbc.queryForObject("select status from agent_turns", String.class))
-                    .isEqualTo("SUCCEEDED");
+                    .isEqualTo(2);
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select count(*) from agent_turns where status = 'SUCCEEDED'",
+                                    Integer.class))
+                    .isEqualTo(2);
             assertThat(
                             jdbc.queryForList(
                                     "select type from session_messages order by id", String.class))
-                    .containsExactly("USER", "ASSISTANT");
+                    .containsExactly("USER", "ASSISTANT", "USER", "ASSISTANT");
             assertThat(jdbc.queryForObject("select count(*) from llm_calls", Integer.class))
-                    .isOne();
+                    .isEqualTo(2);
             assertThat(jdbc.queryForObject("select count(*) from tool_invocations", Integer.class))
                     .isZero();
         }

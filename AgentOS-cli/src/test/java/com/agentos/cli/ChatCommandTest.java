@@ -7,6 +7,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.agentos.core.error.AgentOSException;
+import com.agentos.core.error.ErrorCode;
+import com.agentos.core.session.SessionManager;
 import com.agentos.core.turn.AgentService;
 import com.agentos.core.turn.PersistenceStatus;
 import com.agentos.core.turn.ProcessRequest;
@@ -147,6 +150,83 @@ class ChatCommandTest {
                                 "--message",
                                 " "))
                 .isEqualTo(2);
+    }
+
+    @Test
+    void newArchivesOnlyTheSelectedAgentBeforeProcessing() throws Exception {
+        agent("main");
+        when(service.process(any())).thenReturn(success());
+        SessionManager sessions = mock(SessionManager.class);
+        when(sessions.archiveIfIdle(any())).thenReturn(true);
+        ContextLauncher withSessions =
+                root ->
+                        new ContextLauncher.RunningContext() {
+                            @Override
+                            public AgentService agentService() {
+                                return service;
+                            }
+
+                            @Override
+                            public SessionManager sessionManager() {
+                                return sessions;
+                            }
+                        };
+
+        assertThat(chat(withSessions, "--new")).isZero();
+        verify(sessions)
+                .archiveIfIdle(
+                        org.mockito.ArgumentMatchers.argThat(key ->
+                                key.channel().equals("cli") && key.profileName().equals("main")));
+        verify(service).process(any());
+    }
+
+    @Test
+    void newRefusesToArchiveBusySessionAndDoesNotCallModel() throws Exception {
+        agent("main");
+        SessionManager sessions = mock(SessionManager.class);
+        when(sessions.archiveIfIdle(any()))
+                .thenThrow(new AgentOSException(ErrorCode.SESSION_BUSY, "上一条消息还在处理"));
+        ContextLauncher withSessions =
+                root ->
+                        new ContextLauncher.RunningContext() {
+                            @Override
+                            public AgentService agentService() {
+                                return service;
+                            }
+
+                            @Override
+                            public SessionManager sessionManager() {
+                                return sessions;
+                            }
+                        };
+
+        assertThat(chat(withSessions, "--new")).isEqualTo(3);
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void newWithoutAnActiveSessionStartsNormally() throws Exception {
+        agent("main");
+        when(service.process(any())).thenReturn(success());
+        SessionManager sessions = mock(SessionManager.class);
+        when(sessions.archiveIfIdle(any())).thenReturn(false);
+        ContextLauncher withSessions =
+                root ->
+                        new ContextLauncher.RunningContext() {
+                            @Override
+                            public AgentService agentService() {
+                                return service;
+                            }
+
+                            @Override
+                            public SessionManager sessionManager() {
+                                return sessions;
+                            }
+                        };
+
+        assertThat(chat(withSessions, "--new")).isZero();
+        verify(sessions).archiveIfIdle(any());
+        verify(service).process(any());
     }
 
     @Test

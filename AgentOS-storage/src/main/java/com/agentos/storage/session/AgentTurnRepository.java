@@ -8,4 +8,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface AgentTurnRepository extends JpaRepository<AgentTurnEntity, UUID> {
     /** 回收操作查询 RUNNING 残留；查询本身不会启动后台任务或自动修改状态。 */
     List<AgentTurnEntity> findByStatus(String status);
+
+    /** 先排除仍在执行的轮次，再按完整轮次选择，避免 RUNNING 占掉历史配额。 */
+    List<AgentTurnEntity> findBySessionIdAndStatusNotOrderByStartedAtAsc(
+            UUID sessionId, String status);
 }

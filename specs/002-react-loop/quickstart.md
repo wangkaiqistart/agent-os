@@ -2,7 +2,7 @@
 
 **Plan**: [plan.md](plan.md) | 行为契约见 [contracts/](contracts/)，表结构见 [data-model.md](data-model.md)
 
-**2026-11-16 当前状态**：默认主 Agent 的 Phase 10 已完成（第 9.5 节）；Phase 4 工具闭环和 Phase 5 安全上限已完成（第 10、11 节）。本次全量质量门通过；本机 Docker 未运行时，数据库测试按约定跳过，数据库质量门需在 Docker/CI 中补验。真实天气仍等待 US5 审计恢复。
+**2026-11-16 当前状态**：默认主 Agent 的 Phase 10 已完成（第 9.5 节）；Phase 4 工具闭环、Phase 5 安全上限和 Phase 6 历史/新会话已完成（第 10–12 节）。Docker 已启动，本次全量质量门和真实 PostgreSQL Testcontainers 测试均通过；`python3 scripts/check_db_test_reports.py` 返回 0。真实天气仍等待 US5 审计恢复。
 
 ## 前置条件
 
@@ -329,7 +329,7 @@ Docker 已实际运行，使用 Testcontainers `pgvector/pgvector:pg17`。`pytho
 
 Phase 4 本地工具闭环通过。**NOT_RUN**：US2 场景 10 的真实模型 + 真实天气演示，按 T051 原前置条件等待 Phase 5（US3）安全上限与 Phase 7（US5）审计恢复完成。不能据此把 SC-001/SC-007/SC-008 的全部后续故障验收或整个 ReAct 标为完成。
 
-仍待 T052–T093：maxIterations 判定、官方超限调用补 limit_skipped 审计、跨轮历史恢复/截断、--new、审计退避/有界数据库 I/O/提交不确定性查证与恢复、并发接管等。现有普通短事务不等价于数据库故障时已守住完整 hardStop；本次输出回调边界测试也不替代后续数据库故障注入。正常循环次数已落库；致命异常中止的精确进度及恢复仍由后续故障收尾验收覆盖。没有提前实现或勾选这些任务。
+Phase 4 收尾时仍待 T052–T093：maxIterations 判定、官方超限调用补 limit_skipped 审计、跨轮历史恢复/截断、--new、审计退避/有界数据库 I/O/提交不确定性查证与恢复、并发接管等。现已由 Phase 5/6 分别完成前两组中的循环上限与历史/归档；现有普通短事务不等价于数据库故障时已守住完整 hardStop，本次输出回调边界测试也不替代后续数据库故障注入。正常循环次数已落库；致命异常中止的精确进度及恢复仍由后续故障收尾验收覆盖。
 
 实施后按 `/speckit-analyze` 只读核对 42 条 FR、22 条 SC、109 项任务的结构及当前 Phase 4 的 16 项对应。当前范围未映射任务 0，无新增 CRITICAL/HIGH 宪章或执行入口冲突。发现并在退出只读分析后修复 3 处文档漂移：配置契约 max-body-bytes 与实际 max-response-bytes 不一致（MEDIUM），quickstart 页首仍称 Phase 10 待实现（LOW），T045 仓库路径与实际复用 session/ 下仓库不一致（LOW）。同时注明尚未绑定的全局策略配置，避免把示例当作开关。未修改 constitution/checklist，未重写已完成任务正文或历史记录。
 
@@ -369,4 +369,28 @@ Phase 4 收尾时全表为 67 项完成、42 项待办；Phase 5 已在本记录
 
 `python3 scripts/check_db_test_reports.py` 返回 1：“数据库连通性测试未成功执行，缺失、跳过或失败均不允许。”原因是本机 `/var/run/docker.sock` 不存在，Testcontainers 的 9 个 storage 测试和 boot 中 6 个数据库相关测试被跳过；因此本轮数据库续租/收尾的真实 PostgreSQL 质量门为 **NOT_RUN**，不能把 `mvn verify` 的 BUILD SUCCESS 当作数据库已验证。CI 或启动 Docker 后必须重新运行该脚本并确认返回 0。
 
-Phase 5 的本地合成测试、配置检查和非数据库质量门均通过；真实模型、真实天气和 US5 审计恢复仍为 **NOT_RUN**。下一阶段按用户指定进入 Phase 6，不自动执行后续任务。
+Phase 5 的本地合成测试、配置检查和非数据库质量门均通过；真实模型、真实天气和 US5 审计恢复仍为 **NOT_RUN**。随后按用户指定进入 Phase 6，详见第 12 节。
+
+## 12. Phase 6 多轮历史与新会话实施记录（2026-11-16）
+
+**范围与结果**：用户明确执行 `/speckit-implement Phase 6`，完成 T062–T069。每条新用户消息仍从磁盘重新加载 Agent；PromptBuilder 在第一次模型请求前恢复同一 active 会话的已完成历史，按完整轮次同时执行轮数与 token 预算，失败轮次只带用户消息和固定的未完成说明。`--new` 在启动时通过 SessionManager 的条件更新归档空闲会话，随后由 `startTurn` 创建新的 UUID；旧消息、轮次和审计不删除、不改写。
+
+### 12.1 实现路径
+
+`AgentService → TurnStore.startTurn → ReActLoop → MessageStore.recentTurns → PromptBuilder`。`startTurn` 已写入的当前 USER 消息不会被恢复，因为 JPA 先排除 `RUNNING` 轮次再选择最近已完成轮次；同一轮中的 ASSISTANT 工具请求与 TOOL 响应按 JSON 结构整组还原。PromptBuilder 使用 `JTokkitTokenCountEstimator`，正值上限取 90% floor，预算只作用于历史，不截断系统指令或当前用户消息；单轮超预算时整轮丢弃。
+
+`ChatCommand --new` 复用 CLI 的 `(cli, user.name, profile)` 会话键。没有活跃会话时归档返回 false 但继续处理；有有效租约时返回退出码 3 和“上一条消息还在处理”，不调用模型。JPA 归档使用单条条件 UPDATE，只有 active 且租约为空/已过期才转 archived，并清空租约字段。
+
+### 12.2 自动化证据
+
+| 验收 | 结果与实际断言 |
+|---|---|
+| SC-011 历史双限与安全恢复 | **PASS**：`PromptHistoryTest` 6 项覆盖 20 轮、边界相等、90% floor/上限为 0、工具组不拆、失败安全文案、Bootstrap 与跨零点日期刷新 |
+| SC-012/SC-017 存储完整轮次与归档 | **PASS**：`JpaMessageStoreTest` 2 项覆盖排除 RUNNING、先选轮次再读消息、工具调用 ID/结果结构及 20 个已完成轮次；`JpaStorageContractTest` 的 PostgreSQL 6 项测试增加旧会话归档、新 UUID 和旧消息行数不变断言 |
+| CLI `--new` | **PASS**：`ChatCommandTest` 9 项覆盖空会话、成功归档、忙会话拒绝、消息不进入模型和安全退出码 |
+| 重启后恢复 | **PASS**：`DefaultAgentCliIntegrationTest` 关闭第一个 Spring 上下文后重新启动并发送第二条消息，断言同一 active 会话的历史与消息/审计累计；本次使用 PostgreSQL Testcontainers 实际执行 |
+| Bootstrap/Agent 热更新 | **PASS**：`ContextLoaderTest`、`PromptHistoryTest` 断言共享文件修改和日期跨零点在下一次 Prompt 生效，同一轮不重复读取运行配置 |
+
+本轮代码验证：`mvn -B -ntp spotless:apply` 通过；core 46、storage 21、CLI 31 项定向测试全部通过。Docker 启动后重新执行 `mvn -B -ntp verify`，结果为 **BUILD SUCCESS**，全仓 **382 tests / 0 failures / 0 errors / 0 skipped**（core 46、provider 220、tool 23、storage 21、web 11、channel-cli 3、CLI 31、boot 27）。`python3 scripts/check_db_test_reports.py` 返回 0：“数据库连通性测试已执行并通过。”真实 PostgreSQL 迁移、JPA 契约、消息历史/归档和 Boot ReAct 链路均已执行；真实模型、真实天气和 US5 故障恢复仍为 **NOT_RUN**。
+
+慢 HTTP 超时场景确认模型和工具各实际调用一次，并以 `TIMED_OUT + CONFIRMED` 收尾；异常收口路径的 `TurnResult.iterations` 和轮次表值按当前契约为 0，调用次数由模型/工具审计记录确认。未启用 `llm` profile，未读取开发 `.env`，未连接共享库，也未发送真实天气请求。

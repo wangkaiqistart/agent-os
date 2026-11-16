@@ -3,6 +3,7 @@ package com.agentos.cli;
 import com.agentos.core.agent.AgentLoader;
 import com.agentos.core.error.AgentOSException;
 import com.agentos.core.error.ErrorCode;
+import com.agentos.core.session.SessionKey;
 import com.agentos.core.turn.PersistenceStatus;
 import com.agentos.core.turn.ProcessRequest;
 import com.agentos.core.turn.TurnResult;
@@ -31,7 +32,7 @@ public final class ChatCommand implements Callable<Integer> {
     @Option(names = "--message")
     String message;
 
-    // 保留参数以兼容既有契约，归档功能仍由 US4 实现，不能静默忽略。
+    // --new 先归档当前 Agent 的空闲会话，再由 startTurn 创建新 UUID 会话。
     @Option(names = "--new")
     boolean newSession;
 
@@ -65,9 +66,6 @@ public final class ChatCommand implements Callable<Integer> {
             if (message != null && message.isBlank()) {
                 throw new IllegalArgumentException("消息不能为空");
             }
-            if (newSession) {
-                throw new IllegalArgumentException("--new 的会话归档功能尚未实现");
-            }
             selected = selectProfile(root);
         } catch (AgentOSException | IllegalArgumentException e) {
             spec.commandLine().getErr().println(e.getMessage());
@@ -89,6 +87,9 @@ public final class ChatCommand implements Callable<Integer> {
         }
         // 整段对话共用一个上下文；成功、失败及 EOF 都会关闭，释放连接池。
         try (ContextLauncher.RunningContext context = opened) {
+            if (newSession && !archiveCurrentSession(context, selected)) {
+                return 3;
+            }
             if (message != null) {
                 return process(context, selected, message);
             }
@@ -112,6 +113,30 @@ public final class ChatCommand implements Callable<Integer> {
         } catch (IOException | RuntimeException e) {
             spec.commandLine().getErr().println("对话中断，请检查运行配置后重试");
             return 3;
+        }
+    }
+
+    private boolean archiveCurrentSession(ContextLauncher.RunningContext context, String selected) {
+        if (context.sessionManager() == null) {
+            spec.commandLine().getErr().println("无法创建新会话，请检查数据库和运行配置");
+            return false;
+        }
+        try {
+            context.sessionManager()
+                    .archiveIfIdle(
+                            new SessionKey(
+                                    "cli", System.getProperty("user.name", "unknown"), selected));
+            return true;
+        } catch (AgentOSException e) {
+            if (e.getErrorCode() == ErrorCode.SESSION_BUSY) {
+                spec.commandLine().getErr().println("上一条消息还在处理");
+            } else {
+                spec.commandLine().getErr().println("无法创建新会话，请检查运行配置");
+            }
+            return false;
+        } catch (RuntimeException e) {
+            spec.commandLine().getErr().println("无法创建新会话，请检查运行配置");
+            return false;
         }
     }
 

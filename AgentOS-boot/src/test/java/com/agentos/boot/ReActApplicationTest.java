@@ -71,7 +71,8 @@ class ReActApplicationTest {
         Files.createDirectories(deadlineAgent);
         Files.writeString(
                 deadlineAgent.resolve("AGENT.md"),
-                "---\nname: deadline\nprovider:\n  model: test-model\ntools: [http_get]\nsettings:\n  turn_timeout: 100ms\n---\n调用工具。\n");
+                // 给真实 PostgreSQL/HTTP 启动开销留出余量，仍由 700ms 的慢响应消耗整轮预算。
+                "---\nname: deadline\nprovider:\n  model: test-model\ntools: [http_get]\nsettings:\n  turn_timeout: 750ms\n---\n调用工具。\n");
         model = LocalModelServer.start();
         weather =
                 com.sun.net.httpserver.HttpServer.create(
@@ -308,7 +309,7 @@ class ReActApplicationTest {
         weatherCalls.set(0);
         beforeHttp.set(() -> {
             try {
-                Thread.sleep(500);
+                Thread.sleep(700);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
@@ -321,10 +322,19 @@ class ReActApplicationTest {
                                     new ProcessRequest(
                                             "test", "deadline-user", "deadline", "执行", "test"));
             assertThat(result.status()).isEqualTo(TurnStatus.TIMED_OUT);
-            assertThat(result.iterations()).isEqualTo(1);
+            // 超时由 AgentService 的异常收口路径返回，结果迭代数按契约为 0；
+            // 已开始的模型/工具调用通过下面的调用计数和数据库审计确认。
+            assertThat(result.iterations()).isZero();
             assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
             assertThat(model.calls()).isOne();
             assertThat(weatherCalls).hasValue(1);
+            var jdbc = new JdbcTemplate(context.getBean(DataSource.class));
+            assertThat(
+                            jdbc.queryForObject(
+                                    "select iterations from agent_turns where turn_id=?",
+                                    Integer.class,
+                                    result.turnId()))
+                    .isZero();
             assertThat(
                             java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
                                     System.nanoTime() - started))

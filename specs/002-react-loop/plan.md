@@ -6,7 +6,7 @@
 
 **Updated**: 2026-11-16，增量规划 FR-039/FR-040“初始化默认主 Agent”。保留 2026-11-15 的设计、研究与人工 review 历史；该历史 review 不等于批准本次新增设计。增量状态：本次 `/speckit-implement Phase 10` 已确认范围并实施，文件/CLI/真实启动器及 PostgreSQL 验收通过；证据见 quickstart 第 9.5 节，真实模型未运行。`tasks.md` 的 T001–T035 完成记录及后续未完成任务原样保留，不重新编号或反向取消完成状态。
 
-**Phase 4 实施状态（2026-11-16）**：T036–T051 已完成，工具/沙箱/安全解析、先记后做、完整历史回填和有界终结通知已接通。统一质量门 359 项测试通过、无数据库跳过，详见 quickstart 第 10 节；Phase 5–9、完整数据库故障恢复与真实天气 Demo 仍未完成。复用 session/ 下已有工具仓库；正常循环次数通过 TurnStore 的兼容收尾重载与终态一起落库。
+**Phase 4 实施状态（2026-11-16）**：T036–T051 已完成，工具/沙箱/安全解析、先记后做、完整历史回填和有界终结通知已接通。统一质量门 359 项测试通过、无数据库跳过，详见 quickstart 第 10 节；Phase 5–6 之后的 US5–US6、完整数据库故障恢复与真实天气 Demo 仍未完成。复用 session/ 下已有工具仓库；正常循环次数通过 TurnStore 的兼容收尾重载与终态一起落库。
 
 ## Summary
 
@@ -133,8 +133,8 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 | FR-039 ~ FR-042 命令行 | `InitCommand`、`ChatCommand`、`CliChannel`（[workspace-and-cli.md](contracts/workspace-and-cli.md)，R12） |
 | FR-039/FR-040 增量：默认主 Agent | `InitModelResolver`、`DefaultAgentOptions`、`WorkspaceInitializer`；`ContextLauncher.launch(Path)` → boot 高优先级 `agentos.workspace.root`；见下文及 research R20–R24 |
 | SC-001 阶段 Demo | [quickstart.md](quickstart.md) 第 3 节；自动化的替身版见第 4 节 |
-| SC-002 ~ SC-017 | 逐条对应 [quickstart.md](quickstart.md) 第 1 节的测试表；SC-017 由 `ChatCommandTest` 的 `--new` 用例验证 |
-| SC-018 ~ SC-022 | [quickstart.md](quickstart.md) 第 9 节：文件初始化、解析/选择矩阵、自定义工作区、敏感信息与真实 CLI 装配验证；`--new` 仍由原 US4 任务负责 |
+| SC-002 ~ SC-017 | 逐条对应 [quickstart.md](quickstart.md) 第 1 节及第 12 节的测试表；SC-011/SC-012/SC-017 由 Phase 6 的历史、存储和 `--new` 用例验证 |
+| SC-018 ~ SC-022 | [quickstart.md](quickstart.md) 第 9 节：文件初始化、解析/选择矩阵、自定义工作区、敏感信息与真实 CLI 装配验证；会话归档与历史恢复见第 12 节 |
 
 ## Complexity Tracking
 
@@ -221,7 +221,7 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 - 将 CLI 端口唯一抽象方法改为 `ContextLauncher.launch(Path workspaceRoot)`，同步迁移仓库内所有调用者、假 launcher 和测试；不保留会忽略参数的无参回退。工作区只在入口规范化一次，两次加载均使用该目录。
 - `SpringContextLauncher` 在 `WebApplicationType.NONE` 的 `.run(...)` 中传入单个 `--agentos.workspace.root=<绝对路径>` 配置参数。这样显式/缺省 CLI 工作区都不会被较低优先级环境配置改写；不调用 `System.setProperty`，不把路径值解释为 shell 命令。现有 core 装配由同一 root 构建 Agent/Bootstrap 加载器，无需改造循环。
 - boot 为测试提供包内可注入的启动器构建工厂：测试可设置仅含本地测试配置的高优先级属性源，并关闭 `.env` 导入；工厂不得改变生产 `NONE`、工作区参数和关闭行为。该入口不作为用户 CLI 配置功能。集成测试需使用真实 `SpringContextLauncher`，不能替换成仅捕获路径的假 launcher。
-- 本次不实现 `--new`；保留原参数、FR-040 已有归档约束和对应 US4 未完成任务，不把默认 main 验收当作会话归档验收。
+- Phase 10 时暂不实现 `--new`；该参数现由 Phase 6 接入，默认主 Agent 的验收不替代本阶段的历史/归档验收。归档仍通过 SessionManager 的数据库条件更新完成，不能在 CLI 先读后写。
 
 ### 验证分层与任务衔接
 

@@ -5,8 +5,8 @@ import java.time.Duration;
 /**
  * 单个 Agent 的运行限制，从 AGENT.md 的 settings 段解析。
  *
- * <p>当前主链路使用 turnTimeout 限制整轮时间；maxIterations 和历史字段定义后续循环、
- * 历史筛选的边界，不能仅凭这些字段存在就认为多轮工具调用和历史注入已经接入。
+ * <p>当前主链路使用 turnTimeout 限制整轮时间；maxIterations 控制循环上限，历史字段控制
+ * 下一轮提示词恢复的整轮和 token 边界。
  *
  * @param maxIterations 允许的模型迭代上限，至少为 1
  * @param maxHistoryTurns 历史轮次上限，0 表示不保留历史轮次
