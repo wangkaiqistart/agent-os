@@ -2,6 +2,8 @@
 
 **Date**: 2026-11-15 | **Plan**: [plan.md](plan.md)
 
+**Updated**: 2026-11-16，追加默认主 Agent 的 R20–R24；R1–R19 保留为原研究记录。本次新增结论来自当前源码只读核对与设计分析，不是新的运行实测。
+
 工具执行的结论来自对 Spring AI 2.0.2 `ToolCallingManager` 的实测（一次性探针，没有进仓库）：用 `ApplicationContextRunner` 加官方自动配置，构造带工具调用的 `ChatResponse`，直接调用 `executeToolCalls`。其余结论来自反汇编、本机环境检查和对公开天气接口的只读请求。下面提到的探针工具：`get_a` 是名单内的工具，`get_b` 声明成 Bean 但不在名单里，`ghost` 不存在，`boom` 会抛异常。
 
 ## R1 `ToolCallingManager` 的执行方式
@@ -126,3 +128,45 @@
 - PostgreSQL的now()/transaction_timestamp()固定为事务开始时刻，等待行锁后不会更新；clock_timestamp()才返回实际当前时间。租约和deadline实时判定必须取得所需行锁后捕获db_now=clock_timestamp()，本操作统一使用该值；普通created_at默认值可用now()。依据：[PostgreSQL当前时间函数](https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT)。补两个连接锁等待跨过有效期的测试，不只在无锁路径测时间。
 - 输入ProcessRequest不含回调；process(request)委托process(request,TurnSink.NOOP)，双参数重载同一执行链路，sink非空。CLI使用单参数，测试/后续适配器用双参数选择流式。
 - 过程回调失败在终态确认前按取消处理；终结通知是结果通知，不是新的业务执行。必要持久化处理结束后才在受管虚拟线程尝试一次complete或error，只等待剩余hardStop；已失效、过程回调未退出或无剩余预算则跳过并安全记录未送达。异常/阻塞超时不改确认终态或persistenceStatus，不再补另一种终结事件。取消不响应中断的回调不能声称已强制杀死，但系统不再向它发送事件或推进外呼/消息写入。
+
+## R20 默认主 Agent 的现有支点与缺口（2026-11-16）
+
+> R20–R24 保留实施前的研究快照，其中“当前”“尚未执行”均描述研究时的基线。Phase 10 实施后跟进：InitModelResolver/DefaultAgentOptions、CREATE_NEW 初始化、main 选择与 `launch(Path)` 已落地；LocalModelServer 已捕获请求，新增真实 CLI + PostgreSQL 测试通过。运行证据见 [quickstart.md](quickstart.md) 第 9.5 节；真实模型未运行。
+
+- **Decision**: 在既有 `002` 中增量实现，不新建 feature、不重开 T001–T035。默认 `main` 使用现有 Agent 目录、frontmatter、Profile 和处理入口，不引入“主 Agent 引擎”或额外数据库实体。
+- **Rationale / 当前证据**：`WorkspaceInitializer.initialize` 只创建共享目录、Bootstrap 和记忆文件；`InitCommand` 只有 `--workspace`，没有模型输入。`AgentLoader` 可脱离 Spring 直接使用 SafeConstructor 解析并验证 name/model/settings；它不做环境变量插值，当前仅拒绝空模型、不拒绝 `${...}`。`CoreAutoConfiguration` 从相同 `WorkspaceProperties.root` 构造 AgentLoader 与 ContextLoader，所以实际工作区传递无须改动循环。
+- **Alternatives considered**：把配置写进根部 `AGENTS.md` 会混淆共享自然语言指令和 Profile；给连接重新增加默认模型会推翻 US-1 模型归属；另建 main 运行引擎没有必要，均不采用。
+- **证据**：[初始化器](../../AgentOS-cli/src/main/java/com/agentos/cli/WorkspaceInitializer.java)、[init 命令](../../AgentOS-cli/src/main/java/com/agentos/cli/InitCommand.java)、[加载器](../../AgentOS-core/src/main/java/com/agentos/core/agent/AgentLoader.java)、[core 装配](../../AgentOS-core/src/main/java/com/agentos/core/config/CoreAutoConfiguration.java)、技术方案 8.1“生成默认 Profile”。
+
+## R21 不启动 Spring 的模型名解析
+
+- **Decision**: 新增 CLI 内小型 `InitModelResolver`，注入环境查询与执行目录便于隔离测试；结果为非敏感 `DefaultAgentOptions`。只在 `main` 缺失时按已约定优先级读取输入，已有合法 main 不读取较新模型配置。显式提供但无效与完全缺失分开处理，不回退掩盖错误。
+- **Rationale / 当前证据**：当前没有可直接复用的无 Spring `ConfigLoader`；boot 的 `application.yaml` 用 `spring.config.import` 导入 `.env[.properties]`，只有启动上下文时生效。为 init 启动这个上下文会触发数据源等重型配置，违反 FR-039。模型名属于 Agent，必须在生成时成为具体字符串，不能让已有 AgentLoader 猜测展开规则。
+- **格式选择**：使用 JDK `Properties.load(Reader)` 的语法，以 UTF-8 Reader 读取；通过只保留目标键的 Properties 投影适配，使结果不持有其他配置项。解析重复键采用最后定义生效，支持标准转义/续行；引号不是 shell 引号，`export KEY=...` 也不是模型项，均不新增 shell 语义。含占位符、空白值和读取/解析失败输出安全文案，不拼接原始异常、内容或环境变量值。测试覆盖中文、`=`/`:`、转义、续行、重复键、缺失、无效高优先级以及低优先级未读取。
+- **Alternatives considered**：不使用 `source`、dotenv 新依赖或全局 Spring Environment；不手写 `split("=")` 冒充 `.properties` 解析；不将 `.env` 的全部键保存到初始化结果。解析器只服务这一输入，不扩展为通用配置加载系统。
+- **证据**：[入口配置](../../AgentOS-boot/src/main/resources/application.yaml)、[CLI 依赖](../../AgentOS-cli/pom.xml)、[加载器](../../AgentOS-core/src/main/java/com/agentos/core/agent/AgentLoader.java)。未读取用户实际 `.env`。
+
+## R22 幂等、字段校验和生成文件
+
+- **Decision**: 所有预检查先于目录/文件写入；已有 main 复用 AgentLoader 做结构校验，补齐模型未解析占位符的拒绝规则；不验证远端 Provider 是否存在。缺失 main 的 YAML 由结构化序列化生成，只含非敏感参数与固定指令。逐文件 `CREATE_NEW`，已存在内容保留，路径类型/受管理链接冲突返回安全错误。
+- **Rationale / 当前证据**：原初始化器是 `exists → writeString`，不是原子创建，存在竞争覆盖窗口；对已有目录也没有类型检查。对任意模型/Provider 名直接字符串拼接还可能改变 YAML 结构。现有加载器拒绝 Agent 末级软链接，初始化与候选扫描应保持一致。
+- **恢复边界**：工作区不提供跨文件事务；中途失败已创建文件保留，完整旧文件不覆盖。竞争创建时校验现有赢家；若留下不完整 main，重试明确返回字段/文件错误，不能自动重写。生成前缺少模型名时工作区写入次数必须为 0。
+- **Alternatives considered**：不删除旧工作区重建、不使用覆盖写后备份、不将默认密钥写入模板、不为这次初始化引入数据库事务或持久化任务队列。选择 create-new 保证不覆盖，不宣称所有并发 init 都一定成功。
+- **证据**：[WorkspaceInitializer](../../AgentOS-cli/src/main/java/com/agentos/cli/WorkspaceInitializer.java)、[AgentLoader](../../AgentOS-core/src/main/java/com/agentos/core/agent/AgentLoader.java)。这些修复尚未实施。
+
+## R23 工作区必须到达真实加载器
+
+- **Decision**: `ContextLauncher.launch(Path workspaceRoot)` 替代无参方法；ChatCommand 传规范化绝对路径，SpringContextLauncher 通过 `.run("--agentos.workspace.root=" + workspaceRoot)` 传入。所有内部实现和测试同步迁移，不留忽略参数的兼容回退。
+- **Rationale / 当前证据**：当前 ChatCommand 的 `--workspace` 只用于扫描，实际 `launch()` 没有参数；boot 的 `.web(NONE).run()` 又使用默认配置，造成“选得到、加载不到”。现有 core 装配已把两个加载器绑定同一 root，问题在入口到 Spring 的传参。CLI 的参数配置源优先于普通环境/配置文件，能让选择与加载一致。
+- **选择行为**：显式 profile 优先；默认 main 路径存在就选择并校验，损坏/冲突不回退；没有 main 才沿用唯一目录/多目录/零目录规则。候选流及时关闭，不扫描非目录或末级链接。选中项的本地错误在 launcher 前失败；运行时 Provider 校验仍保留。
+- **测试 seam**：boot 增加包内启动器构建工厂注入，只让测试提供隔离 Environment：测试属性优先于 application.yaml 与进程环境，但仍低于 launcher 注入的 `commandLineArgs` 工作区；设置 `spring.config.import` 为空、使用容器数据库和本地模型。生产不新增用户参数，不设置全局系统属性。
+- **Alternatives considered**：单纯改目录扫描不能修复实际加载；builder 的 `.properties(...)` 是低优先级默认属性，可能被环境覆盖；`System.setProperty` 污染同 JVM 其他命令/测试，均不采用。
+- **证据**：[ChatCommand](../../AgentOS-cli/src/main/java/com/agentos/cli/ChatCommand.java)、[ContextLauncher](../../AgentOS-cli/src/main/java/com/agentos/cli/ContextLauncher.java)、[SpringContextLauncher](../../AgentOS-boot/src/main/java/com/agentos/boot/SpringContextLauncher.java)、[WorkspaceProperties](../../AgentOS-core/src/main/java/com/agentos/core/config/WorkspaceProperties.java)。
+
+## R24 退出码与端到端证据
+
+- **Decision**: 命令入口明确返回退出码或统一映射安全错误：init 的缺少/无效输入和损坏 Agent 为 2，路径/I/O 失败为 1，成功为 0；chat 保持现有契约的 0/1/2/3。选用 Picocli 的 `Callable<Integer>` 或等价集中处理，所有对外文案不得拼接底层异常原值；不增加新的日志/凭据配置层。
+- **Rationale / 当前证据**：当前 InitCommand 和 ChatCommand 均为 Runnable，包装 PicocliException 后未实现契约中的完整分类。`AgentOSCliTest` 还包含“没有模型输入的 init 成功”断言，须改为显式测试模型或已有合法 main；不能为保旧断言降低新要求。现有 `ReActApplicationTest` 手写 answer、直接调用 AgentService，只证明处理主链路落库，没有证明 CLI 初始化和默认选择。
+- **验收设计**：扩充 CLI 文件/命令矩阵；新增 `DefaultAgentCliIntegrationTest`，经 CLI init 生成 main，再由 CLI chat 调真实 SpringContextLauncher，通过 Testcontainers PostgreSQL 和已有 LocalModelServer 返回一条纯文本。现有替身只有调用计数和固定响应，须在测试源码内补充请求捕获，检查实际模型、无 tools、指定目录 Bootstrap；不得新增生产 prompt 日志。数据库只出现 main 的 1 个会话、1 个成功轮次、2 条消息、1 条模型调用，工具记录为 0。另放冲突默认目录和配置源，证明实际加载没有落回默认 root。
+- **Alternatives considered**：仅断言 launcher 收到路径不等于实际加载正确；复制手写 main 的原集成测试绕过初始化；使用共享库或真实模型会破坏隔离与普通验证边界，均不采用。`--new` 原任务保留，不借本次增量标完成。
+- **证据**：[CLI 测试](../../AgentOS-cli/src/test/java/com/agentos/cli/AgentOSCliTest.java)、[选择测试](../../AgentOS-cli/src/test/java/com/agentos/cli/ChatCommandTest.java)、[原纵向测试](../../AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java)、[模型替身](../../AgentOS-boot/src/test/java/com/agentos/boot/support/LocalModelServer.java)。本轮未执行这些新增验收，待任务实现。

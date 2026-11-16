@@ -4,9 +4,13 @@
 
 **Input**: Feature specification from `specs/002-react-loop/spec.md`
 
+**Updated**: 2026-11-16，增量规划 FR-039/FR-040“初始化默认主 Agent”。保留 2026-11-15 的设计、研究与人工 review 历史；该历史 review 不等于批准本次新增设计。增量状态：本次 `/speckit-implement Phase 10` 已确认范围并实施，文件/CLI/真实启动器及 PostgreSQL 验收通过；证据见 quickstart 第 9.5 节，真实模型未运行。`tasks.md` 的 T001–T035 完成记录及后续未完成任务原样保留，不重新编号或反向取消完成状态。
+
 ## Summary
 
 统一入口 `AgentService.process` 接收一条消息：找到或创建活跃会话、取得会话租约、开始轮次，然后由 `ReActLoop` 迭代。`PromptBuilder` 组装提示词，`ProviderService`（US-1）调用一次模型；响应没有工具调用就结束，有就交给 `ToolExecutor`，它调用容器注入的 `ToolCallingManager` 执行，结果追加进历史再进入下一次迭代。契约放 `AgentOS-core`；工具与沙箱在 `AgentOS-tool`；会话、轮次、消息和两张审计表的 JPA 实现与迁移脚本在 `AgentOS-storage`；`AgentOS init` 与 `AgentOS chat` 在 `AgentOS-cli` 与 `AgentOS-channel-cli`；`AgentOS-boot` 只负责装配和启动上下文。Provider调用/重试逻辑不改；新增只读ProviderCatalog实现，复用RequestValidator在轮次开始前验证Profile。
+
+本次增量使 `init` 从“只建骨架”变为“同时生成 `agents/main/AGENT.md`”：仅在缺少该文件时从参数、进程环境或执行目录 `.env` 解析具体模型名，生成通用中文助手且 `tools: []`。`chat` 按显式 Agent → `main` → 旧工作区规则选择，并将同一规范化工作区传到 Spring 实际加载链路。初始化仍不启动 Spring、不探测数据库或模型、不落盘凭据；没有新表、迁移或模块，不引入新的第三方库或版本。设计细节见文末“默认主 Agent 增量设计”，新增研究为 R20–R24。
 
 Phase 0 对 Spring AI 2.0.2 的工具执行做了实测（见 [research.md](research.md)），决定设计走向的结论：
 
@@ -35,6 +39,8 @@ Phase 0 对 Spring AI 2.0.2 的工具执行做了实测（见 [research.md](rese
 **Constraints**: 整轮超时之后最多超出 1 秒；工具调用先记后做；审计最多3次、200/500ms只是退避时间；每次数据库调用有界且受本轮剩余预算限制，收尾共用最后1秒；数据库事务不跨模型调用与工具调用；日志不含密钥、完整提示词和工具参数
 
 **Scale/Scope**: 单进程、单用户的 CLI；`core` 约 30 个新类型，`tool` 约 8 个，`storage` 约 14 个，`cli` 与 `channel-cli` 约 8 个；约 25 个测试类
+
+**本次增量技术边界**：沿用上述版本。新增 CLI 的 `InitModelResolver` 与 `DefaultAgentOptions` 两个小类型；扩展 `WorkspaceInitializer`、`InitCommand`、`ChatCommand`，调整 CLI 的 `ContextLauncher` 和 boot 的实现，必要时在 `AgentLoader` 补齐未解析模型占位符的本地校验。模型配置为 UTF-8 本地文件输入，运行状态仍在 PostgreSQL。测试沿用 JUnit 5、`@TempDir`、Mockito、现有本地模型替身和 Testcontainers；不以当前机器环境变量或真实 `.env` 作为自动化夹具。
 
 ## Constitution Check
 
@@ -123,8 +129,10 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 | FR-028 ~ FR-030 工具与治理 | `HttpTools`、`WhitelistSandbox`、`GovernedToolCallback`、`UnknownToolResolver`、处理器（[tool-governance.md](contracts/tool-governance.md)，R2、R3） |
 | FR-031 ~ FR-038 持久化与审计 | 五张表与端口（[data-model.md](data-model.md)）；`RetryingAuditWriter`（R14）；`Redactor`；迁移只建这五张表、不依赖向量扩展（FR-033，`V1__core_tables.sql`）；每个仓库操作是独立的短事务（FR-038） |
 | FR-039 ~ FR-042 命令行 | `InitCommand`、`ChatCommand`、`CliChannel`（[workspace-and-cli.md](contracts/workspace-and-cli.md)，R12） |
+| FR-039/FR-040 增量：默认主 Agent | `InitModelResolver`、`DefaultAgentOptions`、`WorkspaceInitializer`；`ContextLauncher.launch(Path)` → boot 高优先级 `agentos.workspace.root`；见下文及 research R20–R24 |
 | SC-001 阶段 Demo | [quickstart.md](quickstart.md) 第 3 节；自动化的替身版见第 4 节 |
 | SC-002 ~ SC-017 | 逐条对应 [quickstart.md](quickstart.md) 第 1 节的测试表；SC-017 由 `ChatCommandTest` 的 `--new` 用例验证 |
+| SC-018 ~ SC-022 | [quickstart.md](quickstart.md) 第 9 节：文件初始化、解析/选择矩阵、自定义工作区、敏感信息与真实 CLI 装配验证；`--new` 仍由原 US4 任务负责 |
 
 ## Complexity Tracking
 
@@ -177,3 +185,64 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 - 租约/deadline/接管/消息有效性采用取锁后的db_now=clock_timestamp()，避免PostgreSQL事务起点now()在锁等待后过时；默认创建时间仍可用now()。T022先测锁等待跨有效期，T025/T082实现。
 - AgentService提供process(request,sink)与委托NOOP的单参数入口，输入不带回调；两种调用共用循环和持久化链路。
 - 终结通知与结果分离：complete/error只尝试一次且有界等到相同hardStop；失败不改业务终态或确认状态，也不补第二终结事件。无预算、sink已失效或过程回调仍阻塞时跳过通知并写安全日志。T037先红灯，T028/T048实现，T054/T060验证硬截止边界。
+
+## 默认主 Agent 增量设计（2026-11-16）
+
+### 当前事实与本轮范围
+
+本节方案已按 Phase 10 实施。研究时的基线是：初始化器只建共享模板，CLI 没有 main 优先级，启动器不接收工作区。现在 init 创建普通 main，chat 优先选择 main，并通过 `ContextLauncher.launch(Path workspaceRoot)` 将实际根目录传给共享的 `WorkspaceProperties.root`。新增 `DefaultAgentCliIntegrationTest` 经真实 CLI init/chat、真实启动器、本地模型替身和 PostgreSQL 验证闭环；原 `ReActApplicationTest` 保留为先前纵向链路证据。研究基线与决策见 [research.md](research.md) R20–R24，运行证据见 [quickstart.md](quickstart.md) 第 9.5 节。
+
+旧文中的 Docker 状态、spike 风险和类型数量属于原版规划快照；已完成内容以既有 tasks 和 quickstart 的实测记录为准。本次不改写那些历史结论；本次运行验证另记于 quickstart 第 9.5 节，不把它当成原 Phase 4–9 的验收。
+
+### Phase 0：研究结论
+
+- 无 Spring 初始化没有可复用的通用 `ConfigLoader`，只新增一个限定于模型名输入的解析器，不提前实现全局配置系统（R20/R21）。
+- 直接复用 `AgentLoader` 做已有 Agent 的本地校验；它不连接数据库、不调用 Provider，且不会读取 Bootstrap。已补上拒绝未解析占位符的测试与校验，不改变 US-1 `Profile` 或 Provider 调用接口（R20/R22）。
+- `ContextLauncher` 接收显式工作区，boot 以命令行属性传入 Spring；不使用低优先级默认属性，也不依赖全局系统属性（R23）。
+- 文件创建采用 create-new 语义，生成内容按 YAML 字符串规则转义；退出码由命令入口明确返回，不靠 Picocli 的默认异常码碰巧匹配（R22/R24）。
+
+### Phase 1：初始化与文件设计
+
+1. `InitCommand` 将 `--workspace`（默认 `.AgentOS`）相对执行目录转成规范化绝对路径。先检查已有路径类型和已有 `main/AGENT.md`：合法就保留；损坏则返回 2，错误只指明文件/字段。对其他自定义 Agent 不做无关校验，避免阻断初始化。
+2. 只有目标 `main/AGENT.md` 缺失时才调用 `InitModelResolver`。输入显式参数、可注入的环境变量读取函数和执行目录；按 `--model` > 进程 `AGENTOS_LLM_MODEL` > 执行目录 `.env` 的同名项惰性解析。所选值为空白或含未解析占位符直接返回 2；所有来源缺失同样返回 2，且此前不创建任何工作区目录或文件。
+3. `.env` 使用 JDK `Properties` 的语法解析、UTF-8 Reader，仅保留/返回 `AGENTOS_LLM_MODEL` 的白名单投影；解析器不接收 Provider 凭据、数据库配置或 Spring Environment。不执行 shell，不展开变量，不将整个文件或异常原文输出。`--provider` 省略时不写 `provider.name`；提供时只作为非敏感连接名保存。详细输入规则见 [configuration.md](contracts/configuration.md)。
+4. `DefaultAgentOptions` 只带 model 和可选 providerName。初始化器用结构化 YAML 序列化构造 frontmatter，固定 `name: main`、`tools: []` 和通用中文助手正文，不写温度、连接地址或密钥。沿用已有 SnakeYAML，不新增 dotenv 库；CLI 若直接引用 SnakeYAML 类型，应在自己的 POM 显式声明现有受管依赖，不依赖偶然的传递性。序列化必须验证特殊字符的 round-trip，不能用未转义字符串直接拼 YAML。
+5. 预检查成功后补齐目录、现有共享模板和缺失的 `main`。目录必须是目录，文件必须是普通文件；继承加载器对 Agent 末级软链接的限制，并检查受管理路径以避免经链接写入其他目录。文件用 `CREATE_NEW` 写入，遇到竞争创建不覆盖，重新校验赢家文件/目录。整个工作区不做伪事务回滚；I/O 失败返回 1，保留已创建内容，重试只补缺项。部分写坏的已有 `main` 不自动修复，按字段/文件错误提示人工处理。
+6. 成功输出新建/跳过清单和“仅本地文件已准备”的说明；错误输出安全失败原因及补齐方式，不打印配置原值、生成正文或堆栈。合法 `main` 已存在时不重新解析模型来源，传入另一个模型名也仅跳过，不是更新配置命令。
+
+`WorkspaceInitializer` 的路径检查、文件写入与结果统计保持在 CLI；core 不反向依赖 CLI。初始化参数不是持久化 Profile，生成文件仍由现有加载器派生 Profile，见 [data-model.md](data-model.md) 的增量类型。
+
+### Phase 1：选择与真实工作区传递
+
+- `ChatCommand` 先确定候选：显式 `--profile`；否则存在 `main` 路径就选它并校验；否则扫描直接子目录，唯一则选中、多项列名单、零项提示 init。不能先丢弃损坏 `main` 再静默选择其他 Agent。候选扫描关闭 `Files.list` 的 Stream，目录判断与 `AgentLoader` 的链接限制一致。
+- 选中的 Agent 用 `AgentLoader(workspace/agents).load(name)` 本地校验；失败返回 2、不启动 launcher、不发模型请求。只校验选中的 Agent。Provider 是否已配置/可用仍由现有运行时校验负责，不以联网试探代替校验。
+- 将 CLI 端口唯一抽象方法改为 `ContextLauncher.launch(Path workspaceRoot)`，同步迁移仓库内所有调用者、假 launcher 和测试；不保留会忽略参数的无参回退。工作区只在入口规范化一次，两次加载均使用该目录。
+- `SpringContextLauncher` 在 `WebApplicationType.NONE` 的 `.run(...)` 中传入单个 `--agentos.workspace.root=<绝对路径>` 配置参数。这样显式/缺省 CLI 工作区都不会被较低优先级环境配置改写；不调用 `System.setProperty`，不把路径值解释为 shell 命令。现有 core 装配由同一 root 构建 Agent/Bootstrap 加载器，无需改造循环。
+- boot 为测试提供包内可注入的启动器构建工厂：测试可设置仅含本地测试配置的高优先级属性源，并关闭 `.env` 导入；工厂不得改变生产 `NONE`、工作区参数和关闭行为。该入口不作为用户 CLI 配置功能。集成测试需使用真实 `SpringContextLauncher`，不能替换成仅捕获路径的假 launcher。
+- 本次不实现 `--new`；保留原参数、FR-040 已有归档约束和对应 US4 未完成任务，不把默认 main 验收当作会话归档验收。
+
+### 验证分层与任务衔接
+
+| 验证层 | 已扩展/新增测试 | 验证的行为 |
+|--------|-----------------|----------------|
+| CLI 纯文件/参数 | 现有 `WorkspaceInitializerTest`、`AgentOSCliTest`，新增 `InitModelResolverTest` | 首次 main、来源优先级/惰性读取、缺失零写入、已有 main 幂等、特殊 YAML 值、部分失败及安全退出码；不碰真实 `.env` |
+| Agent 本地校验 | 现有 `AgentLoaderTest` | 缺少 model、未解析占位符、目录/文件冲突和末级链接被拒绝 |
+| CLI 选择/端口 | 现有 `ChatCommandTest` | main 优先、显式覆盖、旧工作区选择、无效 Agent 零 launcher 调用；传入规范化工作区，成功/失败均关闭已打开上下文 |
+| boot 真实装配 | 新增 `DefaultAgentCliIntegrationTest`（`@Tag("db")`） | CLI init 创建 main 后通过 CLI chat + 真实 launcher + 本地模型替身 + PostgreSQL 完成一轮，核对同一 root 的 Agent/Bootstrap 和 1 session/1 turn/2 messages/1 llm_call |
+| 全仓回归 | 原有质量门及数据库报告脚本 | Provider、工具唯一执行入口、core 依赖倒置、原任务回归；Docker 不可用须区分跳过与通过，CI 不得跳过 |
+
+真实装配测试已扩展 boot 测试源码中的 `support/LocalModelServer`，捕获合成模型请求，断言模型名、无工具和 Bootstrap 标记。请求捕获只存在于测试夹具，不新增生产 prompt 日志。
+
+测试先行顺序：解析/文件与选择行为红灯 → CLI/core 最小实现 → 工作区端口及 boot 装配红灯 → 真实链路实现 → 全仓 verify 和数据库报告。规划轮只完成设计；后续 `/speckit-tasks` 已将增量追加为 T094–T109 及其依赖，不重开 T029/T031/T033/T034/T035，不挤占原 Phase 4–9 的任务编号。该顺序已执行，行为红灯、修复及质量门结果见 quickstart 第 9.5 节。
+
+### 增量 Constitution Check（设计前/设计后）
+
+| 闸门 | 设计前核对 | Phase 1 设计后结论 |
+|------|------------|-------------------|
+| I / II 技术栈与范围 | 沿用现有模块、依赖，不做配置向导或 Profile 管理 | 通过；新增代码仅位于 CLI、boot 和必要的 core 本地校验 |
+| III / IV 工具与调用链 | 默认工具名单为空，循环和 Provider 调用逻辑不变 | 通过；没有新增模型/工具执行入口或 ThreadLocal |
+| VI / 技术约束 存储与密钥 | init 仅文件；聊天沿用 PostgreSQL 与审计 | 通过；零表结构变化，不保存凭据，不以 H2/共享库替代测试 |
+| VII / VIII Demo 与 Agent | main 是普通 Agent、共享 AGENTS 仍是指令 | 通过；新增纯文本 CLI 验收，原天气 Demo 继续使用显式 weather Agent |
+| 开发流程与质量门 | 按用户明确的 Phase 10 范围实施，不重写任务完成历史 | 通过；T094 确认范围，测试先行，`mvn -B -ntp verify` 320 项测试通过，数据库无跳过 |
+
+新增研究没有待澄清项，未发现宪章冲突；无需增加 Complexity Tracking 例外。原设计轮未运行 Maven、数据库或真实模型；Phase 10 实施后 Maven 和容器数据库已实测通过，真实模型仍未运行。设计审查与运行证据分别记录。

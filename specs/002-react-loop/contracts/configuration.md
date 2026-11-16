@@ -2,6 +2,8 @@
 
 各模块使用配置属性；正式入口配置在 `AgentOS-boot/src/main/resources/application.yaml`，密钥仍只由已有环境变量注入。
 
+**2026-11-16 增量说明**：初始化模型输入与 CLI 工作区契约已按 Phase 10 实施并实测通过，证据见 quickstart 第 9.5 节；此结论不涵盖其他未完成阶段的时间预算、工具或会话归档设计。
+
 ```yaml
 agentos:
   workspace:
@@ -73,6 +75,26 @@ spring:
 | AGENTOS_DB_URL缺失/不可达 | chat在模型请求前安全报错，包含变量名但不包含连接串/密码；init不启动上下文，不受影响 |
 
 工作区缺agents目录时提示init；Provider未知/不可用在轮次开始前校验。核心通过新的只读 `ProviderCatalog.validate(Profile)` 端口调用provider实现的现有校验，不靠反射或调用模型试探；不改Provider的调用/重试逻辑。
+
+## 初始化模型输入与工作区（FR-039/FR-040）
+
+| 输入/配置 | 规则 |
+|-----------|------|
+| `init --model` | 创建缺失 main 时最高优先级；缺少参数值由命令解析报 2；提供空白/未解析占位符报 2，不回退 |
+| 进程 `AGENTOS_LLM_MODEL` | 仅在未提供 `--model` 时读取；存在但无效即报 2，不回退 |
+| 执行目录 `.env` 的 `AGENTOS_LLM_MODEL` | 仅在前两项未提供时读取；文件不存在/目标项不存在视为缺失；缺失、空白或未解析占位符报 2 |
+| `.env` 格式 | UTF-8 `.properties` 语法，JDK Reader 解析，重复键最后一个生效，支持标准转义/续行；不执行 shell、不把引号当 shell 引号、不展开 `${...}`、不支持 `export` 前缀 |
+| `.env` 读取/解析失败 | 文件 I/O 错误为 1，非法配置语法为 2；只说明路径/配置项和安全原因，不返回原文或原始异常文本，不回退到其他模型 |
+| 已有合法 main | 不读取新的模型来源，不用参数更新文件；旧配置保持不变。命令语法错误仍由 Picocli 拒绝 |
+| `init --provider` | 可选非空白连接名，只在创建 main 时写 provider.name；省略不写，聊天沿用 `agentos.default-provider`；不把 primary 固定进默认模板 |
+| `--workspace` | init/chat 默认 `.AgentOS`；相对执行目录解析，指向工作区根本身；命令入口规范化为绝对 Path |
+| `agentos.workspace.root` | chat 将上述 Path 作为 Spring 命令行配置源传入，优先于普通配置文件和进程环境中的同名值；不使用 JVM 全局属性传递 |
+
+所有候选值均须是具体非空白模型名；初始化不校验服务端模型目录。值不做 shell 去引号或环境插值，输入原值不进入错误文案。高优先级值已提供时，不再访问低优先级来源；`.env` 位置始终是命令执行目录，不跟随自定义 workspace 移动。上述模型环境变量只作为初始化输入，不是 Provider 连接中的默认模型；之后修改环境变量不会自动改写现有 Agent。
+
+`.env` 的解析边界是仅投影模型名，其他键不进入初始化参数或 Spring Environment，不写入生成文件、不输出。初始化不启动 Spring、不装配 Provider/DataSource、不联网；若缺少模型名，必须在任何工作区写入前返回 2。测试使用合成配置文件和可注入环境查询函数，禁止读取真实开发 `.env` 或依赖开发机模型变量。
+
+工作区经 `ContextLauncher.launch(Path)` 到达 boot，以 `.run(...)` 的 `--agentos.workspace.root=<path>` 单个参数绑定；core 的 WorkspaceProperties 继续同时构造 AgentLoader 与 ContextLoader。自动化装配测试可注入隔离的 Environment：测试配置源低于该 commandLineArgs、高于普通环境/配置文件，并关闭 `.env` 导入；生产入口不增加测试选项。不能只验证扫描路径或把 builder 默认属性误当高优先级覆盖。
 
 ## 输出回调的硬截止约束
 

@@ -2,6 +2,8 @@
 
 **Plan**: [plan.md](plan.md) | **Spec**: [spec.md](spec.md)
 
+**Updated**: 2026-11-16，追加默认主 Agent 的文件模型与临时输入类型；本次新增设计不增加关系表、列、索引或迁移，以下原有五表及轮次/审计状态机保持不变。
+
 表字段在技术方案 9.2 维护；本文件给出本 story 实际建的五张表，与 9.2 不同的地方标"新增"。时间列都用 `timestamptz`；租约这类要比较时间的列，由数据库的 `clock_timestamp()` 在取得所需行锁后取值，不在 Java 里取时间。
 
 ## sessions
@@ -143,3 +145,44 @@ US-1 的记录里 `session_id`、`turn_id`、`iteration` 可空，落库时这�
 轮次状态与租约清理用一次短事务：更新终态→收尾该轮in_progress工具→释放匹配owner租约；数据库操作失败整体回滚，无法查证时返回UNCONFIRMED。条件更新0行先查询：若已是数据库终态、本owner不再持租约、旧轮次工具清理与必要审计均确认，则视为已收敛，返回数据库终态与CONFIRMED；已有终态不覆盖，仅允许清理旧轮次自己的遗留记录，不清新owner租约。数据库持续故障无法承诺立即落库或恢复模型审计缺行，恢复后回收失效RUNNING以及终态孤儿工具记录。
 
 startTurn提交未知按预生成turnId在同一预算内查证：确认已提交且仍有效则继续；已提交但过期/取消/丢租约则不外呼、直接收尾；确认原事务已结束且未提交时抛安全启动失败；仅暂时查无行不足以确认未提交，仍未知则本地FAILED+turnId+UNCONFIRMED，不重放startTurn。详见agent-service契约。
+
+## 默认主 Agent 增量模型（2026-11-16）
+
+### 文件与身份
+
+| 对象 | 位置/身份 | 约束与关系 |
+|------|-----------|------------|
+| 工作区根 | `--workspace`；默认执行目录下 `.AgentOS` | 入口转为规范化绝对 Path，init、候选扫描、Agent/Bootstrap 加载使用同一值；不是数据库实体 |
+| 默认主 Agent | `<root>/agents/main/AGENT.md`；名称固定 `main` | 普通 AgentProfile，默认选择优先级由 CLI 规则决定，无 `is_default` 数据库字段、无新的全局注册表 |
+| frontmatter | `name`、`provider.model`、可选 `provider.name`、`tools` | name 必须等于 main；model 为具体非空白值且无未解析占位符；provider.name 省略时由现有默认连接决定；首次生成 tools 为空列表，不限制用户以后显式修改 |
+| Agent 正文 | main 文件 frontmatter 之后 | 通用中文助手指令，不含凭据；每轮由既有加载器重读 |
+| 共享 Bootstrap | `<root>/AGENTS.md`、`SOUL.md`、`USER.md` | 仍只承载共享指令，不解析 Provider/model 或默认 Agent 配置；不是 main 的副本 |
+| 模型输入来源 | 参数、进程环境、执行目录 `.env` | 仅创建缺失 main 时投影为具体模型字符串；来源本身不写入 Agent 文件，不缓存成另一套配置 |
+
+`main` 与其他 Agent 一样，聊天时使用 `(channel, user_id, profile_name)` 标识会话，此时 `profile_name=main`。默认选择不会合并、迁移或归档以前 answer/weather 的会话；显式选择仍使用各自历史，`--new` 语义沿用原契约及原任务。
+
+### CLI 临时类型与端口
+
+| 类型/端口 | 字段或输入输出 | 校验/生命周期 |
+|-----------|----------------|----------------|
+| `DefaultAgentOptions`（已实现） | `String model`、可空 `String providerName` | 只包含非敏感值，不含环境 Map、连接串、key、密码；仅用于生成缺失的 main，不持久化该对象 |
+| `InitModelResolver`（已实现） | 显式 model/provider、环境查询函数、执行目录 → DefaultAgentOptions | 惰性选择模型来源；保留“未提供”和“提供无效”的区别；无效所选值不回退；已有合法 main 跳过解析 |
+| `WorkspaceInitializer.Result`（已有） | `List<Path> created`、`List<Path> skipped` | 保留路径级结果，不放文件正文或配置；失败由命令输出安全原因，不以部分 Result 声称成功 |
+| `ContextLauncher`（变更） | `launch(Path workspaceRoot)` → RunningContext | Path 非空且已规范化；一条 chat 只启动一个上下文，退出时 close；所有实现/假实现同步更新，不保留忽略路径的无参方法 |
+
+模型名和 Provider 名经 YAML 字符串序列化，不将用户输入当 YAML 片段。生成后仍由 AgentLoader 派生现有 Profile，不改变 US-1 Profile 签名；Provider 连接的存在性、权限与可达性留给既有运行时校验。
+
+### 初始化状态与结果
+
+这些是命令内的控制流程，不新增数据库状态枚举：
+
+| 初始情况 | 处理 | 结果 |
+|----------|------|------|
+| 缺失 main，输入有效 | 预检查后补目录/模板/main | 0，新建/跳过清单 |
+| 缺失 main，模型缺失/无效 | 预检查失败，不创建工作区内容 | 2，提示补齐模型 |
+| 已有合法 main | 不解析新的模型来源，保留原内容，补其他缺项 | 0，main 记为跳过 |
+| 已有 main 内容不合法 | 本地加载校验失败，保留原文件 | 2，指明文件/字段 |
+| 路径类型冲突、链接冲突、不可读写或写入异常 | 停止，保留已存在/已成功创建的文件 | 1，说明初始化未完成；重试不覆盖 |
+| 竞争者先创建目标 | 使用 create-new 避免覆盖，重新校验赢家 | 合法则跳过；路径/内容异常按上述错误分类 |
+
+某次写入留下不完整 main 时，后续按已有不合法文件返回 2，不能当缺失文件重写。共享目录及 main 的预检查、模型解析先于任何写入；整个工作区不承诺跨文件事务。输入和退出码的详细契约见 [workspace-and-cli.md](contracts/workspace-and-cli.md)、[configuration.md](contracts/configuration.md)。
