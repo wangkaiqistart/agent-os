@@ -18,6 +18,9 @@ class AgentOSCliTest {
     void bootLauncherIsUsedForChatButInitDoesNotNeedIt() throws Exception {
         var workspace = Files.createTempDirectory("cli");
         Files.createDirectories(workspace.resolve("agents/assistant"));
+        Files.writeString(
+                workspace.resolve("agents/assistant/AGENT.md"),
+                "---\nname: assistant\nprovider:\n  model: local-model\n---\n指令\n");
         AgentService service = mock(AgentService.class);
         when(service.process(org.mockito.ArgumentMatchers.any()))
                 .thenReturn(
@@ -30,7 +33,7 @@ class AgentOSCliTest {
         var launcher =
                 new ContextLauncher() {
                     @Override
-                    public RunningContext launch() {
+                    public RunningContext launch(java.nio.file.Path workspaceRoot) {
                         return new RunningContext() {
                             @Override
                             public AgentService agentService() {
@@ -56,6 +59,13 @@ class AgentOSCliTest {
 
         assertThat(exit).isZero();
         verify(service).process(org.mockito.ArgumentMatchers.any());
-        assertThat(AgentOSCli.execute("init", "--workspace", workspace.toString())).isZero();
+        assertThat(
+                        AgentOSCli.execute(
+                                "init",
+                                "--workspace",
+                                workspace.toString(),
+                                "--model",
+                                "local-model"))
+                .isZero();
     }
 }

@@ -54,4 +54,28 @@ class AgentLoaderTest {
         Files.writeString(root.resolve("plain"), "not a directory");
         assertThatThrownBy(() -> new AgentLoader(root).load("plain")).hasMessageContaining("目录不存在");
     }
+
+    @Test
+    void rejectsUnresolvedModelsAndLinksWithoutChangingCustomAgentRules() throws Exception {
+        Path root = Files.createTempDirectory("agent-model-check");
+        Path main = Files.createDirectories(root.resolve("main"));
+        for (String model : java.util.List.of("${MODEL}", "{{MODEL}}", "<model>")) {
+            Files.writeString(
+                    main.resolve("AGENT.md"),
+                    "---\nname: main\nprovider:\n  model: '" + model + "'\n---\n正文\n");
+            assertThatThrownBy(() -> new AgentLoader(root).load("main"))
+                    .hasMessageContaining("provider.model");
+        }
+        Path custom = Files.createDirectories(root.resolve("custom"));
+        Files.writeString(
+                custom.resolve("AGENT.md"), "---\nname: custom\nprovider:\n  model: actual\n---\n");
+        assertThat(new AgentLoader(root).load("custom").profile().name()).isEqualTo("custom");
+        Files.delete(main.resolve("AGENT.md"));
+        Files.createSymbolicLink(main.resolve("AGENT.md"), custom.resolve("AGENT.md"));
+        assertThatThrownBy(() -> new AgentLoader(root).load("main"))
+                .hasMessageContaining("Agent 文件");
+        Files.createSymbolicLink(root.resolve("linked"), custom);
+        assertThatThrownBy(() -> new AgentLoader(root).load("linked"))
+                .hasMessageContaining("目录不存在");
+    }
 }

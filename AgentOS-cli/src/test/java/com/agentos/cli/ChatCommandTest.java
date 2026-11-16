@@ -3,49 +3,182 @@ package com.agentos.cli;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.agentos.core.turn.AgentService;
 import com.agentos.core.turn.PersistenceStatus;
+import com.agentos.core.turn.ProcessRequest;
 import com.agentos.core.turn.TurnResult;
 import com.agentos.core.turn.TurnStatus;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 class ChatCommandTest {
+    @TempDir Path workspace;
+    private final AgentService service = mock(AgentService.class);
+    private final boolean[] closed = new boolean[1];
+    private final StringWriter output = new StringWriter();
+
+    private ContextLauncher launcher() {
+        return root ->
+                new ContextLauncher.RunningContext() {
+                    @Override
+                    public AgentService agentService() {
+                        return service;
+                    }
+
+                    @Override
+                    public void close() {
+                        closed[0] = true;
+                    }
+                };
+    }
+
+    private void agent(String name) throws Exception {
+        Path dir = Files.createDirectories(workspace.resolve("agents").resolve(name));
+        Files.writeString(
+                dir.resolve("AGENT.md"),
+                "---\nname: " + name + "\nprovider:\n  model: test-model\n---\n中文指令\n");
+    }
+
+    private int chat(ContextLauncher launcher, String... arguments) {
+        var line = AgentOSCli.commandLine(launcher, workspace, key -> null);
+        line.setOut(new PrintWriter(output));
+        line.setErr(new PrintWriter(output));
+        var args =
+                new java.util.ArrayList<>(
+                        java.util.List.of("chat", "--workspace", workspace.toString()));
+        if (!java.util.List.of(arguments).contains("--message")) {
+            args.addAll(java.util.List.of("--message", "hello"));
+        }
+        args.addAll(java.util.List.of(arguments));
+        return line.execute(args.toArray(String[]::new));
+    }
+
     @Test
-    void singleMessageUsesInjectedLauncherWithoutStartingSpring() throws Exception {
-        var workspace = Files.createTempDirectory("chat-command");
-        Files.createDirectories(workspace.resolve("agents/assistant"));
-        AgentService service = mock(AgentService.class);
+    void mainWinsAndExplicitProfileOverridesEvenWhenOtherAgentIsBroken() throws Exception {
+        agent("main");
+        agent("custom");
+        Files.writeString(workspace.resolve("agents/main/AGENT.md"), "broken");
+        when(service.process(any())).thenReturn(success());
+        assertThat(chat(launcher(), "--profile", "custom")).isZero();
+        assertThat(closed[0]).isTrue();
+        var request = ArgumentCaptor.forClass(ProcessRequest.class);
+        verify(service).process(request.capture());
+        assertThat(request.getValue().agentName()).isEqualTo("custom");
+        agent("main");
+        assertThat(chat(launcher())).isZero();
+        verify(service, org.mockito.Mockito.times(2)).process(request.capture());
+        assertThat(request.getValue().agentName()).isEqualTo("main");
+    }
+
+    @Test
+    void oldSingleAgentStillWorksAndMultipleAgentsListCandidates() throws Exception {
+        agent("legacy");
+        when(service.process(any())).thenReturn(success());
+        assertThat(chat(launcher())).isZero();
+        agent("another");
+        assertThat(
+                        chat(root -> {
+                            throw new AssertionError("选择失败不应启动");
+                        }))
+                .isEqualTo(2);
+        assertThat(output.toString()).contains("another", "legacy", "--profile");
+    }
+
+    @Test
+    void invalidSelectionsNeverLaunchOrFallBack() throws Exception {
+        ContextLauncher forbidden =
+                root -> {
+                    throw new AssertionError("不应启动");
+                };
+        assertThat(chat(forbidden)).isEqualTo(2);
+        assertThat(output.toString()).contains("init");
+        agent("custom");
+        Files.createDirectories(workspace.resolve("agents/main"));
+        assertThat(chat(forbidden)).isEqualTo(2);
+        assertThat(chat(forbidden, "--profile", "missing")).isEqualTo(2);
+        assertThat(chat(forbidden, "--profile", "../custom")).isEqualTo(2);
+        assertThat(chat(forbidden, "--profile", " ")).isEqualTo(2);
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void startupAndProcessingFailuresHaveSafeCodesAndCloseContext() throws Exception {
+        agent("main");
+        assertThat(
+                        chat(root -> {
+                            throw new IllegalStateException("synthetic-secret");
+                        }))
+                .isEqualTo(1);
+        when(service.process(any())).thenThrow(new IllegalStateException("synthetic-secret"));
+        assertThat(chat(launcher())).isEqualTo(3);
+        assertThat(closed[0]).isTrue();
+        assertThat(output.toString()).doesNotContain("synthetic-secret", "Exception");
+    }
+
+    @Test
+    void unsuccessfulOrUnconfirmedTurnIsNotReportedAsSuccessAndBlankMessageDoesNotLaunch()
+            throws Exception {
+        agent("main");
         when(service.process(any()))
                 .thenReturn(
                         new TurnResult(
                                 UUID.randomUUID(),
-                                TurnStatus.SUCCEEDED,
-                                "answer",
+                                TurnStatus.FAILED,
+                                "安全失败",
                                 1,
-                                PersistenceStatus.CONFIRMED));
-        var closed = new boolean[1];
-        ContextLauncher launcher =
-                () ->
-                        new ContextLauncher.RunningContext() {
-                            @Override
-                            public AgentService agentService() {
-                                return service;
-                            }
+                                PersistenceStatus.UNCONFIRMED));
+        assertThat(chat(launcher())).isEqualTo(3);
+        assertThat(output.toString()).contains("持久化未确认");
+        assertThat(
+                        chat(
+                                root -> {
+                                    throw new AssertionError("空消息不启动");
+                                },
+                                "--message",
+                                " "))
+                .isEqualTo(2);
+    }
 
-                            @Override
-                            public void close() {
-                                closed[0] = true;
-                            }
-                        };
-        ChatCommand command = new ChatCommand(launcher);
-        command.workspace = workspace;
-        command.profile = "assistant";
-        command.message = "hello";
-        command.run();
-        assertThat(closed[0]).isTrue();
+    @Test
+    void normalizedWorkspaceReachesLauncherAndInteractiveInputClosesOnExitOrEof() throws Exception {
+        agent("main");
+        when(service.process(any())).thenReturn(success());
+        var passed = new java.util.concurrent.atomic.AtomicReference<Path>();
+        ContextLauncher recording =
+                root -> {
+                    passed.set(root);
+                    return launcher().launch(root);
+                };
+        for (String input : java.util.List.of("\nhello\n/exit\nignored\n", "hello\n")) {
+            var command =
+                    new ChatCommand(
+                            recording,
+                            workspace,
+                            new java.io.BufferedReader(new java.io.StringReader(input)));
+            var line = new picocli.CommandLine(command);
+            line.setOut(new PrintWriter(output));
+            line.setErr(new PrintWriter(output));
+            closed[0] = false;
+            assertThat(line.execute("--workspace", "x/..")).isZero();
+            assertThat(passed.get()).isEqualTo(workspace.toAbsolutePath().normalize());
+            assertThat(closed[0]).isTrue();
+        }
+        verify(service, org.mockito.Mockito.times(2)).process(any());
+        assertThat(output.toString()).contains("消息不能为空");
+    }
+
+    private static TurnResult success() {
+        return new TurnResult(
+                UUID.randomUUID(), TurnStatus.SUCCEEDED, "answer", 1, PersistenceStatus.CONFIRMED);
     }
 }

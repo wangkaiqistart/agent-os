@@ -10,15 +10,14 @@ import picocli.CommandLine.Spec;
  * <p>核心阶段的 12 个子命令（init、status、chat、serve、gateway、profile list/create/show/delete、
  * provider list、tool list、session list）在实现各 user story 时逐个注册到 {@code subcommands}。
  *
- * <p>当前 init 通过下方注解注册，chat 由 AgentOSCli 在拿到 ContextLauncher 后动态注册；
+ * <p>当前 init/chat 由 AgentOSCli 注入文件输入与 ContextLauncher 后动态注册；
  * 其余目标子命令尚未实现。不带子命令时显示帮助，每个子命令负责把参数转换成应用服务调用。
  */
 @Command(
         name = "AgentOS",
         mixinStandardHelpOptions = true,
         versionProvider = VersionInfo.class,
-        description = "Java 原生、私有部署、可审计的企业级 Agent OS",
-        subcommands = {InitCommand.class})
+        description = "Java 原生、私有部署、可审计的企业级 Agent OS")
 public class AgentOSCommand implements Runnable {
 
     // Picocli 在执行命令前自动注入当前命令的描述对象。

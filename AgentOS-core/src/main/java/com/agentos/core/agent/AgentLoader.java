@@ -70,9 +70,13 @@ public final class AgentLoader {
             }
             Map<String, Object> provider = map(root.get("provider"));
             String model = text(provider.get("model"));
-            if (model == null || model.isBlank()) {
+            if (model == null
+                    || model.isBlank()
+                    || model.contains("${")
+                    || model.contains("{{")
+                    || (model.startsWith("<") && model.endsWith(">"))) {
                 throw new AgentOSException(
-                        ErrorCode.INVALID_ARGUMENT, "字段 provider.model 必填：" + file);
+                        ErrorCode.INVALID_ARGUMENT, "字段 provider.model 必须是具体非空白模型名：" + file);
             }
             // Provider 名称可留空让 Catalog 使用默认连接；模型名必须由 Agent 明确给出。
             Profile profile =

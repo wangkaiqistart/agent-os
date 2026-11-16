@@ -1,31 +1,64 @@
 package com.agentos.cli;
 
+import com.agentos.core.error.AgentOSException;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.util.concurrent.Callable;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
-/**
- * 只操作本地文件的 init 命令，不启动 Spring，也不连接数据库或模型。
- * workspace 由 Picocli 的 Option 注入，和 Spring 的 ConfigurationProperties 是两套机制。
- */
-@Command(name = "init", description = "创建 AgentOS 工作区")
-public final class InitCommand implements Runnable {
+/** 只准备本地文件；成功不意味着 Provider、数据库或模型权限已验证。 */
+@Command(name = "init", mixinStandardHelpOptions = true, description = "创建工作区与默认 main Agent")
+public final class InitCommand implements Callable<Integer> {
     @Option(names = "--workspace", defaultValue = ".AgentOS")
     Path workspace;
 
+    @Option(names = "--model")
+    String model;
+
+    @Option(names = "--provider")
+    String provider;
+
+    @Spec CommandSpec spec;
+    private final WorkspaceInitializer initializer;
+    private final InitModelResolver resolver;
+    private final Path directory;
+
+    public InitCommand() {
+        this(
+                new WorkspaceInitializer(),
+                new InitModelResolver(System::getenv, Path.of("")),
+                Path.of(""));
+    }
+
+    InitCommand(WorkspaceInitializer initializer, InitModelResolver resolver, Path directory) {
+        this.initializer = initializer;
+        this.resolver = resolver;
+        this.directory = directory;
+    }
+
     @Override
-    public void run() {
+    public Integer call() {
         try {
-            // 初始化器返回统计信息，由入口决定如何显示；已有文件跳过，保留用户手工配置。
-            WorkspaceInitializer.Result result = new WorkspaceInitializer().initialize(workspace);
-            System.out.println(
-                    "工作区已准备：新建 "
-                            + result.created().size()
-                            + " 项，跳过 "
-                            + result.skipped().size()
-                            + " 项");
-        } catch (Exception e) {
-            throw new picocli.CommandLine.PicocliException("初始化失败：" + e.getMessage(), e);
+            Path root = directory.resolve(workspace).toAbsolutePath().normalize();
+            WorkspaceInitializer.Result result =
+                    initializer.initialize(root, () -> resolver.resolve(model, provider));
+            var out = spec.commandLine().getOut();
+            out.printf(
+                    "仅本地文件已准备：新建 %d 项，跳过 %d 项；聊天仍需配置外部连接。%n",
+                    result.created().size(), result.skipped().size());
+            result.created().forEach(path -> out.println("新建：" + path));
+            result.skipped().forEach(path -> out.println("跳过：" + path));
+            return 0;
+        } catch (AgentOSException | IllegalArgumentException e) {
+            // 本地校验器只提供安全文件/字段说明；不转发底层解析异常的 cause。
+            spec.commandLine().getErr().println("初始化未完成：" + e.getMessage());
+            return 2;
+        } catch (IOException | RuntimeException e) {
+            spec.commandLine().getErr().println("初始化未完成：文件或路径操作失败，请检查类型、权限和执行目录配置");
+            return 1;
         }
     }
 }

@@ -2,6 +2,9 @@ package com.agentos.boot;
 
 import com.agentos.cli.ContextLauncher;
 import com.agentos.core.turn.AgentService;
+import java.nio.file.Path;
+import java.util.Objects;
+import java.util.function.Supplier;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -13,13 +16,28 @@ import org.springframework.context.ConfigurableApplicationContext;
  * 因而不会递归执行 Picocli。NONE 模式保留 Bean/数据源/事务等能力，但不监听 HTTP 端口。
  */
 public final class SpringContextLauncher implements ContextLauncher {
+    private final Supplier<SpringApplicationBuilder> builders;
+
+    public SpringContextLauncher() {
+        this(() -> new SpringApplicationBuilder(AgentOSApplication.class));
+    }
+
+    /** 包内测试入口只替换构建工厂，生产仍由本类强制 NONE 模式及工作区参数。 */
+    SpringContextLauncher(Supplier<SpringApplicationBuilder> builders) {
+        this.builders = Objects.requireNonNull(builders, "builders");
+    }
+
     @Override
-    public RunningContext launch() {
+    public RunningContext launch(Path workspaceRoot) {
+        Objects.requireNonNull(workspaceRoot, "workspaceRoot");
+        if (!workspaceRoot.isAbsolute() || !workspaceRoot.equals(workspaceRoot.normalize())) {
+            throw new IllegalArgumentException("workspaceRoot 必须是规范化绝对路径");
+        }
         // 每次 chat 命令启动一个容器；ChatCommand 在交互期间复用它，退出时 close。
         ConfigurableApplicationContext context =
-                new SpringApplicationBuilder(AgentOSApplication.class)
+                builders.get()
                         .web(WebApplicationType.NONE)
-                        .run();
+                        .run("--agentos.workspace.root=" + workspaceRoot);
         return new RunningContext() {
             @Override
             public AgentService agentService() {

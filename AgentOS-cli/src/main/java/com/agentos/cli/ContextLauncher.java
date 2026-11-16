@@ -1,6 +1,7 @@
 package com.agentos.cli;
 
 import com.agentos.core.turn.AgentService;
+import java.nio.file.Path;
 
 /**
  * CLI 与 Spring 上下文之间的最小端口，测试可注入假实现而无需连接数据库。
@@ -10,8 +11,8 @@ import com.agentos.core.turn.AgentService;
  */
 @FunctionalInterface
 public interface ContextLauncher {
-    /** 启动一次应用上下文；其生命周期交给命令通过 try-with-resources 管理。 */
-    RunningContext launch();
+    /** 接收规范化绝对工作区；启动一次上下文，由命令通过 try-with-resources 关闭。 */
+    RunningContext launch(Path workspaceRoot);
 
     /** 只暴露业务入口和关闭能力，CLI 无需持有 Spring 的 ApplicationContext 类型。 */
     interface RunningContext extends AutoCloseable {

@@ -1,5 +1,7 @@
 package com.agentos.cli;
 
+import java.nio.file.Path;
+import java.util.function.Function;
 import picocli.CommandLine;
 
 /**
@@ -30,10 +32,33 @@ public final class AgentOSCli {
      * 在没有数据库和模型配置时运行。
      */
     public static int execute(ContextLauncher launcher, String... args) {
+        return execute(launcher, Path.of(""), System::getenv, args);
+    }
+
+    /** 嵌入式调用可指定执行目录和环境查询；不引入额外的命令行配置选项。 */
+    public static int execute(
+            ContextLauncher launcher,
+            Path directory,
+            Function<String, String> environment,
+            String... args) {
+        return commandLine(launcher, directory, environment).execute(args);
+    }
+
+    static CommandLine commandLine(
+            ContextLauncher launcher, Path directory, Function<String, String> environment) {
         CommandLine commandLine = new CommandLine(new AgentOSCommand());
-        // 动态注册可传入启动器；注解中的 init 则无需 Spring 依赖即可实例化。
-        // 独立 CLI 的 launcher 为 null，执行 chat 会明确报错，完整 boot 入口才能启动对话链路。
-        commandLine.addSubcommand("chat", new ChatCommand(launcher));
-        return commandLine.execute(args);
+        commandLine.addSubcommand(
+                "init",
+                new InitCommand(
+                        new WorkspaceInitializer(),
+                        new InitModelResolver(environment, directory),
+                        directory));
+        commandLine.addSubcommand("chat", new ChatCommand(launcher, directory, null));
+        // 参数解析也可能包含用户输入原值，统一输出安全用法说明，不泄露解析器原文。
+        commandLine.setParameterExceptionHandler((error, arguments) -> {
+            error.getCommandLine().getErr().println("命令参数不合法，请使用 --help 检查参数");
+            return 2;
+        });
+        return commandLine;
     }
 }
