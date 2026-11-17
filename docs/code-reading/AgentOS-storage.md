@@ -72,7 +72,7 @@ Core 只接收快照和消息值对象，不暴露 JPA 实体或懒加载关系�
 
 启动扫描使用独立预算：整次最多 30 秒，候选查询和每个会话事务各最多 5 秒且受剩余总预算限制。外层虚拟线程等待覆盖连接获取；超时/中断会取消任务，事务入口和提交前再次检查预算，不能让迟到写入继续推进。失败仍使启动失败，不宣称全部恢复完成。此预算只用于启动，单轮清理上限仍固定一秒。
 
-轮次启动、续租、查证与结束使用 `AuditTransactions` 的事务/I/O 边界：普通操作采用 `agentos.turn.storage-timeout`（默认5秒），并取整轮剩余预算的较小值。起步和续租取执行余量，收尾及 `find(turnId, budget)` 查证取同一hardStop余量；deadline之后不会重新获得五秒，最多仍共用剩余的一秒。未登记预算的独立存储调用使用普通存储上限。外层虚拟线程等待同样使用操作时限，连接池耗尽也不会拖到整轮结束；取消不等于确认回滚，迟到连接和提交继续由事务入口及提交检查拦住。审计尝试仍单独最多250ms。startTurn 取得锁后用数据库时间加本地剩余时长生成数据库 deadline，不延长本地单调预算。
+轮次启动、续租、查证与结束使用 `AuditTransactions` 的事务/I/O 边界：普通操作采用 `agentos.turn.storage-timeout`（默认5秒），并取整轮剩余预算的较小值。起步和续租取执行余量，收尾及 `find(turnId, budget)` 查证取同一hardStop余量；deadline之后不会重新获得五秒，最多仍共用剩余的一秒。未登记预算的独立存储调用使用普通存储上限。外层虚拟线程等待同样使用操作时限，连接池耗尽也不会拖到整轮结束；取消不等于确认回滚，迟到连接和提交继续由事务入口及提交检查拦住。审计尝试使用独立配置，默认2秒、可配置1ms～5秒，仍扣原轮次预算。startTurn 取得锁后用数据库时间加本地剩余时长生成数据库 deadline，不延长本地单调预算。
 
 ## `JpaMessageStore`：只追加和快照读取
 
@@ -90,7 +90,7 @@ record 入口为这一次实际模型请求生成随机 `write_id`，校验关�
 
 审计表保留 `null` 和 `0` 的区别：没有返回 token 是 `null`，服务端明确返回 0 才是 0；`attempt`、`image_count`、`output_cap_honored`、失败类型和 HTTP 状态均按 data-model 映射。Phase 7 已接入 `RetryingAuditWriter`：瞬时故障总计最多三次，事务结束后才等待 200/500ms。约束/参数错误不重试；超时或连接中断等提交未知情况只查证，不重发模型。确认后只打一条完整结构化 `llm_call` 日志；未确认则 ERROR，带 write_id 和 UNCONFIRMED，不能当成数据库记录。
 
-`AuditTransactions` 每次尝试/查证都新建 REQUIRES_NEW，在同一条SQL里设置 PostgreSQL statement_timeout和lock_timeout，并设置 JDBC networkTimeout；提交前再次检查本次截止时间，完成后恢复连接设置。外层 Future 约束连接池等待，迟到拿到连接的任务必须先检查时限，不能再写入。审计失败的控制台正文也带turnId、attemptTimeoutMs和UNCONFIRMED，结构化元数据保持完整；没有放宽250ms上限。`Closed by interrupt` 可能是外层预算耗尽后取消JDBC任务的结果，应结合审计阶段与耗时分析。
+`AuditTransactions` 每次尝试/查证都新建 REQUIRES_NEW，在同一条SQL里设置 PostgreSQL statement_timeout和lock_timeout，并设置 JDBC networkTimeout；提交前再次检查本次截止时间，完成后恢复连接设置。外层 Future 约束连接池等待，迟到拿到连接的任务必须先检查时限，不能再写入。审计失败的控制台正文也带turnId、attemptTimeoutMs和UNCONFIRMED，结构化元数据保持完整。审计默认2秒，允许配置1ms～5秒，包含调度、连接、SQL和提交；最终审计按同一hardStop压短。审计等待超时不再interrupt数据库线程，避免主动关闭JDBC/TLS连接；事务配置往返后与提交前检查原时限。networkTimeout恢复失败则abort连接，不允许污染后续借用者。`Read timed out`意味着本次I/O未及时确认，不能直接推断提交回滚；稳定键查证成功才算CONFIRMED。
 
 ## `JpaToolInvocationRecorder`：先确认意图，再允许执行
 
@@ -111,8 +111,8 @@ begin/skipped 的新记录直接插入，重复或冲突通过唯一约束和异
 | `MigrationTest` | Flyway V1 在空库建表 |
 | `JsonbMappingTest` | JSONB 编解码边界 |
 | `JpaToolInvocationRecorderTest` | 同行状态转换、重复 ID、null/false/0、非法 JSON、安全输入与冲突拒绝 |
-| `AuditTransactionTest` | 新事务/稳定键、真实提交后丢响应、完整载荷冲突、SQL/锁/连接池故障、无连接退避、最终审计单次尝试 |
-| `AuditLatencyTest` | 模型审计60～65ms、工具begin/complete/skipped审计50ms逐次往返等待仍能提交；超过250ms预算仍未确认且不重放插入 |
+| `AuditTransactionTest` | 新事务/稳定键、真实提交后丢响应、完整载荷冲突、SQL/锁/连接池故障、无连接退避、最终审计单次尝试、回滚原子性及连接autocommit/networkTimeout/SET LOCAL恢复 |
+| `AuditLatencyTest` | 模型连续150～250ms、工具begin/complete/skipped审计50ms逐次往返等待仍能提交；提交响应超时可由另一连接查证；超过预算仍未确认且不重放插入 |
 | `TurnReaperTest` / `TurnReaperStartupTest` | 有效 owner 保留、失效/接管/正常结束原子收尾、终态孤儿工具、正常历史不更新、慢 SQL 超过一秒、分会话提交/失败隔离、真实 chat 启动和幂等 |
 | `TurnStorageBudgetTest` | 查证超过250ms仍成功、执行预算不足时起步原子回滚、清理/查证不扩大共享hardStop、连接池耗尽按操作时限返回且不迟到续租 |
 | `JpaStorageContractTest` | 落库、快照、审计字段、关联校验、数据库时钟和真实行锁竞争 |

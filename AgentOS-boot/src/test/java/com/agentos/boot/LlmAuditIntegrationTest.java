@@ -191,7 +191,7 @@ class LlmAuditIntegrationTest {
         assertThat(appender.list.getFirst().getLevel())
                 .isEqualTo(ch.qos.logback.classic.Level.ERROR);
         assertThat(appender.list.getFirst().getFormattedMessage())
-                .contains(result.turnId().toString(), "attemptTimeoutMs=250", "UNCONFIRMED")
+                .contains(result.turnId().toString(), "attemptTimeoutMs=2000", "UNCONFIRMED")
                 .doesNotContain("PRIVATE_PROMPT", "PRIVATE_RESPONSE", "audit-test-key");
     }
 

@@ -221,6 +221,63 @@ class AuditTransactionTest extends PostgresIntegrationTest {
     }
 
     @Test
+    void successfulAndRolledBackTransactionsRestoreConnectionSettings() throws Exception {
+        int originalTimeout;
+        try (var connection = dataSource.getConnection()) {
+            originalTimeout = connection.getNetworkTimeout();
+        }
+        assertThat(
+                        transactions.execute(
+                                Duration.ofSeconds(2),
+                                () -> jdbc.queryForObject("select 1", Integer.class)))
+                .isOne();
+        var r = record();
+        assertThatThrownBy(() ->
+                        transactions.execute(
+                                Duration.ofSeconds(2),
+                                () -> {
+                                    jdbc.update(
+                                            "update agent_turns set iterations=99 where turn_id=?",
+                                            r.turnId());
+                                    throw new IllegalArgumentException("合成回滚");
+                                }))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(
+                        jdbc.queryForObject(
+                                "select iterations from agent_turns where turn_id=?",
+                                Integer.class,
+                                r.turnId()))
+                .isZero();
+        // 同时借出全部连接，避免只检查到恰好未被上个事务使用的那一条。
+        try (var first = dataSource.getConnection();
+                var second = dataSource.getConnection()) {
+            for (var connection : List.of(first, second)) {
+                assertThat(connection.getAutoCommit()).isTrue();
+                assertThat(connection.getNetworkTimeout()).isEqualTo(originalTimeout);
+                try (var statement = connection.createStatement();
+                        var rows = statement.executeQuery("show statement_timeout")) {
+                    rows.next();
+                    assertThat(rows.getString(1)).isEqualTo("0");
+                }
+                try (var statement = connection.createStatement();
+                        var rows = statement.executeQuery("show lock_timeout")) {
+                    rows.next();
+                    assertThat(rows.getString(1)).isEqualTo("0");
+                }
+            }
+        }
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from pg_stat_activity "
+                                        + "where datname=current_database() and state like 'idle in transaction%'",
+                                Integer.class))
+                .isZero();
+        recorder.record(r);
+        assertThat(repository.findAll().stream().filter(row -> row.getTurnId().equals(r.turnId())))
+                .hasSize(1);
+    }
+
+    @Test
     void finalAuditAfterDeadlineTriesOnceWithoutBackoffOrReplay() {
         var r = record();
         budgets.register(r.turnId(), TurnExecutionBudget.start(Duration.ofNanos(1)));

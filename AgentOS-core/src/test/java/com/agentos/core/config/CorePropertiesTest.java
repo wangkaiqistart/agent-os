@@ -8,6 +8,17 @@ import org.junit.jupiter.api.Test;
 
 class CorePropertiesTest {
     @Test
+    void auditTimeoutSupportsRemoteDatabaseWithoutChangingCleanup() {
+        assertThat(new AuditProperties(2, null, null, null).attemptTimeout())
+                .isEqualTo(Duration.ofSeconds(2));
+        assertThat(new AuditProperties(2, null, null, Duration.ofSeconds(5)).attemptTimeout())
+                .isEqualTo(Duration.ofSeconds(5));
+        assertThatThrownBy(() -> new AuditProperties(2, null, null, Duration.ofNanos(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(new TurnProperties(null, null, null).cleanup()).isEqualTo(Duration.ofSeconds(1));
+    }
+
+    @Test
     void ordinaryStorageTimeoutBindsIndependentlyFromCleanupAndAudit() {
         new org.springframework.boot.test.context.runner.ApplicationContextRunner()
                 .withUserConfiguration(PropertiesConfig.class)
@@ -51,7 +62,7 @@ class CorePropertiesTest {
                                 1,
                                 Duration.ofMillis(1),
                                 Duration.ofMillis(1),
-                                Duration.ofMillis(251)))
+                                Duration.ofMillis(5001)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

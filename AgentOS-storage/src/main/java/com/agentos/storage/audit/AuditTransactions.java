@@ -34,7 +34,7 @@ public final class AuditTransactions {
         var transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         // Spring 只能表示整秒，向上取整；毫秒级的真实预算由下方 PostgreSQL/socket 及提交检查守住。
-        // 普通存储/启动恢复使用各自操作预算；审计最多250ms，deadline后仍共用一秒清理窗口。
+        // 普通存储/启动恢复使用各自操作预算；审计默认2秒且最多5秒，deadline后仍共用一秒清理窗口。
         transaction.setTimeout(Math.toIntExact(Math.max(1, (timeout.toMillis() + 999) / 1000)));
         return transaction.execute(status -> {
             long millis = Math.max(1, Duration.ofNanos(deadline - System.nanoTime()).toMillis());
@@ -80,7 +80,16 @@ public final class AuditTransactions {
                                                         Runnable::run, original);
                                             }
                                         } catch (SQLException failure) {
-                                            /* 已断开的连接由连接池淘汰，不输出原始驱动异常。 */
+                                            // 不能把设置恢复失败的连接交回池里复用；不输出原始驱动异常。
+                                            try {
+                                                connection.abort(Runnable::run);
+                                            } catch (SQLException abortFailure) {
+                                                try {
+                                                    connection.close();
+                                                } catch (SQLException closeFailure) {
+                                                    /* 已失效的连接由连接池淘汰。 */
+                                                }
+                                            }
                                         }
                                     }
                                 });
@@ -90,6 +99,9 @@ public final class AuditTransactions {
                                 + "set_config('lock_timeout', ?, true) as lock_timeout",
                         millis + "ms",
                         Math.max(1, millis / 2) + "ms");
+                if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline) {
+                    throw new AuditWriteException("数据库配置往返已耗尽操作预算");
+                }
                 return action.get();
             } catch (SQLException failure) {
                 throw new AuditWriteException("无法设置审计 I/O 时限");

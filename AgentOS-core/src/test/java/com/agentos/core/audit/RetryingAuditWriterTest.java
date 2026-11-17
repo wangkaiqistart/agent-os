@@ -21,7 +21,7 @@ class RetryingAuditWriterTest {
             AtomicInteger calls, int failures, boolean confirmed) {
         return new RetryingAuditWriter.Operation<>() {
             public String write(Duration timeout) {
-                assertThat(timeout).isPositive().isLessThanOrEqualTo(Duration.ofMillis(250));
+                assertThat(timeout).isPositive().isLessThanOrEqualTo(Duration.ofSeconds(2));
                 if (calls.incrementAndGet() <= failures) {
                     throw new TransientFailure();
                 }
@@ -32,6 +32,84 @@ class RetryingAuditWriterTest {
                 return confirmed;
             }
         };
+    }
+
+    @Test
+    void timeoutDoesNotInterruptDatabaseWorkerOrReplayUnknownWrite() throws Exception {
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var done = new java.util.concurrent.CountDownLatch(1);
+        var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
+        var writes = new AtomicInteger();
+        var writer =
+                new RetryingAuditWriter(
+                        new AuditProperties(2, null, null, Duration.ofMillis(100)), e -> true);
+        try {
+            assertThatThrownBy(() ->
+                            writer.write(
+                                    TurnExecutionBudget.start(Duration.ofSeconds(5)),
+                                    false,
+                                    new RetryingAuditWriter.Operation<String>() {
+                                        public String write(Duration timeout) {
+                                            writes.incrementAndGet();
+                                            started.countDown();
+                                            try {
+                                                release.await();
+                                            } catch (InterruptedException e) {
+                                                interrupted.set(true);
+                                            } finally {
+                                                done.countDown();
+                                            }
+                                            return "late";
+                                        }
+
+                                        public boolean confirmed(Duration timeout) {
+                                            return false;
+                                        }
+                                    },
+                                    "confirmed"))
+                    .isInstanceOf(AuditWriteException.class);
+            assertThat(started.getCount()).isZero();
+            assertThat(done.getCount()).isOne();
+            assertThat(interrupted).isFalse();
+            assertThat(writes).hasValue(1);
+        } finally {
+            release.countDown();
+            assertThat(done.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
+    @Test
+    void inFlightFinalAuditCanCrossBusinessDeadlineWithinTheSameHardStop() {
+        var budget = TurnExecutionBudget.start(Duration.ofMillis(60));
+        var writes = new AtomicInteger();
+        var writer = new RetryingAuditWriter(properties, e -> false);
+        assertThat(
+                        writer.write(
+                                budget,
+                                true,
+                                new RetryingAuditWriter.Operation<String>() {
+                                    public String write(Duration timeout) {
+                                        writes.incrementAndGet();
+                                        try {
+                                            java.util.concurrent.TimeUnit.MILLISECONDS.sleep(100);
+                                        } catch (InterruptedException e) {
+                                            Thread.currentThread().interrupt();
+                                            throw new IllegalStateException("测试写入被提前取消");
+                                        }
+                                        return "committed";
+                                    }
+
+                                    public boolean confirmed(Duration timeout) {
+                                        return false;
+                                    }
+                                },
+                                "committed"))
+                .isEqualTo("committed");
+        assertThat(writes).hasValue(1);
+        assertThat(budget.auditsConfirmed()).isTrue();
+        assertThat(budget.expired()).isTrue();
+        assertThat(budget.hardStopped()).isFalse();
     }
 
     @Test

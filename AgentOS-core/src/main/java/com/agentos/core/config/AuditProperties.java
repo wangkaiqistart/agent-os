@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param maxRetries 重试次数上限，取值 0～2，不含第一次尝试
  * @param backoffFirst 第一次重试前的退避时间
  * @param backoffSecond 第二次重试前的退避时间
- * @param attemptTimeout 单次审计尝试的时间上限，配置范围 1～250ms
+ * @param attemptTimeout 单次审计尝试的时间上限，默认 2 秒，配置范围 1ms～5s，仍受整轮剩余预算约束
  */
 @ConfigurationProperties("agentos.audit")
 public record AuditProperties(
@@ -21,7 +21,7 @@ public record AuditProperties(
         }
         backoffFirst = backoffFirst == null ? Duration.ofMillis(200) : backoffFirst;
         backoffSecond = backoffSecond == null ? Duration.ofMillis(500) : backoffSecond;
-        attemptTimeout = attemptTimeout == null ? Duration.ofMillis(250) : attemptTimeout;
+        attemptTimeout = attemptTimeout == null ? Duration.ofSeconds(2) : attemptTimeout;
         if (backoffFirst.isNegative()
                 || backoffFirst.isZero()
                 || backoffSecond.isNegative()
@@ -29,9 +29,9 @@ public record AuditProperties(
             throw new IllegalArgumentException("audit.backoff 必须为正数");
         }
         if (attemptTimeout.isNegative()
-                || attemptTimeout.isZero()
-                || attemptTimeout.compareTo(Duration.ofMillis(250)) > 0) {
-            throw new IllegalArgumentException("audit.attempt-timeout 必须在1到250ms之间");
+                || attemptTimeout.compareTo(Duration.ofMillis(1)) < 0
+                || attemptTimeout.compareTo(Duration.ofSeconds(5)) > 0) {
+            throw new IllegalArgumentException("audit.attempt-timeout 必须在1ms到5s之间");
         }
     }
 }

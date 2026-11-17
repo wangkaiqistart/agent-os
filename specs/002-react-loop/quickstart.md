@@ -126,7 +126,7 @@ mvn -B verify -Pllm
 ## 6. 新增的故障与流式验收
 
 - 流式正常工具闭环：delta按序、toolCall/toolResult按ID对应、sink可用且预算充足时正常complete一次、失败error一次；过程sink异常后不再回调，通知预算耗尽可跳过并记录未送达。同步与流式最终文本、工具结果及审计归属一致。
-- 250ms单次审计故障、连接/锁等待、200/500ms退避与finally组合注入，检查从创建轮次到返回结果≤deadline+1s；持续故障必须返回turnId和UNCONFIRMED，不将它记为持久化成功。
+- 审计单次预算（默认2秒、可配置1ms～5秒）故障、连接/锁等待、200/500ms退避与finally组合注入，检查从创建轮次到返回结果≤deadline+1s；持续故障必须返回turnId和UNCONFIRMED，不将它记为持久化成功。
 - 模型审计提交成功但响应丢失后重试，write_id唯一且payload相同，只留一行；工具begin/complete同理。不重放模型或工具。
 - 默认300秒轮次取得的租约至少到deadline+30秒；模拟Provider内部两次长请求时不被接管；无有效租约时接管事务原子回收旧轮次。父轮次已FAILED/INTERRUPTED但工具还in_progress，同样能收尾。
 - max_iterations=0/负数、turn_timeout非正失败；history任一上限0不带历史，token预算使用90% floor。空/重复工具ID整批零执行、FAILED。
@@ -499,3 +499,25 @@ java -jar AgentOS-boot/target/AgentOS.jar chat
 进一步显式启用 `llm` profile，用独立测试身份 `phase7-01d4f63c0420` 运行现有main Agent，使用应用现有真实模型与数据库配置。首次三轮通过（22.888秒）；随后退出并重启，同身份再验两轮通过（17.212秒），新进程能正确恢复上一进程的测试暗号。合计5轮、1会话、5条CONFIRMED模型审计，没有持久化未确认。真实配置验收只做普通文本请求，没有对用户库注入故障，没有归档或删除用户原会话。
 
 详细场景、环境和证据见 [验证报告](../../docs/testing/phase7-validation-2026-11-17.md)。真实外网工具/天气Demo未在本次真实配置验收中执行，工具链路在独立环境验证。代码未提交；Phase 8/9任务保持原记录。
+
+### 13.9 实际提交超时与连接安全修复（2026-11-17）
+
+后续日志表明13.8的五轮通过不能证明远程数据库在所有抖动下稳定：10:24模型审计COMMIT读超时后查证也超时，10:25另一轮COMMIT超时但最终查证成功。因此保留13.4～13.8原始证据，当前预算以本节和configuration契约为准，不再坚持250ms硬上限。
+
+`agentos.audit.attempt-timeout`现在默认2秒，允许1ms～5秒；普通审计扣执行余量，在途调用最终审计可使用同一hardStop余量，不扩大deadline后共享一秒。审计外层等待超时/取消不再interrupt数据库事务线程，SQL/socket超时及配置往返后/提交前的原时限检查负责结束事务。连接networkTimeout恢复失败时abort，不交回池复用。提交未知只按稳定键查证完整载荷，查不到不等于已回滚；不重写审计、不重发模型或工具。
+
+新增回归先复现旧默认预算及interrupt问题，再修复：`AuditLatencyTest`覆盖150/250/180ms逐次SQL与提交等待、提交完成但客户端响应延迟2.3秒时另一连接查证且只插入一次、配置往返已耗尽预算则业务写入零执行、超预算安全失败。`AuditTransactionTest`核对真实回滚、全部池连接的autocommit/networkTimeout/SET LOCAL恢复及无idle in transaction；core验证超时不interrupt后台数据库线程、配置范围与在途最终审计跨deadline。
+
+可复验命令（Docker必须可用，不读开发.env、不调用真实模型）：
+
+```bash
+mvn -B -ntp -pl AgentOS-storage -am -Dtest=CorePropertiesTest,RetryingAuditWriterTest,AuditLatencyTest,AuditTransactionTest -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -B -ntp verify
+python3 scripts/check_db_test_reports.py
+```
+
+全仓质量门于2026-11-17 10:43:47 +08:00完成，461 tests / 0 failures / 0 errors / 0 skipped，耗时2:13；数据库测试实际执行检查通过。当前工作区包含此前并发/租约改动，本次完整验证同时覆盖它们，不更改其任务完成状态。详见docs/testing/database-safety-2026-11-17.md。
+
+应用仍在运行时，可用`mvn -B -ntp -Dagentos.boot.final-name=AgentOS-dbfix verify`生成独立产物，避免覆盖运行中的fat JAR。标准构建名称仍为AgentOS.jar；退出旧进程后再更新并启动。
+
+本次进一步使用显式llm profile和独立身份完成真实配置验收：三轮后退出重启，再一轮正确恢复暗号。合计4轮、1会话、4个独立write_id，审计全部CONFIRMED，ERROR/数据库读超时/持久化未确认均为0，两个进程均正常关闭连接池。标准AgentOS.jar已于10:45:55更新；此结论仅覆盖当前样本，不承诺任意网络和数据库故障下成功。

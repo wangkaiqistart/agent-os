@@ -51,10 +51,12 @@ class AuditLatencyTest extends PostgresIntegrationTest {
     @jakarta.annotation.Resource TurnBudgetRegistry budgets;
     @jakarta.annotation.Resource JdbcTemplate jdbc;
     @jakarta.annotation.Resource LatencyDataSource dataSource;
+    @jakarta.annotation.Resource AuditTransactions transactions;
 
     @AfterEach
     void resetLatency() {
         dataSource.delayMillis = 0;
+        dataSource.commitResponseDelay.set(0);
     }
 
     private LlmCallRecord record() {
@@ -124,6 +126,80 @@ class AuditLatencyTest extends PostgresIntegrationTest {
         assertThat(budgets.get(record.turnId()).auditsConfirmed()).isTrue();
     }
 
+    @Test
+    void remoteRoundTripsAndCommitJitterDoNotBreakConsecutiveAudits() {
+        recorder.record(record());
+        var record = record();
+        dataSource.insertAttempts.set(0);
+        try {
+            for (int delay : List.of(150, 250, 180)) {
+                dataSource.delayMillis = delay;
+                recorder.record(record);
+            }
+        } finally {
+            dataSource.delayMillis = 0;
+        }
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from llm_calls where turn_id=?",
+                                Integer.class,
+                                record.turnId()))
+                .isEqualTo(3);
+        assertThat(dataSource.insertAttempts).hasValue(3);
+        assertThat(budgets.get(record.turnId()).auditsConfirmed()).isTrue();
+        assertThat(dataSource.pool.getHikariPoolMXBean().getActiveConnections()).isZero();
+    }
+
+    @Test
+    void commitResponsePastWaitLimitIsConfirmedOnceUsingAnotherConnection() {
+        recorder.record(record());
+        var record = record();
+        dataSource.insertAttempts.set(0);
+        dataSource.commitResponseDelay.set(2300);
+        recorder.record(record);
+        assertThat(dataSource.insertAttempts).hasValue(1);
+        assertThat(budgets.get(record.turnId()).auditsConfirmed()).isTrue();
+        org.awaitility.Awaitility.await()
+                .atMost(Duration.ofSeconds(3))
+                .untilAsserted(() ->
+                        assertThat(dataSource.pool.getHikariPoolMXBean().getActiveConnections())
+                                .isZero());
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from llm_calls where turn_id=?",
+                                Integer.class,
+                                record.turnId()))
+                .isOne();
+        // 同一连接池继续完成下一条审计，不能残留超时配置或未结束事务。
+        recorder.record(record);
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from llm_calls where turn_id=?",
+                                Integer.class,
+                                record.turnId()))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void slowTimeoutConfigurationCannotStartBusinessWriteAfterAttemptExpiry() {
+        var invoked = new java.util.concurrent.atomic.AtomicBoolean();
+        dataSource.delayMillis = 200;
+        try {
+            assertThatThrownBy(() ->
+                            transactions.execute(
+                                    Duration.ofMillis(100),
+                                    () -> {
+                                        invoked.set(true);
+                                        return null;
+                                    }))
+                    .isInstanceOf(AuditWriteException.class);
+        } finally {
+            dataSource.delayMillis = 0;
+        }
+        assertThat(invoked).isFalse();
+        assertThat(jdbc.queryForObject("select 1", Integer.class)).isOne();
+    }
+
     private ToolInvocationRecord toolRecord(LlmCallRecord turn, String id, String status) {
         boolean intent = status.equals("in_progress");
         boolean skipped = status.equals("limit_skipped");
@@ -173,14 +249,14 @@ class AuditLatencyTest extends PostgresIntegrationTest {
         recorder.record(record());
         var record = record();
         dataSource.insertAttempts.set(0);
-        dataSource.delayMillis = 100;
+        dataSource.delayMillis = 800;
         long before = System.nanoTime();
         try {
             assertThatThrownBy(() -> recorder.record(record))
                     .isInstanceOf(AuditWriteException.class)
                     .hasNoCause();
             assertThat(Duration.ofNanos(System.nanoTime() - before))
-                    .isLessThan(Duration.ofSeconds(1));
+                    .isLessThan(Duration.ofSeconds(5));
             assertThat(budgets.get(record.turnId()).auditsConfirmed()).isFalse();
             assertThat(dataSource.insertAttempts.get()).isLessThanOrEqualTo(1);
         } finally {
@@ -204,6 +280,7 @@ class AuditLatencyTest extends PostgresIntegrationTest {
         private final HikariDataSource pool;
         private volatile int delayMillis;
         private final AtomicInteger insertAttempts = new AtomicInteger();
+        private final AtomicInteger commitResponseDelay = new AtomicInteger();
 
         LatencyDataSource(HikariDataSource pool) {
             super(pool);
@@ -230,6 +307,10 @@ class AuditLatencyTest extends PostgresIntegrationTest {
                                     delay();
                                 }
                                 Object value = invoke(target, method, args);
+                                if (method.getName().equals("commit")) {
+                                    // 真实提交完成后才延迟客户端确认；另一个事务可以看到已提交的行。
+                                    TimeUnit.MILLISECONDS.sleep(commitResponseDelay.getAndSet(0));
+                                }
                                 if (value instanceof Statement statement) {
                                     String sql =
                                             args != null

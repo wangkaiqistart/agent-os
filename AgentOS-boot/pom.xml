@@ -14,6 +14,8 @@
 
     <properties>
         <!-- 正式构建仍使用 CLI 入口；本地 HTTP 链路调试可在命令行覆盖。 -->
+        <!-- 可用 -Dagentos.boot.final-name=AgentOS-dbfix 生成独立产物，避免覆盖运行中的 JAR。 -->
+        <agentos.boot.final-name>AgentOS</agentos.boot.final-name>
         <agentos.boot.main-class>com.agentos.boot.AgentOSApplication</agentos.boot.main-class>
     </properties>
 
@@ -80,7 +82,7 @@
     </dependencies>
 
     <build>
-        <finalName>AgentOS</finalName>
+        <finalName>${agentos.boot.final-name}</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

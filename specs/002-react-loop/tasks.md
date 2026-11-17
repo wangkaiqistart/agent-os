@@ -360,3 +360,6 @@ T095 与 T096 在 T094 完成后可并行，分别写 CLI 和 core 的测试文�
 
 
 **Phase 7 扩大验证（2026-11-17）**：修复启动回收、普通存储预算及审计往返延迟问题后，427 tests / 0 failures / 0 errors / 0 skipped，数据库报告检查通过。真实模型与数据库完成首次三轮、重启后两轮，累计五条 CONFIRMED 模型审计，历史跨进程恢复；真实天气 Demo 尚未执行。详细证据见 quickstart 第 13.8 节与 docs/testing/phase7-validation-2026-11-17.md。
+
+
+**Phase 7 实际远程提交超时回归（2026-11-17）**：后续日志仍出现COMMIT及查证读超时，当前修复用默认2秒/可配置1ms～5秒替代250ms上限，保留共享deadline+1秒和未知提交不重放。新增连接设置恢复、迟到配置拒写及提交响应延迟查证证据，见quickstart第13.9节与docs/testing/database-safety-2026-11-17.md；保留全部历史任务记录，本修复不改变其他阶段任务状态。

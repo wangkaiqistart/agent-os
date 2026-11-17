@@ -16,9 +16,10 @@ agentos:
     lease-grace: 30s                 # 租约至少覆盖剩余整轮预算再加这个余量
     cleanup: 1s              # deadline后所有收尾共享的总预算
   audit:
-    write-retries: 2                 # 最多3次尝试，不保证预算内一定重试满
-    retry-backoff: [200ms, 500ms]
-    attempt-timeout: 250ms           # 每次审计数据库操作上限，还须取剩余预算的较小值
+    max-retries: 2                 # 最多3次尝试，不保证预算内一定重试满
+    backoff-first: 200ms
+    backoff-second: 500ms
+    attempt-timeout: 2s           # 每次审计数据库操作上限，还须取剩余预算的较小值
   tools:
     default-timeout: 30s             # 规划项：当前内置 ToolPolicy 固定为 30s，尚非绑定的全局开关
     default-max-result-chars: 10000   # 规划项：当前内置 ToolPolicy 固定为 10000，尚非绑定的全局开关
@@ -45,7 +46,7 @@ spring:
 - 清理阶段的最终审计每项最多一次数据库写入尝试；提交结果未知时仅在同一剩余清理预算内按稳定键查询确认，不重放写入、不再等待200/500ms。其后finishAndRelease继续使用相同hardStop，不能另起1秒。执行超时与持久化确认分开：正常超时、最终审计和收尾均确认时返回TIMED_OUT + CONFIRMED；任何必要审计或收尾无法确认时返回对应的安全失败/超时结果 + UNCONFIRMED。
 - `TurnExecutionBudget` 用单调时钟推进，由TurnRunner、TurnGuard、工具、审计记录器共享；`TurnBudgetRegistry`按turnId显式查找，不从线程或MDC查业务上下文。
 - 外层有界等待负责保证调用方按时返回；到hardStop取消仍在运行的受管任务：必要持久化尚未确认才返回UNCONFIRMED；若仅终结通知尚未返回且持久化已确认，则保留已确认结果，不把通知超时变成持久化失败。底层JDBC连接/语句/锁等待、HTTP连接与body读取也必须有界，取消线程不能代替I/O超时。到期后迟到的任务不能继续外呼或追加消息，数据库写入仍须owner/状态条件保护。
-- 审计每次尝试最多250ms，执行阶段取剩余执行预算、最终审计阶段取剩余清理预算的较小值；间隔200/500ms仅在deadline前且剩余执行预算足够时等待。0.7秒只是两次等待之和，**不是审计重试总时长**。SQL通过事务内 `SET LOCAL statement_timeout/lock_timeout` 下发毫秒级剩余上限，连接获取等待也受外层预算约束；JDBC驱动socket/network timeout须配置，测试确认取消后连接不会被带着未完成事务复用。
+- 审计每次尝试默认2秒，可配置1ms～5秒；普通审计取剩余执行预算，已在途调用的最终审计/查证取同一hardStop的剩余预算；间隔200/500ms仅在deadline前且剩余执行预算足够时等待。0.7秒只是两次等待之和，**不是审计重试总时长**。SQL通过事务内 `SET LOCAL statement_timeout/lock_timeout` 下发毫秒级剩余上限，连接获取等待也受外层预算约束；JDBC驱动socket/network timeout须配置，测试确认取消后连接不会被带着未完成事务复用。
 
 ## 本地与数据库的时间换算
 
@@ -69,9 +70,9 @@ spring:
 | lease-ttl、lease-grace、工具timeout | 必须为正Duration；按上述动态公式覆盖逻辑调用，不再按一次Provider timeout做WARN判定 |
 | cleanup | 固定1秒，与SC-006一致，不提供扩大容差的配置 |
 | turn.storage-timeout | 正Duration，默认5秒；普通轮次存储操作上限，不是额外整轮时长，也不扩大审计尝试或清理窗口 |
-| audit.write-retries | 0到2；超过2拒绝，避免无限重试 |
-| audit.retry-backoff | 必须有write-retries个正Duration，默认200/500ms；总和不能替代预算判断 |
-| audit.attempt-timeout | 正数且不大于250ms |
+| audit.max-retries | 0到2；超过2拒绝，避免无限重试 |
+| audit.backoff-first / audit.backoff-second | 必须为正Duration，默认200/500ms；总和不能替代预算判断 |
+| audit.attempt-timeout | 1ms～5s，默认2s；包含调度、连接获取、SQL及提交，仍扣原预算 |
 | HTTP max-redirects | 0到3；超过3拒绝 |
 | HTTP max-response-bytes | 1～1048576 字节；0 归一化为缺省值 1048576 |
 | default-max-result-chars | 规划中的全局策略配置；当前内置策略固定 10000，非已绑定开关 |
@@ -107,3 +108,7 @@ spring:
 过程回调运行在有界的轮次任务内，终结通知由AgentService在必要持久化处理结束后决定，单独提交到受管虚拟线程并只等待同一个hardStop的剩余时长，不为回调新增超时窗口。若之前的过程回调仍阻塞、sink已失效或hardStop已到，则不再调用sink，记录安全的通知未送达日志并直接返回TurnResult。
 
 终结回调最多尝试一次。onComplete/onError抛异常或阻塞超时，仅表示通知失败；不能回滚或改写已确认的业务终态和persistenceStatus，不能再补发另一种终结事件。取消回调Future并清理受管任务引用；不承诺强行终止不响应中断的用户回调，但必须禁止其触发后续系统事件、外呼或消息写入。验收“按时返回”不以任意用户回调必然响应中断为前提。
+
+## 远程数据库审计修复（2026-11-17）
+
+250ms固定上限已由默认2秒、可配置1ms～5秒替代。此修正来自实际提交与查证读超时，不改变FR-019/SC-006的deadline+1秒硬等待终点；最终审计可以跨越业务deadline，但所有收尾仍共用同一hardStop。超时只结束审计调用方等待，不interrupt数据库事务线程。数据库线程独立按SQL/socket超时结束，在事务入口、配置往返后及提交前检查原操作时限；连接设置恢复失败时丢弃连接，不能交回池复用。提交未知仍只查原唯一键和完整载荷，查不到不能宣称回滚或重新写入。

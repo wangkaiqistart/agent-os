@@ -108,7 +108,7 @@ agentos:
     max-retries: 2
     backoff-first: 200ms
     backoff-second: 500ms
-    attempt-timeout: 250ms
+    attempt-timeout: 2s                 # 远程数据库完整事务上限，含提交；仍扣同一整轮/清理预算
   tools:
     http:
       allowed-domains: ${AGENTOS_TOOLS_HTTP_ALLOWEDDOMAINS:}
