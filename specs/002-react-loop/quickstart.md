@@ -2,7 +2,7 @@
 
 **Plan**: [plan.md](plan.md) | 行为契约见 [contracts/](contracts/)，表结构见 [data-model.md](data-model.md)
 
-**2026-11-17 当前状态**：Phase 10 默认主 Agent、Phase 4 工具闭环、Phase 5 安全上限、Phase 6 历史/新会话和 Phase 7 审计恢复均已完成（第 9.5、10–13 节）。扩大验证后 `mvn -B -ntp verify` 的 427 项测试全部通过，真实 PostgreSQL Testcontainers 与数据库报告检查均通过。真实模型完成五轮普通文本对话及跨进程历史恢复验收（第 13.8 节）；Phase 8/9 与真实天气 Demo 尚未验收。
+**2026-11-17 当前状态**：Phase 10 默认主 Agent、Phase 4 工具闭环、Phase 5 安全上限、Phase 6 历史/新会话、Phase 7 审计恢复和 Phase 8 会话并发与租约安全均已完成（第 9.5、10–13 节）。当前主分支 `mvn -B -ntp verify` 的 461 项测试全部通过，真实 PostgreSQL Testcontainers 与数据库报告检查均通过。真实模型完成普通文本对话及跨进程历史恢复验收（第 13.8、13.9 节）；Phase 9 与真实天气 Demo 尚未验收。
 
 ## 前置条件
 
@@ -521,3 +521,14 @@ python3 scripts/check_db_test_reports.py
 应用仍在运行时，可用`mvn -B -ntp -Dagentos.boot.final-name=AgentOS-dbfix verify`生成独立产物，避免覆盖运行中的fat JAR。标准构建名称仍为AgentOS.jar；退出旧进程后再更新并启动。
 
 本次进一步使用显式llm profile和独立身份完成真实配置验收：三轮后退出重启，再一轮正确恢复暗号。合计4轮、1会话、4个独立write_id，审计全部CONFIRMED，ERROR/数据库读超时/持久化未确认均为0，两个进程均正常关闭连接池。标准AgentOS.jar已于10:45:55更新；此结论仅覆盖当前样本，不承诺任意网络和数据库故障下成功。
+
+### 13.10 Phase 8 / T086 独立验收（2026-11-17）
+
+US6 使用真实 PostgreSQL Testcontainers 多连接竞争完成验收，没有把单线程顺序测试当作并发证据：
+
+- `SessionConcurrencyIntegrationTest` 用模型/工具闸门验证同一会话的第二条消息与 `--new` 在首轮进行时均返回 `SESSION_BUSY`，数据库没有新增轮次、用户消息或模型审计；另一会话可以继续完成。
+- 同一测试验证模型重试期间租约覆盖整轮；旧 owner 在模型或第一项工具期间被接管后返回 `INTERRUPTED + CONFIRMED`，后续模型/工具调用和迟到消息均为零，新 owner 的租约与消息不被旧 owner 的 `finally` 清理。
+- `JpaTurnStoreContractTest` 在独立事务和多连接下重复 20 次归档/起步竞争，结果始终不会留下归档会话中的 RUNNING 轮次；并验证等待会话锁后按数据库 deadline 拒绝追加、过期 owner 不能成功收尾、归档会回收过期 RUNNING、接管后的旧 owner 不能追加消息或工具审计。
+- 内存与 JPA 会话/轮次契约均通过，覆盖 active 会话唯一性、租约 owner 匹配、释放不清理新 owner 以及旧历史保留。
+
+**PASS**：主分支执行 `mvn -B -ntp verify`，共 **461 tests / 0 failures / 0 errors / 0 skipped**；`python3 scripts/check_db_test_reports.py` 通过，确认 PostgreSQL 测试实际执行。`git diff --check` 通过。竞争测试使用隔离 Testcontainers 数据库，未对用户共享库做故障注入；真实天气 Demo 和 Phase 9 Polish 仍未运行。T080–T086 已全部勾选，当前只剩 T087–T093 待办。

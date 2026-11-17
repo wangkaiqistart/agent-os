@@ -216,7 +216,7 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 - [X] T083 [US6] 完善 TurnGuard、AgentService 与治理层丢租约终止：先deadline再租约检查，续租失败不变普通工具错误；消息追加前检查owner约束，finally仅释放自己的租约，拒绝请求安全返回SESSION_BUSY而不是500（依赖 T081、T082，FR-004 ~ FR-006、FR-042） in CORE/turn/TurnGuard.java、CORE/turn/AgentService.java、TOOL/govern/GovernedToolCallback.java、STORE/session/JpaMessageStore.java
 - [X] T084 [US6] 运行多连接 PostgreSQL 竞争集成测试，不把同一个测试事务共享给并发线程；阻塞模型期间第二条忙、抢租约后旧owner不能写、new-owner租约不被旧finally清理、--new竞争可重复（FR-004、FR-005、FR-040） in BOOT-TEST/SessionConcurrencyIntegrationTest.java、STORE-TEST/session/JpaTurnStoreContractTest.java
 - [X] T085 [US6] 在 CLI 端补“上一条消息还在处理”输出、--message退出3、交互模式可继续下一次输入；--new 没有active直接开始，终端关闭后同一用户名恢复会话，不打印SQL/内部堆栈（依赖 T081 ~ T084，FR-040 ~ FR-042） in CLI/ChatCommand.java、CHANNEL/CliChannel.java、CLI-TEST/ChatCommandTest.java
-- [ ] T086 [US6] 完成 US6 独立验收与质量门，记录并发时零被拒消息写入、owner切换和归档保留旧历史的证据；不能用单线程顺序测试替代数据库竞争测试 in specs/002-react-loop/quickstart.md
+- [X] T086 [US6] 完成 US6 独立验收与质量门，记录并发时零被拒消息写入、owner切换和归档保留旧历史的证据；不能用单线程顺序测试替代数据库竞争测试 in specs/002-react-loop/quickstart.md
 
 **Checkpoint**: 同会话串行、多会话互不阻塞；旧owner不能污染新owner的消息或租约。
 
@@ -345,7 +345,7 @@ T095 与 T096 在 T094 完成后可并行，分别写 CLI 和 core 的测试文�
 | 同根真实加载、无需手写 Agent 的 CLI→模型→数据库闭环 | T104/T105 → T106 → T107 | US1-8/13；FR-040；SC-018/021 |
 | 运行证据、教学文档与实施后漂移 | T107 → T108 → T109 | SC-014/018–022；不替代原完整故事验收 |
 
-本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）、Phase 5（T052–T061）、Phase 6（T062–T069）和 Phase 7（T070–T079）已完成并独立验证，证据见 quickstart 第 10–13 节。当前全表共 109 项（完成 95、待办 14）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实模型普通文本对话及跨进程历史恢复已验收（见 quickstart 第 13.8 节），真实天气 Demo 未运行；Phase 8 并发隔离专项与 Phase 9 Polish 继续保持待办。
+本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）、Phase 5（T052–T061）、Phase 6（T062–T069）、Phase 7（T070–T079）和 Phase 8（T080–T086）已完成并独立验证，证据见 quickstart 第 10–13 节。当前全表共 109 项（完成 102、待办 7）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实模型普通文本对话及跨进程历史恢复已验收（见 quickstart 第 13.8 节），真实天气 Demo 未运行；Phase 9 Polish（T087–T093）继续保持待办。
 
 
 **Phase 4 实施记录（2026-11-16）**：T036–T051 已完成，前置行为红灯与最终 359 tests / 0 failures / 0 errors / 0 skipped、数据库回读及实施后分析见 quickstart 第 10 节。保留 T001–T035、T094–T109 历史记录；未勾选 T052–T093。T051 的真实天气演示按原要求延期到 US3 安全上限与 US5 审计恢复完成后，本次只做本地替身天气闭环。
