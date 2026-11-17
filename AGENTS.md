@@ -13,6 +13,8 @@
 
 开始编码前，先检查 `git status --short --branch`，保留用户和前序 agent 的未提交改动，不要重置、清理或覆盖它们。
 
+本项目不使用 Git worktree 开发。开发、修复、验证和提交直接在当前检出目录进行，不创建或切换到额外的 worktree。
+
 ## Codex 与 Spec-Kit 接续
 
 仓库已经包含 Spec-Kit 运行资产：`.specify/scripts/bash/`、模板、工作流和 `specs/`。Codex 集成已安装在
