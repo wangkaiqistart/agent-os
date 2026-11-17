@@ -887,7 +887,7 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 
 Channel 是 Agent 对外的消息接入入口，主要解决"消息进来、响应出去"。HTTP 接入归 Web Service，不在 Channel 范畴内。
 
-**`CliChannel` 模块。** `AgentOS chat` 命令的实现，读 stdin 写 stdout 实现交互式对话，维护当前 Session，每次输入调 `AgentService.process`，支持 `/quit` 退出。扩展阶段补企业微信、飞书、钉钉、Slack 等 IM Channel，每个通过 Channel Adapter 插件机制扩展，所有 IM Channel 底层都调 Web Service 的 Agent 接口，不重复实现 Agent 逻辑。
+**`CliChannel` 模块。** `AgentOS chat` 命令的实现，读 stdin 写 stdout 实现交互式对话，维护当前 Session，每次输入调 `AgentService.process`，支持 `/exit` 或 EOF 退出。扩展阶段补企业微信、飞书、钉钉、Slack 等 IM Channel，每个通过 Channel Adapter 插件机制扩展，所有 IM Channel 底层都调 Web Service 的 Agent 接口，不重复实现 Agent 逻辑。
 
 ### 8.5 定时任务（第三种触发源）
 
@@ -938,6 +938,8 @@ provider list
 tool list
 session list
 ```
+
+**US-2 当前可运行入口（2026-11-17）**：`init [--workspace <root>] [--model <model>] [--provider <name>]` 与 `chat [--workspace <root>] [--profile <name>] [--message <text>] [--new]` 已实现，其余列表为后续规划。init 仅准备本地文件并生成空工具权限的 main；模型来源是显式参数、进程环境、执行目录 `.env` 的非敏感模型名，缺少模型时零写入。chat 显式选择优先，其次 main，再兼容旧工作区；实际 Agent 与 Bootstrap 共用指定根目录。`--new` 仅空闲时归档，旧消息、轮次和审计不删除、不改写；忙请求不产生写入。退出码依次为成功0、启动失败1、用法错误2、轮次不成功/忙3。数据库未确认时输出 turnId 与 UNCONFIRMED。
 
 每个子命令一个 `@Command` 类。不需要 Spring 上下文的命令（`init`、`profile list`）直接走文件操作启动快；需要 LLM 调用的命令（`chat`、`serve`、`gateway`）启动 Spring 上下文。
 
@@ -1524,3 +1526,7 @@ AgentOS 技术方案核心：**JDK 21 + Spring Boot 4.x** 单体应用，基于 
 **承接定位：** 核心阶段交付运行时内核，能力上对齐业界开源 Agent OS 基础层，企业级治理差异化在扩展阶段补齐。架构上为治理层预留扩展点（Tool Policy、多租户、审计查询、SSO 都有对应的预留位置）。
 
 **核心理念不变：** AgentOS 五大能力扎实落地，业务方写一个 `AGENT.md` 目录 加 MCP server 就能解决业务问题，通过 Web Service 接入已有系统，不需要写 Agent 后端代码。
+
+## US-2 实现核对（2026-11-17，Phase 9）
+
+V1 与实体已核对 9.2：工具状态含 in_progress/interrupted，updated_at 为非空时间；模型审计含 failure_kind/http_status 和唯一 write_id。工具先持久化 begin 再执行、终态更新同一行；模型请求不因审计失败重发。租约至少覆盖 deadline+30s，取锁后按 clock_timestamp 判断 owner/有效期；启动和接管收尾失效轮次及终态孤儿工具，不清理新 owner。审计每次默认2s、上限5s，始终受原执行/清理预算压短；deadline 后仍只有共享1s。完整表约束及幂等/竞争行为分别由 MigrationTest、AuditTransactionTest、JpaTurnStoreContractTest 与 SessionConcurrencyIntegrationTest 验证。验收结果见 specs/002-react-loop/quickstart.md 第14节；Memory、MCP、REST、周期调度与 SSE 仍为后续能力。

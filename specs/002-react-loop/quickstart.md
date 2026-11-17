@@ -2,7 +2,7 @@
 
 **Plan**: [plan.md](plan.md) | 行为契约见 [contracts/](contracts/)，表结构见 [data-model.md](data-model.md)
 
-**2026-11-17 当前状态**：Phase 10 默认主 Agent、Phase 4 工具闭环、Phase 5 安全上限、Phase 6 历史/新会话、Phase 7 审计恢复和 Phase 8 会话并发与租约安全均已完成（第 9.5、10–13 节）。当前主分支 `mvn -B -ntp verify` 的 461 项测试全部通过，真实 PostgreSQL Testcontainers 与数据库报告检查均通过。真实模型完成普通文本对话及跨进程历史恢复验收（第 13.8、13.9 节）；Phase 9 与真实天气 Demo 尚未验收。
+**2026-11-17 当前状态**：本Spec全部实现阶段已验收，Phase 9 的架构规则、真实模型/天气Demo、文档和质量门结果见第14节。最终默认质量门 **463 tests / 0 failures / 0 errors / 0 skipped**；真实模型专项另有 **2 tests / 0 failures / 0 errors / 0 skipped**。独立PostgreSQL数据库检查和官网验证均通过。未发布；长期记忆、MCP、REST、调度和正式SSE属于后续范围。
 
 ## 前置条件
 
@@ -61,11 +61,11 @@ python3 scripts/check_db_test_reports.py
 
 随后补充的 Core/CLI/Channel 回归测试共 21 个通过，覆盖 Agent frontmatter 错误、Bootstrap 顺序与热加载、空助手失败、Provider 校验先于建会话、CLI 单消息假 launcher、空行/EOF/`/exit`；同时修复了 Bootstrap 映射顺序在不可变包装后不稳定的问题，并消除了内存契约测试的 JUnit 静态 `@Nested` 发现警告。
 
-## 3. 阶段 Demo 1：查天气穿衣（手动，待 US5 后执行）
+## 3. 阶段 Demo 1：查天气穿衣（运行指南）
 
-本节是后续真实演示指南，Phase 4/5 不执行；先完成 US5 的审计恢复。
+本节保留运行指南；真实执行结果另记第14节。运行前须完成安全上限、审计恢复及并发验收。
 
-`.env` 里要有 `AGENTOS_DB_URL` 等数据库连接，以及 `AGENTOS_LLM_*`（`primary` 模型）。HTTP白名单通过下面合法的环境变量传入，不向.env追加带点的Spring属性（.env还需被shell source）。
+`.env` 里要有 `AGENTOS_DB_URL` 等数据库连接，以及 `AGENTOS_LLM_*`（`primary` 模型）。HTTP白名单通过下面的环境变量传入；应用按 UTF-8 properties 加载 `.env`，不要当 shell 脚本 source。
 
 ```bash
 mvn -B -DskipTests package
@@ -104,15 +104,17 @@ select tool_name, status, result_truncated from tool_invocations;               
 select attempt, success, finish_reason from llm_calls order by id;                     -- 与实际请求数一一对应，不固定为两条
 ```
 
-met.no 的响应约 38000 字符，超过 10000 的上限，所以 `result_truncated` 应为 true。本机访问不了 `api.open-meteo.com` 和 `wttr.in`，met.no 和 `www.7timer.info` 可以。
+响应大小与公网连通性会变化。超过10000字符时应标记 `result_truncated=true`；实际大小、截断状态和本次可达性以第14节实测为准，不能沿用研究时的网络状态。
 
 ## 4. 真实模型自动化测试
 
 `@Tag("llm")`，单独开启，默认构建不运行：
 
 ```bash
-set -a; source .env; set +a
-mvn -B verify -Pllm
+# 在进程环境中安全注入 AGENTOS_LLM_API_KEY / BASE_URL / MODEL，不打印值。
+# 仅运行本 story 的真实模型闭环；数据库始终为独立 Testcontainers。
+mvn -B -ntp -Pllm -pl AgentOS-boot -am -Dtest=ReActWeatherSmokeTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
 用真实的 `primary` 模型加本地天气替身加 Testcontainers 数据库（需要 Docker），断言：轮次SUCCEEDED、至少一次预期http_get、模型和工具次数在配置上限内，记录与实际调用逐一对应。精确1次工具/2次模型的断言只适用于脚本模型替身，不适用于真实模型。用本地替身而不是真实天气接口，避免公网波动让测试不稳定；真实天气源只在第 3 节手动验证。
@@ -532,3 +534,24 @@ US6 使用真实 PostgreSQL Testcontainers 多连接竞争完成验收，没有�
 - 内存与 JPA 会话/轮次契约均通过，覆盖 active 会话唯一性、租约 owner 匹配、释放不清理新 owner 以及旧历史保留。
 
 **PASS**：主分支执行 `mvn -B -ntp verify`，共 **461 tests / 0 failures / 0 errors / 0 skipped**；`python3 scripts/check_db_test_reports.py` 通过，确认 PostgreSQL 测试实际执行。`git diff --check` 通过。竞争测试使用隔离 Testcontainers 数据库，未对用户共享库做故障注入；真实天气 Demo 和 Phase 9 Polish 仍未运行。T080–T086 已全部勾选，当前只剩 T087–T093 待办。
+
+## 14. Phase 9 Polish 验收（2026-11-17）
+
+T087–T093全部完成，全表109项已关闭。最终`/speckit-analyze`只读核对覆盖42条FR和22条SC，无CRITICAL/HIGH问题，无未映射任务；两项LOW历史说明为日志记录器的旧US-2 TODO和已注明合并位置的历史测试名称，不影响当前验收。既有调试Controller仍默认关闭，正式默认上下文未注册。分析未修改文件，完成后仅回写任务与验收状态。详细 [验证报告及42条FR/22条SC矩阵](../../docs/testing/phase9-validation-2026-11-17.md) 区分自动化、真实模型与真实天气证据。
+
+| 层次 | 结果 | 实测 |
+|---|---|---|
+| 默认Maven完整质量门 | PASS | 2026-11-17 12:28:05 +08:00完成，2:11，463 tests，失败/错误/跳过均0；独立产物AgentOS-polish.jar，全部原质量门有效 |
+| PostgreSQL | PASS | Docker29.9.2、pgvector/pgvector:pg17；报告检查确认实际执行 |
+| 真实primary + 本地天气 | PASS | gpt-5.6-luna；2次模型、1次HTTP、4条消息；SUCCEEDED + CONFIRMED，审计/消息调用ID对应 |
+| 真实primary + met.no + CLI --new | PASS | 两个独立CLI进程均退出0，各2次模型/1次工具/4条消息；旧会话归档，旧轮次/消息/审计逐行不变 |
+| 官网中英文 | PASS | npm run verify，10对文件及VitePress构建；既有chunk大小提示仍在 |
+| 安全与产物 | PASS | 当前primary key原值在仓库非忽略文件和JAR条目中零命中；日志/审计无合成秘密；无本轮新增正式REST/SSE接口 |
+
+本轮只在用户授权后由测试启动进程运行时加载现有.env的三个主模型变量，不打印或写入凭据。所有数据库连接来自独立Testcontainers，临时工作区不读取用户Agent/历史；没有共享库迁移、clean或故障注入。调用前已说明费用与向模型发送天气上下文。
+
+模型本次建议为长袖或保暖内衣加毛衣/抓绒和厚外套，早晚防风保暖并备伞；这是本次模型返回样本，不把天气预报准确性作为另行验证的结论。真实模型以后可能多次取数，不承诺固定2次调用。
+
+T087先观察违规夹具断言红灯，再补事务静态辅助规则；动态连接占用测试仍是主要证据。T088核对五表字段、先记后做、动态lease/接管收尾及CLI用法，T091同步六份中英文官网页面。首次天气测试的活跃会话计数未区分本地替身渠道，修正后2个真实用例均通过；格式编辑完成后重跑Spotless及完整verify。
+
+可复验命令与日志位置见验证报告。普通验证没有启用llm；真实专项仅运行ReActWeatherSmokeTest，不以跳过作通过。不自动提交、推送、合并或发布。

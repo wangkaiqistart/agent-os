@@ -21,10 +21,10 @@ US-4 Tool    ──┘
 ```
 
 - **US-1**: explicit model Provider mapping, bounded retries and deadlines, call metadata, streaming, image input, and text Embeddings. Code, offline tests, and real-model smoke tests are done (2026-11-14);
-- **US-2**: ReActLoop, PromptBuilder, Turns, tool execution, and a CLI demo;
+- **US-2**: Implemented ReActLoop, prompts, persisted sessions/turns/messages, leases, limits, timeouts, HTTP GET, auditing and init/chat/--new. Isolated database tests pass; see [ReAct validation](/en/docs/react-loop#validation) for real-model/weather status.
 - **US-3**: conversational memory, long-term memory, and Memory Tools;
 - **US-4**: built-in Tools, MCP, Sandbox, and the governance wrapper;
-- **US-5**: PostgreSQL persistence, 10 REST endpoints, scheduling, and engineering close-out.
+- **US-5**: Future REST, scheduling and management; US-2 already provides PostgreSQL persistence for sessions and audits.
 
 The core acceptance scenarios are a daily weather report, a daily technology digest, and a daily GitHub digest. They demonstrate a bare `AGENT.md`, a shared Skill, and script resources respectively.
 

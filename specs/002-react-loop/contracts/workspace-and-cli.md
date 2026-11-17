@@ -2,7 +2,7 @@
 
 **Owner**: `AgentOS-cli`（命令）、`AgentOS-core`（`AgentLoader`、`ContextLoader`） | **Spec**: FR-024 ~ FR-027、FR-039 ~ FR-042
 
-**Updated**: 2026-11-16，默认主 Agent 增量已在 Phase 10 实施；跨轮历史与 `--new` 已在 Phase 6 接入，证据见 quickstart 第 12 节。US5/US6 的故障恢复与并发加固仍待后续阶段。
+**Updated**: 2026-11-16，默认主 Agent 增量已在 Phase 10 实施；跨轮历史与 `--new` 已在 Phase 6 接入，证据见 quickstart 第 12 节。故障恢复与并发加固已经实现，最终验证见 quickstart 第14节。
 
 ## AgentOS init
 

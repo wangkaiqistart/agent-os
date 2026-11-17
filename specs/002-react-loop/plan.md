@@ -10,6 +10,8 @@
 
 **Phase 7 实施状态（2026-11-16）**：T070–T079 已完成，前述 Phase 4 记录保留为历史。审计有限重试、write_id/完整载荷查证、毫秒级数据库 I/O、工具执行前后失败区分、启动/接管原子恢复及关闭取消已接通。最终质量门 411 项测试通过，无失败/错误/跳过，详见 quickstart 第 13 节；Phase 8 并发专项与 Phase 9 Polish、真实模型/天气 Demo 仍未完成。
 
+**Phase 9 当前结果（2026-11-17）**：实现已按本计划验收；默认质量门463项与真实模型专项2项通过，数据库与官网验证通过。上方各阶段及文末增量的“未运行/待后续”保留为历史时点，当前逐项结论以quickstart第14节及验证报告为准；未部署或发布。
+
 ## Summary
 
 统一入口 `AgentService.process` 接收一条消息：找到或创建活跃会话、取得会话租约、开始轮次，然后由 `ReActLoop` 迭代。`PromptBuilder` 组装提示词，`ProviderService`（US-1）调用一次模型；响应没有工具调用就结束，有就交给 `ToolExecutor`，它调用容器注入的 `ToolCallingManager` 执行，结果追加进历史再进入下一次迭代。契约放 `AgentOS-core`；工具与沙箱在 `AgentOS-tool`；会话、轮次、消息和两张审计表的 JPA 实现与迁移脚本在 `AgentOS-storage`；`AgentOS init` 与 `AgentOS chat` 在 `AgentOS-cli` 与 `AgentOS-channel-cli`；`AgentOS-boot` 只负责装配和启动上下文。Provider调用/重试逻辑不改；新增只读ProviderCatalog实现，复用RequestValidator在轮次开始前验证Profile。
@@ -22,7 +24,7 @@ Phase 0 对 Spring AI 2.0.2 的工具执行做了实测（见 [research.md](rese
 - 默认解析器会执行"声明成 Bean 但不在 Agent 名单里"的工具。必须换成只返回错误的解析器并打开解析回退，才能守住名单（FR-030）。
 - 回调里拿不到模型给的调用 ID，审计靠响应之后建立的按工具名排队账本；ID非空/唯一在整批执行前校验。
 - 自定义回调直接抛异常时，密钥原文会连同异常消息一起冒出来，所以所有工具异常都要在治理层先包装、脱敏。
-- 本机 Docker Desktop 已安装但没有运行，依赖数据库的测试要有不依赖 Docker 的分层。
+- 原研究时 Docker 未运行；当前 Docker 可用并实际执行容器数据库测试，仍保留无 Docker/CI 的分层闸门。
 
 ## Technical Context
 
@@ -157,9 +159,9 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 
 ## 风险与后续
 
-- **`jsonb` 映射没有实测**：本机没有数据库。第一个存储任务是 Testcontainers 的 spike，不通过就把 `jsonb` 列改用 `JdbcClient`（R7）。
+- **`jsonb` 映射已实测**：MigrationTest/JsonbMappingTest 在独立 PostgreSQL 验证迁移、JPA validate 和 JSON 往返；保留 R7 的原始决策依据。
 - **账本依赖管理器的顺序语义**：用测试固定"同名工具第 k 次执行对应第 k 个 ID"；升级 Spring AI 后若失败，说明前提变了（R5）。
-- **处理器重抛路径没有实测**：整轮超时、租约丢失、审计写入失败三类异常能否穿过管理器冒到循环，要用测试验证（R3）。
+- **处理器重抛已实测**：整轮超时、租约丢失、审计失败由 ToolExecutorTest/GovernedToolCallbackTest 和真实装配测试验证，三类异常不作为普通工具错误继续。
 - **跨迭代的次数上限**：交给管理器的 prompt 要带累计历史，否则上限每次迭代都被重置（R4）。
 - **租约覆盖与回收**：动态租约至少到本轮deadline+30s（150s只作最短TTL），不用心跳，代价是强杀等待更久。没有有效owner租约的RUNNING轮次在启动或接管时立即回收，不额外要求deadline过期；终态轮次孤儿工具记录独立清理。
 - **DNS 重绑定**：沙箱只校验主机名，不校验解析后的地址。只信任白名单内的公共接口，完整防护留到后续阶段。
@@ -255,3 +257,7 @@ AgentOS-boot/src/main/java/com/agentos/boot/                 AgentOSApplication�
 新增研究没有待澄清项，未发现宪章冲突；无需增加 Complexity Tracking 例外。原设计轮未运行 Maven、数据库或真实模型；Phase 10 实施后 Maven 和容器数据库已实测通过，真实模型仍未运行。设计审查与运行证据分别记录。
 
 - 实际远程数据库抖动修复（2026-11-17，取代上方历史250ms结论）：审计尝试默认2秒、可配置1ms～5秒，仍扣原执行/清理预算。单次绝对时限覆盖调度与事务，不interrupt JDBC工作线程；配置往返后再次检查时限，提交未知只查证不重写。连接设置恢复失败则丢弃。独立PostgreSQL回归覆盖150～250ms逐次往返、提交后响应跨过等待时限、回滚及连接池状态恢复；deadline后一秒不扩大。
+
+## Phase 9 核对（2026-11-17）
+
+五表迁移与 9.2 已一致；begin 先记后做、动态租约、取锁后实时检查和接管收尾均有数据库测试。CLI 支持 init 的默认 main、自定义工作区、单消息/交互、空闲归档 --new；不实现 REST/SSE、长期记忆、MCP 或完整工具策略。新增事务静态规则只做辅助：注解事务中的直接外呼、同类委托和同步等待会被拦截，非 storage 禁止 TransactionTemplate；程序式/跨线程路径仍以 LlmAuditIntegrationTest、ReActApplicationTest、AuditTransactionTest 的真实连接占用检查为准。真实天气验收和全部 FR/SC 的逐项状态见 quickstart 第14节。

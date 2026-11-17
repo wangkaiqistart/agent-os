@@ -21,10 +21,10 @@ US-4 Tool    ──┘
 ```
 
 - **US-1**：模型 Provider 显式映射、有限重试与截止时间、调用元数据、流式、图片输入和文本向量化。代码、离线测试和真实模型冒烟测试已完成（2026-11-14）；
-- **US-2**：ReActLoop、PromptBuilder、Turn、工具执行和 CLI Demo；
+- **US-2**：已实现 ReActLoop、PromptBuilder、会话/轮次/消息、租约隔离、两道上限、三层超时、HTTP GET/域名白名单、PostgreSQL 审计及 init/chat/--new；独立容器测试通过，真实模型与天气验收状态见 [ReAct 与轮次](/docs/react-loop#validation)；
 - **US-3**：会话记忆、长期记忆和 Memory Tools；
 - **US-4**：内置 Tool、MCP、Sandbox、治理装饰器；
-- **US-5**：PostgreSQL 持久化、10 个 REST 端点、调度与工程化收尾。
+- **US-5**：后续 REST、调度与管理能力；US-2 已提前完成会话和审计所需的 PostgreSQL 持久化。
 
 核心验收场景是每日天气、每日科技日报和每日 GitHub 日报，分别演示光杆 `AGENT.md`、公共 Skill 和脚本资源。
 

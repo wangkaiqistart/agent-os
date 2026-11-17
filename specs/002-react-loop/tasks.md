@@ -12,6 +12,8 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 
 **Organization**: `[US1]` ~ `[US6]` **仅指本 spec 内部的六个用户故事**，整份任务属于项目五部分路线图的 **US-2（ReAct）**，不是再开发路线图 US-1 ~ US-6。
 
+**2026-11-17 当前审计预算**：T001/T017 等已完成任务中的250ms是实施当时的历史值；后续经真实数据库抖动修复，当前默认2秒、配置上限5秒（research R25、configuration 契约），仍共用原 deadline/hardStop。保留历史任务正文，不据旧值回退实现。
+
 **2026-11-16 增量**：默认主 Agent 的任务追加为 T094–T109（文末 Phase 10，归属 US1/P1）。原 T001–T035 的完成状态及任务正文保留，原 T036–T093 不重编号；仅将未完成 T092 的最终验收计数从 17 条 SC 同步为 22 条。编号表示追加顺序，实际执行在原 US1 完成后、原 Phase 4 之前，见依赖图；生成清单本身不代表实施或 review；本次 Phase 10 的实际确认与实施证据见 quickstart 第 9.5 节。
 
 ## Format 与路径
@@ -224,13 +226,13 @@ description: "US-2 ReAct 循环（002-react-loop）的实施任务"
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T087 补充并运行架构规则：现有 core 依赖倒置、唯一 ToolExecutor、禁止自建Manager/ThreadLocal/MDC读取/ToolCallingAdvisor、构造器注入继续生效；增加不让工具/模型外呼被事务包裹的静态辅助规则但以 T077 动态验证为准，不降低已有规则（SC-014） in AgentOS-boot/src/test/java/com/agentos/boot/ArchitectureRulesTest.java
-- [ ] T088 同步设计事实源：技术方案9.2的工具in_progress/interrupted/updated_at和llm failure_kind/http_status/write_id已随分析修订同步，本任务核对实现与这些字段一致；核对Tool先记后做、动态lease和接管收尾；plan/research已修事实不重复保留“model可选”等旧风险；更新CLI用法与 --new，不动辅助调用未决设计或宪章 in docs/TechnicalSolution.md、docs/AiProgrammingGuide.md、specs/002-react-loop/plan.md、specs/002-react-loop/research.md
-- [ ] T089 编写真实模型闭环测试，`@Tag("llm")` 且按 AGENTOS_LLM_API_KEY 条件启用：真实primary+本地天气替身+Testcontainers库，检验SUCCEEDED、工具调用和消息/审计关联，执行次数是否精确按脚本行为核对；费用与外部数据发送在运行前说明，不把跳过当通过（SC-001、SC-003、SC-007） in BOOT-TEST/smoke/ReActWeatherSmokeTest.java
-- [ ] T090 在临时工作目录执行真实天气 Demo：使用met.no HTTPS和白名单、手写weather Agent、chat --message与 --new；先确认目标数据库与迁移授权，不在共享库做clean或故障注入；记录真实模型、真实数据源、最终建议、工具/模型/消息行数与脱敏证据。说明模型可能多次取数，不能未经实测宣称必为2次模型调用（SC-001） in specs/002-react-loop/quickstart.md
-- [ ] T091 更新官网中英文状态和运行文档，只把实际已验收项标已实现，区分US-2、后续Memory/Tool/Web；不把本地测试SSE写成正式API，保留真实Demo尚未运行时的说明 in website/docs/react-loop.md、website/en/docs/react-loop.md、website/docs/quick-start.md、website/en/docs/quick-start.md、website/docs/roadmap.md、website/en/docs/roadmap.md
-- [ ] T092 运行 `mvn spotless:apply`、`mvn -B verify`；有Docker时数据库测试实际执行、CI不跳过；运行官网 `npm run verify`；按需求核对42条FR和22条SC，生成明确通过/失败/未运行结果，任何失败不勾完成（SC-014） in specs/002-react-loop/quickstart.md、specs/002-react-loop/tasks.md
-- [ ] T093 检查spec/plan/tasks/实现漂移、全部待办和临时探针、产物里无密钥与正式SSE接口；运行 `/speckit-analyze` 形成只读报告，必要修复须另获授权。当前不自动提交、推送、合并，用户要求后再做 in specs/002-react-loop/spec.md、specs/002-react-loop/plan.md、specs/002-react-loop/tasks.md
+- [X] T087 补充并运行架构规则：现有 core 依赖倒置、唯一 ToolExecutor、禁止自建Manager/ThreadLocal/MDC读取/ToolCallingAdvisor、构造器注入继续生效；增加不让工具/模型外呼被事务包裹的静态辅助规则但以 T077 动态验证为准，不降低已有规则（SC-014） in AgentOS-boot/src/test/java/com/agentos/boot/ArchitectureRulesTest.java
+- [X] T088 同步设计事实源：技术方案9.2的工具in_progress/interrupted/updated_at和llm failure_kind/http_status/write_id已随分析修订同步，本任务核对实现与这些字段一致；核对Tool先记后做、动态lease和接管收尾；plan/research已修事实不重复保留“model可选”等旧风险；更新CLI用法与 --new，不动辅助调用未决设计或宪章 in docs/TechnicalSolution.md、docs/AiProgrammingGuide.md、specs/002-react-loop/plan.md、specs/002-react-loop/research.md
+- [X] T089 编写真实模型闭环测试，`@Tag("llm")` 且按 AGENTOS_LLM_API_KEY 条件启用：真实primary+本地天气替身+Testcontainers库，检验SUCCEEDED、工具调用和消息/审计关联，执行次数是否精确按脚本行为核对；费用与外部数据发送在运行前说明，不把跳过当通过（SC-001、SC-003、SC-007） in BOOT-TEST/smoke/ReActWeatherSmokeTest.java
+- [X] T090 在临时工作目录执行真实天气 Demo：使用met.no HTTPS和白名单、手写weather Agent、chat --message与 --new；先确认目标数据库与迁移授权，不在共享库做clean或故障注入；记录真实模型、真实数据源、最终建议、工具/模型/消息行数与脱敏证据。说明模型可能多次取数，不能未经实测宣称必为2次模型调用（SC-001） in specs/002-react-loop/quickstart.md
+- [X] T091 更新官网中英文状态和运行文档，只把实际已验收项标已实现，区分US-2、后续Memory/Tool/Web；不把本地测试SSE写成正式API，保留真实Demo尚未运行时的说明 in website/docs/react-loop.md、website/en/docs/react-loop.md、website/docs/quick-start.md、website/en/docs/quick-start.md、website/docs/roadmap.md、website/en/docs/roadmap.md
+- [X] T092 运行 `mvn spotless:apply`、`mvn -B verify`；有Docker时数据库测试实际执行、CI不跳过；运行官网 `npm run verify`；按需求核对42条FR和22条SC，生成明确通过/失败/未运行结果，任何失败不勾完成（SC-014） in specs/002-react-loop/quickstart.md、specs/002-react-loop/tasks.md
+- [X] T093 检查spec/plan/tasks/实现漂移、全部待办和临时探针、产物里无密钥与正式SSE接口；运行 `/speckit-analyze` 形成只读报告，必要修复须另获授权。当前不自动提交、推送、合并，用户要求后再做 in specs/002-react-loop/spec.md、specs/002-react-loop/plan.md、specs/002-react-loop/tasks.md
 
 ---
 
@@ -345,7 +347,7 @@ T095 与 T096 在 T094 完成后可并行，分别写 CLI 和 core 的测试文�
 | 同根真实加载、无需手写 Agent 的 CLI→模型→数据库闭环 | T104/T105 → T106 → T107 | US1-8/13；FR-040；SC-018/021 |
 | 运行证据、教学文档与实施后漂移 | T107 → T108 → T109 | SC-014/018–022；不替代原完整故事验收 |
 
-本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）、Phase 5（T052–T061）、Phase 6（T062–T069）、Phase 7（T070–T079）和 Phase 8（T080–T086）已完成并独立验证，证据见 quickstart 第 10–13 节。当前全表共 109 项（完成 102、待办 7）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实模型普通文本对话及跨进程历史恢复已验收（见 quickstart 第 13.8 节），真实天气 Demo 未运行；Phase 9 Polish（T087–T093）继续保持待办。
+本次新增 16 项全部归属 US1，Phase 10 已完成；随后 Phase 4（T036–T051）、Phase 5（T052–T061）、Phase 6（T062–T069）、Phase 7（T070–T079）和 Phase 8（T080–T086）已完成并独立验证，证据见 quickstart 第 10–13 节。当前全表共 109 项（完成 109、待办 0）。US1 共 34 项、US2 16 项、US3 10 项、US4 8 项、US5 10 项、US6 7 项；其余 Setup/Foundational/Polish 共 24 项。真实模型普通文本对话及跨进程历史恢复已验收（见 quickstart 第 13.8 节），真实天气 Demo 已于2026-11-17在独立环境验收；Phase 9 的T087–T093全部完成，最终只读分析无CRITICAL/HIGH问题，见quickstart第14节。
 
 
 **Phase 4 实施记录（2026-11-16）**：T036–T051 已完成，前置行为红灯与最终 359 tests / 0 failures / 0 errors / 0 skipped、数据库回读及实施后分析见 quickstart 第 10 节。保留 T001–T035、T094–T109 历史记录；未勾选 T052–T093。T051 的真实天气演示按原要求延期到 US3 安全上限与 US5 审计恢复完成后，本次只做本地替身天气闭环。

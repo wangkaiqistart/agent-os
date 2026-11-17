@@ -7,7 +7,7 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.testcontainers.DockerClientFactory;
 
 /** 本地没有 Docker 时跳过数据库集成；CI 中缺 Docker 则失败，避免静默漏测。 */
-final class BootDatabaseTestEnvironment implements ExecutionCondition {
+public final class BootDatabaseTestEnvironment implements ExecutionCondition {
     @Override
     public ConditionEvaluationResult evaluateExecutionCondition(ExtensionContext context) {
         boolean available;

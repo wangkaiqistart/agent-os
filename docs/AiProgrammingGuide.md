@@ -232,6 +232,8 @@ US-1 实施完成后不立刻有 demo，因为它没有用户可见的入口，�
 
 ### 4.2 US-2：ReAct 循环（核心能力二）
 
+**当前实现与验证入口（2026-11-17）**：US-2 的循环、HTTP GET/域名白名单、两道上限、三层超时、PostgreSQL 会话/消息/审计、恢复和并发隔离已实现。`init --model <model> --workspace <root>` 生成默认 main；`chat --workspace <root> --message "你好"` 使用 main，`--profile weather` 选择手写天气 Agent，`--new` 仅在空闲时归档并开始新会话；`/exit` 或 EOF 退出交互。纯文本/脚本模型验证、真实模型加本地天气替身、真实模型加 met.no 的 CLI Demo 是三类证据，逐项结果统一记录在 `specs/002-react-loop/quickstart.md` 第14节，不用模型替身冒充真实天气。
+
 **核心目标**：实现 Agent 的核心工作机制。即：LLM 思考是否调用工具，调用之后看结果，再决定下一步，直到给出最终响应。ReAct 循环是 AgentOS 最关键的一段代码。
 
 **涉及的 Maven 模块**：

@@ -139,6 +139,9 @@ class ReActApplicationTest {
                 .isEmpty();
         assertThat(context.getBeansOfType(org.springframework.ai.embedding.EmbeddingModel.class))
                 .isEmpty();
+        // 既有本地调试入口必须默认关闭，不能冒充本 story 的正式 REST/SSE API。
+        assertThat(context.getBeansOfType(com.agentos.web.dev.AgentLoopDebugController.class))
+                .isEmpty();
 
         JdbcTemplate jdbc = new JdbcTemplate(context.getBean(DataSource.class));
         assertThat(

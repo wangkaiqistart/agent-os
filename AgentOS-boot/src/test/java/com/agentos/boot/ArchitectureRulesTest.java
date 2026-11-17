@@ -12,10 +12,16 @@ import static com.tngtech.archunit.library.GeneralCodingRules.ACCESS_STANDARD_ST
 import static com.tngtech.archunit.library.GeneralCodingRules.NO_CLASSES_SHOULD_USE_FIELD_INJECTION;
 import static com.tngtech.archunit.library.GeneralCodingRules.NO_CLASSES_SHOULD_USE_JAVA_UTIL_LOGGING;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.ArchCondition;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -56,6 +62,15 @@ class ArchitectureRulesTest {
         // 如果扫描范围错了，下面的规则可能因为没有候选类而“假通过”。
         assertThat(classes.contain("com.agentos.cli.AgentOSCli")).as("cli 模块").isTrue();
         assertThat(classes.contain("com.agentos.boot.AgentOSApplication")).as("boot 模块").isTrue();
+        for (String type :
+                java.util.List.of(
+                        "com.agentos.core.turn.ReActLoop",
+                        "com.agentos.provider.chat.DefaultProviderService",
+                        "com.agentos.tool.http.HttpTools",
+                        "com.agentos.storage.session.JpaTurnStore",
+                        "com.agentos.channel.cli.CliChannel")) {
+            assertThat(classes.contain(type)).as(type).isTrue();
+        }
     }
 
     @Test
@@ -108,7 +123,7 @@ class ArchitectureRulesTest {
         // 任何其他类直接调用 executeToolCalls 都会绕过统一治理层。
         noClasses()
                 .that()
-                .doNotHaveSimpleName("ToolExecutor")
+                .doNotHaveFullyQualifiedName("com.agentos.core.turn.ToolExecutor")
                 .should()
                 .callMethodWhere(
                         target(name("executeToolCalls"))
@@ -131,7 +146,9 @@ class ArchitectureRulesTest {
                 .check(classes);
         noClasses()
                 .should()
-                .callMethod("org.slf4j.MDC", "get", "java.lang.String")
+                .callMethodWhere(
+                        target(nameMatching("get|getDequeByKey|popByKey|getMDCAdapter"))
+                                .and(target(owner(name("org.slf4j.MDC")))))
                 .because("MDC 只用于日志关联，业务逻辑不能从 MDC 读上下文")
                 .allowEmptyShould(true)
                 .check(classes);
@@ -233,5 +250,128 @@ class ArchitectureRulesTest {
                 .because("日志走 SLF4J；只有命令行模块直接面向终端输出")
                 .allowEmptyShould(true)
                 .check(classes);
+    }
+
+    @Test
+    void transactionalExternalCallsAreRejectedIncludingLocalDelegates() {
+        for (Class<?> fixture :
+                java.util.List.of(MethodTransaction.class, ClassTransaction.class)) {
+            assertThatThrownBy(() ->
+                            checkTransactionalCalls(new ClassFileImporter().importClasses(fixture)))
+                    .isInstanceOf(AssertionError.class)
+                    .hasMessageContaining("事务不得包裹外呼或等待");
+        }
+        checkTransactionalCalls(new ClassFileImporter().importClasses(StorageTransaction.class));
+    }
+
+    private static void checkTransactionalCalls(JavaClasses imported) {
+        classes()
+                .should(
+                        new ArchCondition<>("事务不得包裹外呼或等待") {
+                            @Override
+                            public void check(
+                                    com.tngtech.archunit.core.domain.JavaClass type,
+                                    ConditionEvents events) {
+                                for (JavaCodeUnit unit : type.getCodeUnits()) {
+                                    if (transactional(type) || transactional(unit)) {
+                                        checkCalls(unit, new java.util.HashSet<>(), events);
+                                    }
+                                }
+                            }
+                        })
+                .check(imported);
+    }
+
+    private static boolean transactional(
+            com.tngtech.archunit.core.domain.properties.CanBeAnnotated element) {
+        return element.isAnnotatedWith("org.springframework.transaction.annotation.Transactional")
+                || element.isMetaAnnotatedWith(
+                        "org.springframework.transaction.annotation.Transactional")
+                || element.isAnnotatedWith("jakarta.transaction.Transactional");
+    }
+
+    private static void checkCalls(
+            JavaCodeUnit unit, java.util.Set<JavaCodeUnit> visited, ConditionEvents events) {
+        if (!visited.add(unit)) {
+            return;
+        }
+        for (JavaMethodCall call : unit.getMethodCallsFromSelf()) {
+            var targetType = call.getTargetOwner();
+            String method = call.getName();
+            boolean external =
+                    (method.matches("call|stream")
+                                    && (targetType.isAssignableTo(
+                                                    "com.agentos.core.provider.ProviderService")
+                                            || targetType.isAssignableTo(
+                                                    "org.springframework.ai.chat.model.ChatModel")
+                                            || targetType.isAssignableTo(
+                                                    "org.springframework.ai.tool.ToolCallback")))
+                            || (method.equals("executeToolCalls")
+                                    && targetType.isAssignableTo(TOOL_CALLING_MANAGER))
+                            || (method.equals("process")
+                                    && targetType
+                                            .getName()
+                                            .equals("com.agentos.core.turn.AgentService"))
+                            || (method.equals("execute")
+                                    && targetType
+                                            .getName()
+                                            .equals("com.agentos.core.turn.ToolExecutor"))
+                            || (method.matches("send|sendAsync")
+                                    && targetType.isAssignableTo("java.net.http.HttpClient"))
+                            || (method.matches("get|join")
+                                    && targetType.isAssignableTo("java.util.concurrent.Future"))
+                            || (method.equals("sleep")
+                                    && targetType.getName().equals("java.lang.Thread"));
+            if (external) {
+                events.add(
+                        SimpleConditionEvent.violated(
+                                unit, "事务不得包裹外呼或等待：" + call.getDescription()));
+            }
+            // 只追同类委托，跨 Bean、异步和程序式事务仍以真实 I/O 动态验证为准。
+            if (targetType.equals(unit.getOwner())) {
+                call.getTarget()
+                        .resolveMember()
+                        .ifPresent(next -> checkCalls(next, visited, events));
+            }
+        }
+    }
+
+    @Test
+    void externalCallsAreOutsideDeclarativeTransactions() {
+        checkTransactionalCalls(classes);
+        noClasses()
+                .that()
+                .resideOutsideOfPackage("com.agentos.storage..")
+                .should()
+                .dependOnClassesThat()
+                .haveFullyQualifiedName(
+                        "org.springframework.transaction.support.TransactionTemplate")
+                .because("程序式事务集中在存储模块，外呼编排不能包住数据库事务")
+                .check(classes);
+    }
+
+    static class MethodTransaction {
+        @org.springframework.transaction.annotation.Transactional
+        void run(com.agentos.core.provider.ProviderService provider) {
+            delegate(provider);
+        }
+
+        private void delegate(com.agentos.core.provider.ProviderService provider) {
+            provider.call(null);
+        }
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    static class ClassTransaction {
+        void run(org.springframework.ai.tool.ToolCallback tool) {
+            tool.call("{}");
+        }
+    }
+
+    static class StorageTransaction {
+        @org.springframework.transaction.annotation.Transactional(readOnly = true)
+        int count() {
+            return 1;
+        }
     }
 }

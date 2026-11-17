@@ -88,7 +88,7 @@ US-1 的记录里 `session_id`、`turn_id`、`iteration` 可空，落库时这�
 | `tool_call_id` | `text` NOT NULL | 模型给的调用 ID（research R5） |
 | `tool_name` | `text` NOT NULL | |
 | `tool_source` | `text` NOT NULL | 本 story 只有 `builtin` |
-| `status` | `text` NOT NULL | `in_progress` / `success` / `failed` / `timeout` / `sandbox_denied` / `limit_skipped` / `interrupted`（CHECK）。**新增** `in_progress`、`interrupted`，技术方案 9.2 里还没有 |
+| `status` | `text` NOT NULL | `in_progress` / `success` / `failed` / `timeout` / `sandbox_denied` / `limit_skipped` / `interrupted`（CHECK）。相对初稿新增 `in_progress`、`interrupted`，现已同步技术方案 9.2 |
 | `input_json` | `jsonb` | 脱敏后的参数；参数不是合法 JSON 时，存成一个 JSON 字符串值，不丢弃 |
 | `result_text` | `text` | 脱敏、截断之后的结果 |
 | `result_chars` | `int` | 截断之前的原始长度 |

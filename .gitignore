@@ -19,3 +19,11 @@ __pycache__/
 .AgentOS/logs/
 **/.AgentOS/logs/
 /.AgentOS/
+
+# 本地诊断日志与编辑器临时文件
+*.log
+*.log.*
+*.tmp
+*.swp
+Thumbs.db
+.vscode/

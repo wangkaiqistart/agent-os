@@ -94,7 +94,7 @@
 - 模型审计每次LlmCallRecorder.record入口生成一次UUID write_id，单次重试复用；数据库UNIQUE write_id，冲突读取并比对相同payload后视为成功，不同payload报错。工具begin复用(turn,iteration,tool_call_id)唯一键；complete对同一行幂等更新；不重发模型、不重复执行工具。不改US-1的调用逻辑。
 - `TurnExecutionBudget`用单调时间，TurnBudgetRegistry按turnId显式提供给只有LlmCallRecord参数的记录器。TurnRunner有界等待到deadline+1s，到hardStop必要持久化仍未确认时取消并返回UNCONFIRMED，仅终结通知未返回则保留已确认结果；移除登记后迟到record失败关闭，不能拿到新预算。
 - 0.7秒只是退避总和，不包含3次SQL；每次audit默认2秒、可配置1ms～5秒且受剩余预算限制。deadline后停止新外呼、工具begin和普通审计退避；deadline前已开始调用返回后的最终模型审计/工具终态也从共享最后1秒出预算，每项最多一次写尝试，提交未知仅有界查证、不重放；它与工具收尾、轮次终态和释放租约共用hardStop。正常超时且必要审计/收尾确认为TIMED_OUT+CONFIRMED。连接/锁/SQL/socket等待必须有界，外层取消不能代替JDBC超时，必须做故障注入验证。
-- 远程数据库往返回归补充（2026-11-17）：statement_timeout/lock_timeout在一条SQL内设置；新随机write_id的正常模型审计直接INSERT，依赖唯一约束去重，异常后再查证完整载荷。查到不同载荷立即失败，不把冲突当作未提交继续重试。减少往返而不扩大250ms上限；独立PostgreSQL测试按每次SQL/提交注入等待，同时验证可完成及超过预算两条路径。
+- 远程数据库往返回归补充（2026-11-17）：statement_timeout/lock_timeout在一条SQL内设置；新随机write_id的正常模型审计直接INSERT，依赖唯一约束去重，异常后再查证完整载荷。查到不同载荷立即失败，不把冲突当作未提交继续重试。该次优化当时保留250ms上限；当前已由 R25 的默认2秒替代。独立PostgreSQL测试按每次SQL/提交注入等待，同时验证可完成及超过预算两条路径。
 - 扩大验证发现工具路径也需要减少往返：begin/skipped直接INSERT并在异常后核对唯一键与完整载荷；requireRunning通过MATERIALIZED CTE顺序取会话锁、读取父轮次，再检查当前数据库时间。真实FOR UPDATE竞争测试确认等锁期间deadline到达后会拒绝；complete继续锁工具行，不能覆盖回收终态。新回归同时验证十轮历史和一次审计失败后同一会话的下一轮恢复。
 - 正常收尾在一个短事务写轮次终态、终结in_progress工具并释放本owner租约。持续数据库故障不可能保证立即持久化，返回安全失败及persistenceStatus=UNCONFIRMED，停止外呼，不伪装已入库，也不承诺恢复缺失模型记录；数据库恢复后由租约失效回收收敛。
 - **Alternatives**: 对所有写入自动重试会重复消息和审计、误判lease；使用线程局部变量传deadline违反宪章；增补持久化补偿队列超出本story，均不采用。
@@ -173,10 +173,14 @@
 - **Alternatives considered**：仅断言 launcher 收到路径不等于实际加载正确；复制手写 main 的原集成测试绕过初始化；使用共享库或真实模型会破坏隔离与普通验证边界，均不采用。`--new` 原任务保留，不借本次增量标完成。
 - **证据**：[CLI 测试](../../AgentOS-cli/src/test/java/com/agentos/cli/AgentOSCliTest.java)、[选择测试](../../AgentOS-cli/src/test/java/com/agentos/cli/ChatCommandTest.java)、[原纵向测试](../../AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java)、[模型替身](../../AgentOS-boot/src/test/java/com/agentos/boot/support/LocalModelServer.java)。本轮未执行这些新增验收，待任务实现。
 
-## R18 远程数据库提交超时的预算与连接安全修复（2026-11-17）
+## R25 远程数据库提交超时的预算与连接安全修复（2026-11-17）
 
 - 新日志表明优化SQL往返后仍在COMMIT响应处超时，随后查证也可能因250ms上限失败；不能仅凭08006认定数据库宕机。原先60～65ms模拟与五轮真实验收不代表任意抖动下稳定。
 - 默认审计尝试改为2秒、配置上限5秒，并继续按原轮次预算压短；不扩大deadline后的共享1秒，不改constitution或质量门。SQL重试次数仍最多三次。
 - 审计等待与工作线程共用一个绝对操作时限，调度等待不能重置预算；超时/取消不interrupt JDBC/TLS工作线程。PostgreSQL statement/lock timeout、JDBC networkTimeout和提交前检查独立约束事务生命周期。未知提交只查证、不重放模型、工具或数据库写入。
 - 事务配置SQL完成后再次检查预算，避免迟到配置之后再开始业务写入；事务结束恢复networkTimeout，恢复失败时abort连接。测试使用真实独立PostgreSQL确认回滚原子性、连接autocommit/networkTimeout/SET LOCAL恢复，无idle in transaction。
 - 修复版可用独立final-name构建，避免覆盖正在运行的fat JAR；标准构建名称保持AgentOS。
+
+## R26 Phase 9 实现核对（2026-11-17）
+
+R7 的 jsonb spike、R3 的致命异常传播、R8 的数据库竞争及接管、R16 的唯一落库记录器均已有可运行测试，当前状态以 quickstart 第14节为准，旧条目的“没有数据库/待测试”仅描述研究时点。模型仍必填；CLI 的 --new 已由空闲归档事务接入，不改辅助 ChatClient 的未决模型来源。真实模型请求次数由返回的响应和审计核对，只有脚本模型的调用次数可预设；真实天气源另用显式 opt-in 的 CLI Demo 验收。

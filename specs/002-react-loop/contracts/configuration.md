@@ -2,7 +2,7 @@
 
 各模块使用配置属性；正式入口配置在 `AgentOS-boot/src/main/resources/application.yaml`，密钥仍只由已有环境变量注入。
 
-**Phase 4 实施状态**：HTTP GET、白名单、治理回调、安全拒绝 resolver 和输出通知边界已实现；证据见 quickstart 第 10 节。下文审计退避、有界数据库 I/O 和恢复语义仍是 Phase 7 及后续目标，不能因配置示例存在就认为全部完成。
+**Phase 4 实施状态**：HTTP GET、白名单、治理回调、安全拒绝 resolver 和输出通知边界已实现；证据见 quickstart 第 10 节。审计退避、有界数据库 I/O 和恢复已在 Phase 7 实现，并发加固与最终验收见 quickstart 第14节。
 
 **2026-11-16 增量说明**：初始化模型输入与 CLI 工作区契约已按 Phase 10 实施并实测通过，证据见 quickstart 第 9.5 节；此结论不涵盖其他未完成阶段的时间预算、工具或会话归档设计。
 

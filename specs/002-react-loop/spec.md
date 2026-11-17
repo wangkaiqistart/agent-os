@@ -4,13 +4,15 @@
 
 **Created**: 2026-11-15
 
-**Status**: Draft
+**Status**: Implemented（2026-11-17本地验收完成，未发布）
 
 **Updated**: 2026-11-16，增量补充“初始化默认主 Agent”（FR-039/FR-040）。增量已按 Phase 10 实施并通过本地文件、真实 CLI + 本地模型替身 + PostgreSQL 验收，记录见 quickstart 第 9.5 节；不表示整个 ReAct 已交付，真实模型未运行。原任务编号和完成记录保留。
 
 **Input**: User description: "http://localhost:4321/projects/agent-os/react-loop/（官网"ReAct 原理、实现与验收"页）。AgentOS 的 ReAct 循环：用户发来一条消息，Agent 让模型决定下一步，需要时调用工具、把结果回填、再让模型继续判断，直到给出最终回答；全过程按会话与轮次持久化，每次模型调用和工具调用都有可追溯的审计记录。依据 docs/TechnicalSolution.md 第 4 章、docs/DemandAnalysis.md 5.4、5.9、5.10 节和 docs/AiProgrammingGuide.md 4.2 节；文档冲突时以技术方案为准"
 
 **Phase 4 状态（2026-11-16）**：US2 的本地替身工具闭环已通过，T036–T051 完成，具体实现/测试/延期边界见 quickstart 第 10 节。真实模型与真实天气场景仍未运行，须先完成 US3 安全上限与 US5 审计恢复；不将当前结果冒报为全部场景已验收。
+
+**Phase 9 当前结果（2026-11-17）**：架构/事务辅助规则与真实primary加本地天气、met.no CLI/--new闭环已验收；默认Maven质量门463项全通过，真实模型专项另2项通过，均无失败/错误/跳过。42条FR/22条SC的逐项证据见quickstart第14节及验证报告。上方Phase 4/10说明保留为历史，不代表当前仍未运行真实天气。
 
 ## 范围与边界
 
