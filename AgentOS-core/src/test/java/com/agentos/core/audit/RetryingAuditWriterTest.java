@@ -113,6 +113,31 @@ class RetryingAuditWriterTest {
     }
 
     @Test
+    void knownLeaseLossBeforeAuditIsNotUncertaintyAndIsNeverRetried() {
+        var budget = TurnExecutionBudget.start(Duration.ofSeconds(5));
+        var calls = new AtomicInteger();
+        var writer = new RetryingAuditWriter(properties, e -> true);
+        assertThatThrownBy(() ->
+                        writer.write(
+                                budget,
+                                false,
+                                new RetryingAuditWriter.Operation<String>() {
+                                    public String write(Duration timeout) {
+                                        calls.incrementAndGet();
+                                        throw new com.agentos.core.turn.LeaseLostException();
+                                    }
+
+                                    public boolean confirmed(Duration timeout) {
+                                        throw new AssertionError("明确租约丢失不查证提交");
+                                    }
+                                },
+                                "unused"))
+                .isInstanceOf(com.agentos.core.turn.LeaseLostException.class);
+        assertThat(calls).hasValue(1);
+        assertThat(budget.auditsConfirmed()).isTrue();
+    }
+
+    @Test
     void retriesOnlyWritesThreeTimesWithBackoffOutsideOperation() {
         var pauses = new ArrayList<Duration>();
         var calls = new AtomicInteger();

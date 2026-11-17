@@ -96,6 +96,10 @@ public final class GovernedToolCallback implements ToolCallback {
         try {
             begin = withinBudget(() -> recorder.begin(beginRecord), budget, false);
         } catch (RuntimeException failure) {
+            if (failure instanceof LeaseLostException
+                    || failure instanceof TurnDeadlineExceededException) {
+                throw failure;
+            }
             budget.auditUnconfirmed();
             throw new AuditWriteException("工具执行前的审计未确认，未执行本次工具", false);
         }

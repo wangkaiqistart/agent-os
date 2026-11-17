@@ -66,12 +66,14 @@ public class StorageAutoConfiguration {
     /** Bean 默认名称为方法名；对 core 暴露接口类型，隔离 JPA 和 JDBC 细节。 */
     @Bean
     SessionManager sessionManager(
-            SessionRepository repository, org.springframework.jdbc.core.JdbcTemplate jdbc) {
-        return new JpaSessionManager(repository, jdbc);
+            SessionRepository repository,
+            org.springframework.jdbc.core.JdbcTemplate jdbc,
+            JpaTurnStore turns) {
+        return new JpaSessionManager(repository, jdbc, turns);
     }
 
     @Bean
-    TurnStore turnStore(
+    JpaTurnStore turnStore(
             SessionRepository sessions,
             AgentTurnRepository turns,
             SessionMessageRepository messages,
@@ -84,8 +86,16 @@ public class StorageAutoConfiguration {
     }
 
     @Bean
-    MessageStore messageStore(SessionMessageRepository messages, AgentTurnRepository turns) {
-        return new JpaMessageStore(messages, turns);
+    MessageStore messageStore(
+            SessionMessageRepository messages,
+            AgentTurnRepository turns,
+            SessionRepository sessions,
+            org.springframework.jdbc.core.JdbcTemplate jdbc,
+            com.agentos.storage.audit.AuditTransactions transactions,
+            com.agentos.core.turn.TurnBudgetRegistry budgets,
+            TurnProperties properties) {
+        return new JpaMessageStore(
+                messages, turns, sessions, jdbc, transactions, budgets, properties);
     }
 
     @Bean

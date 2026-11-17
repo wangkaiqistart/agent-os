@@ -414,9 +414,8 @@ class AuditTransactionTest extends PostgresIntegrationTest {
                 }
                 holder.commit();
                 assertThatThrownBy(() -> pending.get(3, java.util.concurrent.TimeUnit.SECONDS))
-                        .hasCauseInstanceOf(com.agentos.core.audit.AuditWriteException.class)
-                        .rootCause()
-                        .hasMessage("工具审计所属轮次已失效");
+                        .hasCauseInstanceOf(
+                                com.agentos.core.turn.TurnDeadlineExceededException.class);
             } finally {
                 holder.rollback();
             }

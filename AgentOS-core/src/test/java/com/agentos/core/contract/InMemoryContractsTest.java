@@ -34,6 +34,6 @@ class InMemoryContractsTest {
                 .asList()
                 .hasSize(1);
         turns.finishAndRelease(turn, "SUCCEEDED", "ok", null);
-        assertThat(turns.find(turn.turnId())).isEmpty();
+        assertThat(turns.find(turn.turnId()).orElseThrow().status()).isEqualTo("SUCCEEDED");
     }
 }

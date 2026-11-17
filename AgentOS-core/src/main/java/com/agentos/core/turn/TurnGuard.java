@@ -29,7 +29,12 @@ public final class TurnGuard {
         if (budget.cancelled() || Thread.currentThread().isInterrupted()) {
             throw new LeaseLostException();
         }
-        if (!renewWithinBudget(turn, budget)) {
+        boolean renewed = renewWithinBudget(turn, budget);
+        // 续租的连接/锁/往返也会消耗预算，返回后先判 deadline，再解释租约结果。
+        if (budget.expired() || budget.hardStopped()) {
+            throw new TurnDeadlineExceededException();
+        }
+        if (!renewed || budget.cancelled()) {
             throw new LeaseLostException();
         }
     }

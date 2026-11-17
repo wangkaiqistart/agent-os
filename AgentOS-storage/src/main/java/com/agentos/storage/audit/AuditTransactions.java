@@ -113,7 +113,7 @@ public final class AuditTransactions {
 
     /** 先锁会话再重新检查父轮次，避免接管/回收之后插入新的 in_progress 孤儿。 */
     public void requireRunning(java.util.UUID sessionId, java.util.UUID turnId) {
-        Integer count =
+        String state =
                 jdbc.queryForObject(
                         // 两个 MATERIALIZED 边界保证先取会话锁，再读取父轮次并检查当前数据库时间。
                         // 不把 clock_timestamp 提前到等锁之前；同一往返内保留 session → turn 的顺序。
@@ -125,17 +125,38 @@ public final class AuditTransactions {
                             select s.lease_owner, s.lease_until, t.status, t.deadline_at
                             from locked_session s join agent_turns t on t.session_id=s.session_id
                             where t.turn_id=?
+                        ), observed as materialized (
+                            select parent.*, clock_timestamp() as db_now from parent
                         )
-                        select count(*) from parent where status='RUNNING' and lease_owner=?
-                            and lease_until>clock_timestamp() and deadline_at>clock_timestamp()
+                        select coalesce(max(case when deadline_at<=db_now then 'DEADLINE'
+                            when status='RUNNING' and lease_owner=? and lease_until>db_now then 'RUNNING'
+                            else 'LOST' end),'LOST') from observed
                         """,
-                        Integer.class,
+                        String.class,
                         sessionId,
                         turnId,
                         turnId.toString());
-        if (count == null || count != 1) {
-            throw new AuditWriteException("工具审计所属轮次已失效");
+        if ("DEADLINE".equals(state)) {
+            throw new com.agentos.core.turn.TurnDeadlineExceededException();
         }
+        if (!"RUNNING".equals(state)) {
+            throw new com.agentos.core.turn.LeaseLostException();
+        }
+    }
+
+    /** 回收已提交的父轮次终态与旧 owner 释放一起确认，不覆盖迟到的工具结果。 */
+    public boolean recoveredTurn(java.util.UUID sessionId, java.util.UUID turnId) {
+        Integer count =
+                jdbc.queryForObject(
+                        """
+                        select count(*) from agent_turns t join sessions s on s.session_id=t.session_id
+                        where t.session_id=? and t.turn_id=? and t.status<>'RUNNING'
+                            and s.lease_owner is distinct from cast(t.turn_id as text)
+                        """,
+                        Integer.class,
+                        sessionId,
+                        turnId);
+        return count != null && count == 1;
     }
 
     /** 只重试数据库明确报告的临时失败；数据约束、非法输入与未知提交不在此列。 */

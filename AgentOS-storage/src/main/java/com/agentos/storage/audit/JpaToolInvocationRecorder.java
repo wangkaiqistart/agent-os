@@ -69,7 +69,7 @@ public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
                         throw new AuditWriteException("工具审计身份冲突");
                     }
                     if (!"in_progress".equals(row.getStatus())) {
-                        if (!sameOutcome(row, record)) {
+                        if (!sameOutcome(row, record) && !recoveredOutcome(row, record)) {
                             throw new AuditWriteException("工具审计终态冲突");
                         }
                         return null;
@@ -124,7 +124,9 @@ public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
                                             find(record)
                                                     .map(row -> {
                                                         if (!sameIdentity(row, record)
-                                                                || !sameOutcome(row, record)) {
+                                                                || (!sameOutcome(row, record)
+                                                                        && !recoveredOutcome(
+                                                                                row, record))) {
                                                             throw new AuditWriteException(
                                                                     "工具审计载荷冲突");
                                                         }
@@ -135,6 +137,10 @@ public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
                     },
                     confirmedValue);
         } catch (RuntimeException failure) {
+            if (failure instanceof com.agentos.core.turn.LeaseLostException
+                    || failure instanceof com.agentos.core.turn.TurnDeadlineExceededException) {
+                throw failure;
+            }
             var budget = budgets.get(record.turnId());
             if (budget != null) {
                 budget.auditUnconfirmed();
@@ -207,6 +213,12 @@ public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
                 && row.getToolSource().equals(r.source())
                 && row.isIdempotent() == r.idempotent()
                 && Objects.equals(row.getInputJson(), input(r.inputJson()));
+    }
+
+    private boolean recoveredOutcome(ToolInvocationEntity row, ToolInvocationRecord record) {
+        // recovery 的 interrupted 表示结果未知；身份和数据库终态均已确认时，迟到 complete 不再覆盖它。
+        return "interrupted".equals(row.getStatus())
+                && transactions.recoveredTurn(record.sessionId(), record.turnId());
     }
 
     private boolean sameOutcome(ToolInvocationEntity row, ToolInvocationRecord r) {

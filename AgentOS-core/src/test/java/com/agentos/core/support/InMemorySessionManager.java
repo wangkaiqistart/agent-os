@@ -14,11 +14,11 @@ public final class InMemorySessionManager implements SessionManager {
     private final ConcurrentHashMap<SessionKey, SessionSnapshot> sessions =
             new ConcurrentHashMap<>();
 
-    public Optional<SessionSnapshot> findActive(SessionKey key) {
-        return Optional.ofNullable(sessions.get(key));
+    public synchronized Optional<SessionSnapshot> findActive(SessionKey key) {
+        return Optional.ofNullable(sessions.get(key)).filter(s -> "active".equals(s.status()));
     }
 
-    public boolean archiveIfIdle(SessionKey key) {
+    public synchronized boolean archiveIfIdle(SessionKey key) {
         SessionSnapshot current = sessions.get(key);
         if (current != null
                 && current.leaseUntil() != null
@@ -32,7 +32,12 @@ public final class InMemorySessionManager implements SessionManager {
                 != null;
     }
 
-    public SessionSnapshot create(SessionKey key) {
+    public synchronized void setLease(SessionKey key, String owner, Instant until) {
+        sessions.computeIfPresent(
+                key, (k, v) -> new SessionSnapshot(v.sessionId(), k, v.status(), owner, until));
+    }
+
+    public synchronized SessionSnapshot create(SessionKey key) {
         return sessions.compute(
                 key,
                 (k, existing) ->

@@ -257,6 +257,31 @@ class ChatCommandTest {
         assertThat(output.toString()).contains("消息不能为空");
     }
 
+    @Test
+    void busySingleMessageExitsThreeAndInteractiveBusyCanContinue() throws Exception {
+        agent("main");
+        when(service.process(any()))
+                .thenThrow(new AgentOSException(ErrorCode.SESSION_BUSY, "synthetic-secret"));
+        assertThat(chat(launcher())).isEqualTo(3);
+        assertThat(output.toString()).contains("上一条消息还在处理").doesNotContain("synthetic-secret");
+        org.mockito.Mockito.doThrow(new AgentOSException(ErrorCode.SESSION_BUSY, "busy"))
+                .doReturn(success())
+                .when(service)
+                .process(any());
+        var command =
+                new ChatCommand(
+                        launcher(),
+                        workspace,
+                        new java.io.BufferedReader(
+                                new java.io.StringReader("busy\nretry\n/exit\n")));
+        var line = new picocli.CommandLine(command);
+        line.setOut(new PrintWriter(output));
+        line.setErr(new PrintWriter(output));
+        assertThat(line.execute("--workspace", workspace.toString())).isZero();
+        assertThat(output.toString()).contains("上一条消息还在处理", "answer");
+        assertThat(closed[0]).isTrue();
+    }
+
     private static TurnResult success() {
         return new TurnResult(
                 UUID.randomUUID(), TurnStatus.SUCCEEDED, "answer", 1, PersistenceStatus.CONFIRMED);

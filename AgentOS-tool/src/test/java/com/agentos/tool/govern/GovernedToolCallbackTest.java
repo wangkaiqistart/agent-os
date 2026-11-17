@@ -101,6 +101,28 @@ class GovernedToolCallbackTest {
     }
 
     @Test
+    void knownLeaseLossAtIntentBoundaryRemainsInterruptedWithoutAuditUncertainty() {
+        var recorder = mock(ToolInvocationRecorder.class);
+        when(recorder.begin(any())).thenThrow(new LeaseLostException());
+        var ctx = context(Duration.ofSeconds(5), () -> {});
+        var executions = new AtomicInteger();
+        var tool =
+                govern(
+                        callback(c -> {
+                            executions.incrementAndGet();
+                            return "unused";
+                        }),
+                        recorder,
+                        Duration.ofSeconds(1));
+        assertThatThrownBy(() -> tool.call("{}", ctx)).isInstanceOf(LeaseLostException.class);
+        assertThat(executions).hasValue(0);
+        assertThat(
+                        ((TurnExecutionBudget) ctx.getContext().get(ToolContextKeys.TURN_BUDGET))
+                                .auditsConfirmed())
+                .isTrue();
+    }
+
+    @Test
     void beginPrecedesExecutionOnIndependentVirtualThreadWithExplicitMdcAndRedactedResult() {
         var records = new ArrayList<ToolInvocationRecord>();
         var caller = Thread.currentThread();

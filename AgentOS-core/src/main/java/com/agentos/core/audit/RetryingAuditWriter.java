@@ -70,6 +70,12 @@ public final class RetryingAuditWriter {
                 try {
                     return bounded(budget, operation::write, finalAudit);
                 } catch (RuntimeException failure) {
+                    if (failure instanceof com.agentos.core.turn.LeaseLostException
+                            || failure
+                                    instanceof
+                                    com.agentos.core.turn.TurnDeadlineExceededException) {
+                        throw failure;
+                    }
                     // 提交异常后先读相同键并核对完整载荷；查询失败绝不能伪装已提交。
                     if (!budget.hardStopped()) {
                         try {
@@ -97,6 +103,11 @@ public final class RetryingAuditWriter {
                 }
             }
         } catch (RuntimeException failure) {
+            // 数据库明确拒绝失效轮次时尚未写入，不属于提交结果未知，不标记审计缺失。
+            if (failure instanceof com.agentos.core.turn.LeaseLostException
+                    || failure instanceof com.agentos.core.turn.TurnDeadlineExceededException) {
+                throw failure;
+            }
             if (budget != null) {
                 budget.auditUnconfirmed();
             }

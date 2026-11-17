@@ -49,6 +49,11 @@ public class JpaTurnStore implements TurnStore {
         this.budgets = budgets;
     }
 
+    /** --new 没有轮次预算，仍采用普通存储操作上限约束连接、锁及提交。 */
+    <T> T storageOperation(java.util.function.Supplier<T> action) {
+        return bounded(properties.storageTimeout(), action);
+    }
+
     private <T> T bounded(Duration timeout, java.util.function.Supplier<T> action) {
         if (timeout.isZero() || timeout.isNegative()) {
             throw new com.agentos.core.turn.TurnDeadlineExceededException();
@@ -135,29 +140,39 @@ public class JpaTurnStore implements TurnStore {
             String userMessage,
             TurnExecutionBudget budget) {
         // 先确保唯一 active 行存在，再在同一短事务中加行锁；只有拿到锁后才读取数据库时钟。
-        sessions.insertActiveIfAbsent(
-                UUID.randomUUID(), key.profileName(), key.channel(), key.userId(), Instant.now());
-        SessionEntity session =
-                sessions.findActiveForUpdate(key.channel(), key.userId(), key.profileName())
-                        .orElseThrow(
-                                () -> new AgentOSException(ErrorCode.INTERNAL_ERROR, "无法创建会话"));
+        SessionEntity session;
+        do {
+            if (budget.expired() || budget.cancelled()) {
+                throw new com.agentos.core.turn.TurnDeadlineExceededException();
+            }
+            sessions.insertActiveIfAbsent(
+                    UUID.randomUUID(),
+                    key.profileName(),
+                    key.channel(),
+                    key.userId(),
+                    Instant.now());
+            session =
+                    sessions.findActiveForUpdate(key.channel(), key.userId(), key.profileName())
+                            .orElse(null);
+            // --new 可在冲突插入与锁查询之间归档旧行；只重新查找/创建会话，不重放轮次或消息。
+        } while (session == null);
         Instant now = databaseNow();
         // 锁内检查有效租约，避免两个并发请求都以为会话空闲。过期租约允许被新轮次接管。
         if (session.getLeaseUntil() != null && session.getLeaseUntil().isAfter(now)) {
-            throw new AgentOSException(ErrorCode.SESSION_BUSY, "会话正有轮次在执行");
+            throw new AgentOSException(ErrorCode.SESSION_BUSY, "上一条消息还在处理");
         }
         recoverSession(session, now);
+        if (budget.expired() || budget.cancelled()) {
+            throw new com.agentos.core.turn.TurnDeadlineExceededException();
+        }
         String owner = turnId.toString();
+        Instant deadline = now.plus(budget.remaining());
         Instant until =
-                now.plus(
-                        max(
-                                properties.leaseTtl(),
-                                budget.remaining().plus(properties.leaseGrace())));
+                later(now.plus(properties.leaseTtl()), deadline.plus(properties.leaseGrace()));
         session.lease(owner, until);
         session.touch(now);
         sessions.save(session);
         // 数据库时间加单调预算余量；不把 Java 墙钟当成数据库时钟。
-        Instant deadline = now.plus(budget.remaining());
         turns.save(new AgentTurnEntity(turnId, session.getSessionId(), trigger, now, deadline));
         // iteration=0 表示尚未调用模型的用户输入，与 RUNNING 轮次、租约一起提交或一起回滚。
         messages.save(
@@ -182,8 +197,17 @@ public class JpaTurnStore implements TurnStore {
     private boolean renew(TurnSnapshot turn, TurnExecutionBudget budget) {
         // 续租也先锁行；旧 owner 或已经过期的 owner 不允许通过续租“复活”。
         SessionEntity session = sessions.findByIdForUpdate(turn.sessionId()).orElse(null);
+        AgentTurnEntity parent = turns.findById(turn.turnId()).orElse(null);
         Instant now = databaseNow();
+        if (budget.expired() || (parent != null && !parent.getDeadlineAt().isAfter(now))) {
+            throw new com.agentos.core.turn.TurnDeadlineExceededException();
+        }
         if (session == null
+                || !"active".equals(session.getStatus())
+                || parent == null
+                || !parent.getSessionId().equals(turn.sessionId())
+                || !"RUNNING".equals(parent.getStatus())
+                || budget.cancelled()
                 || !turn.owner().equals(session.getLeaseOwner())
                 || session.getLeaseUntil() == null
                 || !session.getLeaseUntil().isAfter(now)) {
@@ -191,10 +215,9 @@ public class JpaTurnStore implements TurnStore {
         }
         session.lease(
                 turn.owner(),
-                now.plus(
-                        max(
-                                properties.leaseTtl(),
-                                budget.remaining().plus(properties.leaseGrace()))));
+                later(
+                        now.plus(properties.leaseTtl()),
+                        parent.getDeadlineAt().plus(properties.leaseGrace())));
         sessions.save(session);
         return true;
     }
@@ -232,9 +255,9 @@ public class JpaTurnStore implements TurnStore {
             String errorMessage,
             Integer iterations) {
         // 所有路径遵守 session → turn 的锁顺序，旧 owner 不能覆盖接管后的终态。
-        Instant now = databaseNow();
         SessionEntity session = sessions.findByIdForUpdate(turn.sessionId()).orElse(null);
         AgentTurnEntity entity = turns.findById(turn.turnId()).orElse(null);
+        Instant now = databaseNow();
         if (entity == null || session == null) {
             // 返回未确认，交上层区分“业务结果已得到”和“数据库终态已确认”。
             return new FinishResult(status, false, text, errorMessage);
@@ -247,8 +270,14 @@ public class JpaTurnStore implements TurnStore {
             return new FinishResult(
                     entity.getStatus(), true, entity.getFinalText(), entity.getErrorMessage());
         }
-        if (!turn.owner().equals(session.getLeaseOwner())) {
-            entity.interrupt("会话已被接管", now);
+        if (!turn.owner().equals(session.getLeaseOwner())
+                || session.getLeaseUntil() == null
+                || !session.getLeaseUntil().isAfter(now)
+                || !"active".equals(session.getStatus())) {
+            entity.interrupt("会话租约已失效", now);
+            if (turn.owner().equals(session.getLeaseOwner())) {
+                session.lease(null, null);
+            }
             interruptTools(entity.getTurnId(), now);
             return new FinishResult(
                     entity.getStatus(), true, entity.getFinalText(), entity.getErrorMessage());
@@ -349,7 +378,7 @@ public class JpaTurnStore implements TurnStore {
     }
 
     /** 启动和接管共用：有效 owner 保留；终态孤儿工具也可独立回收。 */
-    private int recoverSession(SessionEntity session, Instant now) {
+    int recoverSession(SessionEntity session, Instant now) {
         int count = 0;
         for (AgentTurnEntity turn : turns.findRecoveryCandidates(session.getSessionId(), now)) {
             boolean active = "RUNNING".equals(turn.getStatus());
@@ -398,7 +427,7 @@ public class JpaTurnStore implements TurnStore {
         return value == null ? Instant.now() : value;
     }
 
-    private static Duration max(Duration a, Duration b) {
-        return a.compareTo(b) >= 0 ? a : b;
+    private static Instant later(Instant a, Instant b) {
+        return a.isAfter(b) ? a : b;
     }
 }

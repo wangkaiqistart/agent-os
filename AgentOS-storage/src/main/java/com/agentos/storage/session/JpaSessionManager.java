@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class JpaSessionManager implements SessionManager {
     private final SessionRepository sessions;
     private final JdbcTemplate jdbc;
+    private final JpaTurnStore turnStore;
 
     /** 供不需要数据库时钟的隔离测试使用；正式装配注入 JdbcTemplate。 */
     public JpaSessionManager(SessionRepository sessions) {
@@ -25,8 +26,14 @@ public class JpaSessionManager implements SessionManager {
     }
 
     public JpaSessionManager(SessionRepository sessions, JdbcTemplate jdbc) {
+        this(sessions, jdbc, null);
+    }
+
+    public JpaSessionManager(
+            SessionRepository sessions, JdbcTemplate jdbc, JpaTurnStore turnStore) {
         this.sessions = sessions;
         this.jdbc = jdbc;
+        this.turnStore = turnStore;
     }
 
     @Override
@@ -45,18 +52,15 @@ public class JpaSessionManager implements SessionManager {
     }
 
     @Override
-    @Transactional
     public boolean archiveIfIdle(SessionKey key) {
-        // 条件更新在数据库内原子判断租约并写入归档时间，避免“先读后写”的竞争窗口。
-        if (jdbc != null
-                && sessions.archiveActiveIfIdle(key.channel(), key.userId(), key.profileName())
-                        > 0) {
-            return true;
-        }
-        // 未归档时只读取当前状态用于区分“没有会话”和“仍被占用”；不再根据读取结果写回。
+        // 先进入有界短事务再锁行；不能让外层事务持有连接等待另一个线程。
+        return turnStore == null ? archive(key) : turnStore.storageOperation(() -> archive(key));
+    }
+
+    private boolean archive(SessionKey key) {
+        // 与起步/续租共用会话行锁，锁后只捕获一次数据库时间，避免等锁期间使用旧时刻。
         SessionEntity entity =
-                sessions.findByChannelAndUserIdAndProfileNameAndStatus(
-                                key.channel(), key.userId(), key.profileName(), "active")
+                sessions.findActiveForUpdate(key.channel(), key.userId(), key.profileName())
                         .orElse(null);
         if (entity == null) {
             return false;
@@ -65,11 +69,10 @@ public class JpaSessionManager implements SessionManager {
         if (entity.getLeaseUntil() != null && entity.getLeaseUntil().isAfter(now)) {
             throw new AgentOSException(ErrorCode.SESSION_BUSY, "上一条消息还在处理");
         }
-        if (jdbc != null) {
-            // 正式路径只接受上面的条件更新结果，避免这里的读取再次打开写入竞争窗口。
-            return false;
+        // 失效 owner 的父轮次/工具先在同一事务恢复，正常历史保持原样。
+        if (turnStore != null) {
+            turnStore.recoverSession(entity, now);
         }
-        // 没有 JdbcTemplate 的隔离构造器仍保持可测试，但正式装配不会走这里。
         entity.archive(now);
         sessions.save(entity);
         return true;

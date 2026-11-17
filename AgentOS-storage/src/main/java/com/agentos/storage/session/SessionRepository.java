@@ -73,17 +73,4 @@ public interface SessionRepository extends JpaRepository<SessionEntity, UUID> {
             @Param("channel") String channel,
             @Param("user") String user,
             @Param("profile") String profile);
-
-    /** 只有没有有效租约时才归档，条件判断与写入在数据库同一条语句内完成。 */
-    @Modifying
-    @Query(
-            value =
-                    "UPDATE sessions SET status = 'archived', archived_at = clock_timestamp(), lease_owner = NULL, lease_until = NULL "
-                            + "WHERE channel = :channel AND user_id = :user AND profile_name = :profile "
-                            + "AND status = 'active' AND (lease_until IS NULL OR lease_until <= clock_timestamp())",
-            nativeQuery = true)
-    int archiveActiveIfIdle(
-            @Param("channel") String channel,
-            @Param("user") String user,
-            @Param("profile") String profile);
 }

@@ -23,6 +23,27 @@ import org.springframework.transaction.annotation.Transactional;
 public class JpaMessageStore implements MessageStore {
     private final SessionMessageRepository repository;
     private final AgentTurnRepository turns;
+    private SessionRepository sessions;
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    private com.agentos.storage.audit.AuditTransactions transactions;
+    private com.agentos.core.turn.TurnBudgetRegistry budgets;
+    private com.agentos.core.config.TurnProperties properties;
+
+    public JpaMessageStore(
+            SessionMessageRepository repository,
+            AgentTurnRepository turns,
+            SessionRepository sessions,
+            org.springframework.jdbc.core.JdbcTemplate jdbc,
+            com.agentos.storage.audit.AuditTransactions transactions,
+            com.agentos.core.turn.TurnBudgetRegistry budgets,
+            com.agentos.core.config.TurnProperties properties) {
+        this(repository, turns);
+        this.sessions = sessions;
+        this.jdbc = jdbc;
+        this.transactions = transactions;
+        this.budgets = budgets;
+        this.properties = properties;
+    }
 
     public JpaMessageStore(SessionMessageRepository repository) {
         this(repository, null);
@@ -34,10 +55,80 @@ public class JpaMessageStore implements MessageStore {
     }
 
     @Override
-    @Transactional
     public void append(TurnSnapshot turn, int iteration, List<Message> messages) {
+        if (transactions == null) {
+            appendMessages(turn, iteration, messages, Instant.now());
+            return;
+        }
+        var budget = budgets.get(turn.turnId());
+        long remaining = properties.storageTimeout().toNanos();
+        if (budget != null) {
+            remaining = Math.min(remaining, budget.remainingNanos());
+        }
+        if (remaining <= 0) {
+            throw new com.agentos.core.turn.TurnDeadlineExceededException();
+        }
+        long deadline = System.nanoTime() + remaining;
+        var task =
+                new java.util.concurrent.FutureTask<Void>(() ->
+                        transactions.execute(
+                                java.time.Duration.ofNanos(
+                                        Math.max(1, deadline - System.nanoTime())),
+                                () -> {
+                                    var session =
+                                            sessions.findByIdForUpdate(turn.sessionId())
+                                                    .orElse(null);
+                                    var parent = turns.findById(turn.turnId()).orElse(null);
+                                    Instant now =
+                                            jdbc.queryForObject(
+                                                    "select clock_timestamp()",
+                                                    (rs, row) -> rs.getTimestamp(1).toInstant());
+                                    if ((budget != null && budget.expired())
+                                            || (parent != null
+                                                    && !parent.getDeadlineAt().isAfter(now))) {
+                                        throw new com.agentos.core.turn
+                                                .TurnDeadlineExceededException();
+                                    }
+                                    if (budget != null && budget.cancelled()) {
+                                        throw new com.agentos.core.turn.LeaseLostException();
+                                    }
+                                    if (System.nanoTime() >= deadline
+                                            || session == null
+                                            || parent == null
+                                            || !parent.getSessionId().equals(turn.sessionId())
+                                            || !"active".equals(session.getStatus())
+                                            || !"RUNNING".equals(parent.getStatus())
+                                            || !turn.owner().equals(session.getLeaseOwner())
+                                            || session.getLeaseUntil() == null
+                                            || !session.getLeaseUntil().isAfter(now)) {
+                                        throw new com.agentos.core.turn.LeaseLostException();
+                                    }
+                                    appendMessages(turn, iteration, messages, now);
+                                    return null;
+                                }));
+        Thread.ofVirtual().name("message-storage").start(task);
+        try {
+            task.get(
+                    Math.max(1, deadline - System.nanoTime()),
+                    java.util.concurrent.TimeUnit.NANOSECONDS);
+        } catch (java.util.concurrent.ExecutionException failure) {
+            if (failure.getCause() instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new IllegalStateException("消息追加失败");
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw new com.agentos.core.turn.LeaseLostException();
+        } catch (java.util.concurrent.TimeoutException failure) {
+            throw new IllegalStateException("消息追加超时，提交未确认");
+        } finally {
+            task.cancel(true);
+        }
+    }
+
+    private void appendMessages(
+            TurnSnapshot turn, int iteration, List<Message> messages, Instant now) {
         // 一批消息在一个短事务中追加；工具调用和响应分别写 JSONB，不能只靠文本猜调用 ID。
-        Instant now = Instant.now();
         for (Message message : messages) {
             String type =
                     message instanceof UserMessage

@@ -10,6 +10,16 @@ class InMemoryTurnStoreContractTest extends TurnStoreContractTest {
     private final InMemoryTurnStore store = new InMemoryTurnStore(sessions);
 
     @Override
+    protected com.agentos.core.session.SessionManager sessions() {
+        return sessions;
+    }
+
+    @Override
+    protected void expire(com.agentos.core.session.TurnSnapshot turn) {
+        sessions.setLease(turn.sessionKey(), turn.owner(), java.time.Instant.EPOCH);
+    }
+
+    @Override
     protected TurnStore store() {
         return store;
     }
