@@ -1,6 +1,6 @@
 # AgentOS-storage 代码导读
 
-`AgentOS-storage` 把 Core 端口落到 PostgreSQL。它使用 Flyway 建表、JPA 映射实体，并通过显式自动配置向 Core 提供 `SessionManager`、`TurnStore`、`MessageStore` 和 `LlmCallRecorder`。
+`AgentOS-storage` 把 Core 端口落到 PostgreSQL。它使用 Flyway 建表、JPA 映射实体，并通过显式自动配置向 Core 提供 `SessionManager`、`TurnStore`、`MessageStore`、`LlmCallRecorder` 和 `ToolInvocationRecorder`。源码核对至2026-11-17的US-2完整验收。
 
 ## 自动配置边界
 
@@ -14,6 +14,9 @@ flowchart TD
     Scan --> Turn[JpaTurnStore]
     Scan --> Message[JpaMessageStore]
     Scan --> Audit[JpaLlmCallRecorder]
+    Auto --> ToolAudit[JpaToolInvocationRecorder]
+    Auto --> Tx[AuditTransactions]
+    Auto --> Recovery[TurnReaperRunner: 仅 runtime.chat=true]
 ```
 
 Storage 自动配置只有在 `DataSource` 存在时生效，且排在 DataSource/JPA/Flyway 之后、Provider 之前。实体和 Repository 显式扫描 `com.agentos.storage.session`，不依赖 Boot 应用类所在包的默认扫描。
@@ -58,7 +61,7 @@ Core 只接收快照和消息值对象，不暴露 JPA 实体或懒加载关系�
 
 ### 续租
 
-`renewLease` 使用 `SessionRepository.findByIdForUpdate` 先锁定 session 行，再读取数据库墙钟。如果 owner 不匹配、租约为空或 `lease_until <= clock_timestamp()`，返回 `false`；只有有效 owner 才会更新租约。
+`renewLease` 使用 `SessionRepository.findByIdForUpdate` 先锁定session行，再读取父轮次和数据库墙钟。本地预算或数据库deadline已过时抛整轮超时；父轮次非RUNNING、owner不匹配、租约为空或`lease_until <= clock_timestamp()`等情况返回`false`。有效租约不等于可以给已终态或已过轮次deadline的执行续租。
 
 这条顺序是 T022 的关键契约：应用线程可能被暂停、数据库连接可能排队，不能用事务开始时的 `now()` 或无锁的旧快照判断租约。
 
@@ -73,6 +76,14 @@ Core 只接收快照和消息值对象，不暴露 JPA 实体或懒加载关系�
 启动扫描使用独立预算：整次最多 30 秒，候选查询和每个会话事务各最多 5 秒且受剩余总预算限制。外层虚拟线程等待覆盖连接获取；超时/中断会取消任务，事务入口和提交前再次检查预算，不能让迟到写入继续推进。失败仍使启动失败，不宣称全部恢复完成。此预算只用于启动，单轮清理上限仍固定一秒。
 
 轮次启动、续租、查证与结束使用 `AuditTransactions` 的事务/I/O 边界：普通操作采用 `agentos.turn.storage-timeout`（默认5秒），并取整轮剩余预算的较小值。起步和续租取执行余量，收尾及 `find(turnId, budget)` 查证取同一hardStop余量；deadline之后不会重新获得五秒，最多仍共用剩余的一秒。未登记预算的独立存储调用使用普通存储上限。外层虚拟线程等待同样使用操作时限，连接池耗尽也不会拖到整轮结束；取消不等于确认回滚，迟到连接和提交继续由事务入口及提交检查拦住。审计尝试使用独立配置，默认2秒、可配置1ms～5秒，仍扣原轮次预算。startTurn 取得锁后用数据库时间加本地剩余时长生成数据库 deadline，不延长本地单调预算。
+
+## 并发：锁住什么，锁后再判断什么
+
+`startTurn` 的 active 自然键唯一索引只保证一个活跃会话，不负责串行运行轮次。起步、续租、归档和恢复共用 session 行锁；取锁后再读 `clock_timestamp()`、owner、lease 和父轮次状态。起步的冲突插入与后续取锁之间若被 --new 归档，代码重新寻找/创建 active session，不能向已归档会话写 RUNNING。
+
+`JpaSessionManager.archiveIfIdle` 经 `JpaTurnStore.storageOperation` 进入有界短事务，锁后仍有有效租约就报忙，消息/轮次/审计零写入；失效 owner 先在同一事务恢复再归档。归档只改会话状态和时间，正常历史不重写。`JpaMessageStore.append` 同样在锁后核验 owner、父轮次和数据库 deadline，防止等锁期间过期或旧 owner 接管后继续写消息。
+
+读[JpaTurnStoreContractTest.java](../../AgentOS-storage/src/test/java/com/agentos/storage/session/JpaTurnStoreContractTest.java)中的归档/起步竞争、等待行锁后deadline过期、旧owner迟到写入与工具意图测试，再读boot的[SessionConcurrencyIntegrationTest.java](../../AgentOS-boot/src/test/java/com/agentos/boot/SessionConcurrencyIntegrationTest.java)观察模型/工具真实等待期间的竞争。不同会话可推进，不能以进程内全局锁代替数据库契约。
 
 ## `JpaMessageStore`：只追加和快照读取
 
@@ -116,6 +127,7 @@ begin/skipped 的新记录直接插入，重复或冲突通过唯一约束和异
 | `TurnReaperTest` / `TurnReaperStartupTest` | 有效 owner 保留、失效/接管/正常结束原子收尾、终态孤儿工具、正常历史不更新、慢 SQL 超过一秒、分会话提交/失败隔离、真实 chat 启动和幂等 |
 | `TurnStorageBudgetTest` | 查证超过250ms仍成功、执行预算不足时起步原子回滚、清理/查证不扩大共享hardStop、连接池耗尽按操作时限返回且不迟到续租 |
 | `JpaStorageContractTest` | 落库、快照、审计字段、关联校验、数据库时钟和真实行锁竞争 |
+| `JpaTurnStoreContractTest` | 归档/起步竞争、锁后deadline、动态lease、接管后工具意图/消息零写入、过期owner拒绝收尾 |
 
 运行入口：
 

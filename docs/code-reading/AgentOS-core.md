@@ -14,10 +14,11 @@ ContextLoader -> PromptBuilder
 TurnStore -> TurnGuard
 TurnRunner、TurnBudgetRegistry
 ProviderService + ProviderCatalog + SessionManager + TurnStore + MessageStore
+    + ToolCatalog + ToolCallingManager + ToolInvocationRecorder + Redactor
     -> DefaultAgentService
 ```
 
-`AgentService` 只有在 Provider、ProviderCatalog、Storage 端口都存在时才创建。这保证只有测试或 CLI 需要的组件装配完整后，才会出现真正的业务入口。
+`AgentService` 的条件检查要求 Provider、ProviderCatalog 和会话/轮次/消息端口存在；Bean 工厂参数还要求工具目录、官方 Manager、工具记录器及脱敏器。Core 在对应自动配置之后处理，再显式 `new ReActLoop` 和 `new ToolExecutor`；二者是普通对象，不另注册 Bean。
 
 ## `DefaultAgentService`：一轮请求的总编排
 
@@ -32,6 +33,7 @@ sequenceDiagram
     participant T as TurnStore
     participant R as ReActLoop
     participant P as ProviderService
+    participant E as ToolExecutor/官方 Manager
     participant M as MessageStore
 
     C->>A: process(request, sink)
@@ -39,15 +41,21 @@ sequenceDiagram
     A->>V: validate(profile)
     A->>T: startTurn(session, turn, user message)
     A->>R: run(turn, agent, message, budget, sink)
-    R->>P: call 或 stream
-    R->>M: append assistant message
+    loop 每次迭代受次数和时间预算限制
+        R->>P: call 或 stream（每次尝试单独审计）
+        opt 响应要求工具
+            R->>E: 授权 callbacks + 累计历史 + 调用 ID
+            E-->>R: 治理后完整历史 / returnDirect
+        end
+        R->>M: append 本次新增 ASSISTANT/TOOL
+    end
     A->>T: finishAndRelease(status, text, error)
     A-->>C: TurnResult
 ```
 
 实现顺序值得注意：ProviderCatalog 和 ToolCatalog 都在 `startTurn` 前校验，所以未知 Provider 或工具名单不会先创建 session/turn；空白消息也在建轮次前拒绝。`startTurn` 成功后才注册预算和 MDC，最终在 `finally` 中移除预算、清理 MDC。
 
-终态由 `TurnStore.finishAndRelease` 持久化确认结果决定：业务状态仍是 `SUCCEEDED`、`FAILED`、`INTERRUPTED` 或 `TIMED_OUT`，另外返回 `PersistenceStatus.CONFIRMED` 或 `UNCONFIRMED`。终结回调发生在持久化收尾之后，回调异常只记安全日志，不改变已经确定的业务结果。
+终态由 `TurnStore.finishAndRelease` 持久化确认结果决定：业务状态包括 `SUCCEEDED`、`FAILED`、`INTERRUPTED`、`TIMED_OUT` 和 `MAX_ITERATIONS`，另有 `PersistenceStatus.CONFIRMED/UNCONFIRMED`。必要审计、终态或自身租约清理任一未确认，都不能冒报 CONFIRMED。终结回调发生在持久化收尾之后，回调异常只记安全日志，不改变已经确定的业务结果。
 
 ## Agent 配置和 Prompt
 
@@ -61,26 +69,21 @@ sequenceDiagram
 - `settings` 缺省为 `maxIterations=10`、`maxHistoryTurns=20`、`maxHistoryTokens=32000`、`turnTimeout=300s`；
 - 未声明 `tools` 时使用空列表，并打 INFO；认识但尚未实现的键只打 WARN。
 
-`ContextLoader` 在每轮重新读取 `AGENTS.md`、`SOUL.md`、`USER.md`，日期通过可注入 `Clock` 生成。`PromptBuilder` 按固定顺序生成一个系统消息：
+`ContextLoader` 在每轮重新读取 `AGENTS.md`、`SOUL.md`、`USER.md`，日期通过可注入 `Clock` 生成。`PromptBuilder` 按固定顺序构建请求消息：
 
 ```text
-Agent 正文
--> Bootstrap AGENTS.md
--> Bootstrap SOUL.md
--> Bootstrap USER.md
--> 数据安全说明
--> 当地日期
--> 历史消息（当前调用方传入时）
--> 当前 UserMessage
+一个 SystemMessage：Agent 正文 → Bootstrap AGENTS/SOUL/USER → 数据安全说明 → 当地日期
+完整轮次历史：UserMessage / AssistantMessage / ToolResponseMessage
+当前 UserMessage
 ```
 
-系统消息只进入 ProviderRequest，不写入 MessageStore。
+历史和当前用户输入不拼进系统消息。系统消息只进入 ProviderRequest，不写入 MessageStore；长期记忆和 Skill 块预留但本Spec不填充。
 
-三个 Bootstrap 文件位于运行工作区 `.AgentOS/` 内，与仓库根目录给 Codex 使用的 `AGENTS.md` 不同。缺失时 `ContextLoader` 打 WARN 并跳过，仍可继续执行；在仓库根目录运行 `java -jar AgentOS-boot/target/AgentOS.jar init` 可用默认模板补齐，已有文件不会覆盖，也不会连接数据库。
+三个 Bootstrap 文件位于运行工作区 `.AgentOS/` 内，与仓库根目录给 Codex 使用的 `AGENTS.md` 不同。缺失时 `ContextLoader` 打 WARN 并跳过，仍可继续执行；运行 `java -jar AgentOS-boot/target/AgentOS.jar init --model <实际模型名>` 可补齐模板，已有文件不会覆盖，也不会连接数据库。main 缺失时需有合法模型来源，不能把无模型 init 当作必然成功。
 
 当前 `DefaultAgentService.process` 会先调用一次 `ContextLoader.load`；随后 `TurnRunner` 在虚拟线程中执行 `ReActLoop`，`PromptBuilder.build` 再读取一次 Bootstrap。因此同一次请求可能在两个线程各出现一组缺失警告，这本身不表示模型调用了两次。调试时可在这两个加载点下断点，比较 `LoadedAgent.bootstrap()` 和最终的系统消息。
 
-## ReAct 工具循环（Phase 4）
+## ReAct 工具循环
 
 入口：[ReActLoop.java](../../AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java)。纯文本仍只调用一次模型；工具分支会在同一轮内继续迭代：
 
@@ -93,7 +96,7 @@ Agent 正文
 
 循环不自己遍历执行 callback，`ToolExecutor` 是唯一调用 `executeToolCalls` 的生产类。`ToolCallLedger` 维护每个工具名的 ID 队列和全局原顺序；还持有捕获 turn/budget 的 checkpoint 闭包，治理与 HTTP 跳转可复用租约检查，而不更改 TurnContext 签名或引入 ThreadLocal。
 
-Phase 5 已实现 `maxIterations` 判定与超限补审计，达到上限不发送额外总结请求。Phase 7 的审计故障会停止循环，保留已执行操作的不确定性。
+达到 `maxIterations` 不发送额外总结请求。官方 Manager 正常返回后，ToolExecutor 对账本未领取项补 `limit_skipped` 审计；致命异常中断的未开始项不算超限。审计故障会停止循环，保留已执行操作的不确定性。
 
 ### 输出端为什么也要治理
 
@@ -109,6 +112,8 @@ Phase 5 已实现 `maxIterations` 判定与超限补审计，达到上限不发�
 
 `TurnGuard` 在模型调用前后检查：预算是否过期、是否还能续租。预算通过方法参数和 `TurnBudgetRegistry(turnId -> budget)` 显式传递，不使用 `ThreadLocal`。
 
+数据库行锁只覆盖短事务，跨模型/工具等待由租约保护。默认租约为 `max(150s, 本轮剩余时间 + 30s)`，覆盖整轮而非单次 Provider 尝试。每次工具前也 checkpoint；续租检查父轮次、owner、lease 和数据库 deadline，丢失后停止后续外呼和消息写入。已由数据库回收的终态优先于旧 owner 迟到的本地成功，收尾只清自己的租约。
+
 ## 端口表
 
 | 端口 | 作用 | 当前实现 |
@@ -120,11 +125,13 @@ Phase 5 已实现 `maxIterations` 判定与超限补审计，达到上限不发�
 | `MessageStore` | 追加消息、读取历史轮次 | `JpaMessageStore` |
 | `ToolCatalog` | 校验并取得 Agent 工具名单 | `ToolRegistry` |
 | `ToolInvocationRecorder` | 先登记意图再更新原行 | `JpaToolInvocationRecorder` |
-| `LlmCallRecorder` | 保存结构化模型调用记录 | 日志记录器或 `JpaLlmCallRecorder` |
+| `LlmCallRecorder` | 保存结构化模型调用记录 | 完整应用为 `JpaLlmCallRecorder`；Provider 独立上下文才可用日志后备 |
 
 ## 测试怎么读
 
 优先读 `AgentLoaderTest`、`PromptBuilderTest`、`ReActLoopTest`，再读 `AgentServiceTest`。测试夹具在 `AgentOS-core/src/test/.../support/`，包括内存 Session/Turn/Message 实现、脚本化 Provider 和事件记录 Sink。大部分测试不启动 Spring；Manager 契约测试使用轻量 ApplicationContextRunner 获取官方自动配置 Bean。全部 Core 测试不连接数据库、不发送真实模型请求。
+
+第二遍按失败路径读：`ReActLoopLimitsTest` / `ToolCallLimitsTest` 看两道次数上限，`TurnDeadlineTest` 看共享硬截止和回调等待，`PromptHistoryTest` 看完整轮次双预算及失败历史重建，`LeaseLossTest` 看租约中断。Core 替身不能证明数据库竞争；跨连接证据见 storage 的 `JpaTurnStoreContractTest` 和 boot 的 `SessionConcurrencyIntegrationTest`。
 
 ## Phase 7：审计失败与关闭时怎么收口
 

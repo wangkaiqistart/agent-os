@@ -2,7 +2,7 @@
 
 本文面向已经能看懂 Java 类、接口和方法，但对 Spring 的“自动发生”还不熟悉的读者。我们从当前 AgentOS 源码出发，解释对象如何创建、配置如何生效、请求如何分发、数据库事务如何提交。
 
-源码核对日期：2026-11-16。项目当前使用 Spring Boot **4.1.2**、Spring AI **2.0.2**、JDK **21**。这是当前实现的阅读指南；文中的临时调试 Controller、测试替身和后续功能边界会分别说明。
+源码核对日期：2026-11-17，US-2验收基线 `3228b9d`。项目使用 Spring Boot **4.1.2**、Spring AI **2.0.2**、JDK **21**。当前已实现工具循环、历史预算、审计恢复及并发隔离；文中的临时调试 Controller、测试替身和后续功能边界会分别说明。
 
 ## 阅读路线
 
@@ -15,7 +15,7 @@
 | 为什么 `main` 执行了却没有 HTTP 服务？ | 6 |
 | JSON 怎么变成 `DebugRequest`？ | 7 |
 | `@Transactional` 到底在哪里起作用？ | 11 |
-| 为什么初始化时会建表、访问模型？ | 12、13 |
+| 为什么 chat 启动会建表，init 却不会？ | 6、12、13 |
 | 虚拟线程、Reactor、SSE 是什么关系？ | 14 |
 | 怎么验证自动配置，又不连真实数据库？ | 16 |
 | 该在哪些地方下断点？ | 17 |
@@ -148,7 +148,7 @@ Core 可以依赖 `TurnStore` 接口，而不必知道 JPA、PostgreSQL 或 Repo
 | 对象 | 当前如何创建 | 是否单独注册为 Bean |
 |---|---|---|
 | `DefaultAgentService` | Core 的 `@Bean` 工厂方法返回 | 是，注册的端口类型是 `AgentService` |
-| `JpaTurnStore` | Storage 的 `@Bean` 工厂方法返回 | 是，之后可以被事务代理增强 |
+| `JpaTurnStore` | Storage 的 `@Bean` 工厂方法返回 | 是，主链路经AuditTransactions建立程序式事务 |
 | 调试 Controller | 组件扫描且开关匹配 | 是 |
 | `ReActLoop` | 创建 AgentService 时直接 `new`，作为参数传入 | 否 |
 | `OpenAiChatModel` | 模型工厂创建，保存在连接映射中 | 否 |
@@ -280,12 +280,13 @@ Controller 的实际开关：
 
 入口：[StorageAutoConfiguration.java](../../AgentOS-storage/src/main/java/com/agentos/storage/StorageAutoConfiguration.java)、[ProviderAutoConfiguration.java](../../AgentOS-provider/src/main/java/com/agentos/provider/config/ProviderAutoConfiguration.java)、[CoreAutoConfiguration.java](../../AgentOS-core/src/main/java/com/agentos/core/config/CoreAutoConfiguration.java)。
 
-Storage 声明在数据库基础配置之后、Provider 之前处理；Core 声明在 Storage 和 Provider 之后处理。
+Storage 声明在数据库基础配置之后、Provider之前处理；Tool在Storage之后、官方ToolCalling自动配置之前声明安全resolver和异常processor；Core排在Storage、Provider、Tool及官方工具配置之后。
 
 ```text
 数据库相关自动配置
   → Storage 自动配置
   → Provider 自动配置
+  → Tool / 官方 ToolCalling 自动配置
   → Core 自动配置
 ```
 
@@ -444,7 +445,7 @@ Core 自动配置通过下面的注解启用属性对象：
 
 它告诉 Boot 创建这些属性 Bean 并完成绑定。单独声明一个 `@ConfigurationProperties` 类，并不意味着任何应用都会自动注册它。
 
-当前 `HttpToolProperties` 有配置注解和直接绑定测试，但尚未通过现有自动配置接进工具执行链。这是“有配置类型”和“业务功能已运行”之间的实际差别。
+当前[ToolAutoConfiguration.java](../../AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java)通过`@EnableConfigurationProperties(HttpToolProperties.class)`注册HTTP属性，再注入`WhitelistSandbox`和`HttpTools`。工具定义经官方`ToolCallbacks.from`转成callback，外层套`GovernedToolCallback`，由`ToolRegistry`按Agent名单提供。这条实际使用链和绑定测试共同证明配置已接入，单看注解不够。
 
 ### 5.6 命名转换、时间类型和具名 Map
 
@@ -507,10 +508,13 @@ AgentOSApplication.main
 ```java
 new SpringApplicationBuilder(AgentOSApplication.class)
     .web(WebApplicationType.NONE)
-    .run();
+    .run("--agentos.workspace.root=" + workspaceRoot,
+         "--agentos.runtime.chat=true");
 ```
 
 这里传入的 `AgentOSApplication.class` 是**配置来源**。它不会递归调用该类的 `main`，所以不会再次进入 Picocli。
+
+workspaceRoot是CLI已规范化的绝对Path，以commandLineArgs进入同一个上下文，优先于普通文件/环境配置；候选选择、AgentLoader和ContextLoader因此使用同根。`agentos.runtime.chat=true`还会启用一次性`TurnReaperRunner`，启动回收失败会阻止launcher返回，不能把它当作后台定时任务。
 
 ### 6.2 `NONE`、`SERVLET`、`REACTIVE`
 
@@ -805,7 +809,7 @@ Optional<SessionEntity> findByIdForUpdate(@Param("sessionId") UUID sessionId);
 
 `insertActiveIfAbsent(...)` 用原生 INSERT 和 `ON CONFLICT ... DO NOTHING`，还标注了 `@Modifying`。它告诉 Spring Data：这不是一个返回实体列表的查询，而是修改数据的语句。
 
-`@Modifying` 不等于自动建立完整业务事务。这里由外层 `JpaTurnStore.startTurn` 的 `@Transactional` 把 INSERT、行锁和轮次创建放在同一事务里。
+`@Modifying` 不等于自动建立完整业务事务。这里由`JpaTurnStore.startTurn → bounded → AuditTransactions.execute`中的`TransactionTemplate`把INSERT、行锁和轮次创建放在同一事务里。
 
 ### 10.5 `save`、flush、commit 不是一回事
 
@@ -839,22 +843,22 @@ JPA 适合读写实体；这一行直接从数据库取时间，SQL 反而更清
 
 `JdbcTemplate` 帮忙处理 JDBC 资源和异常转换。在当前同一 DataSource、相应 JPA 事务管理器的常规配置下，它也能参与已有事务；“混用两种访问方式”不代表天然变成两套独立事务。
 
-## 11. 声明式事务与 AOP 代理：最值得下断点的一节
+## 11. 事务、AOP 代理与有界存储：最值得下断点的一节
 
 ### 11.1 事务解决的是哪些操作一起成功
 
-入口：[JpaTurnStore.java](../../AgentOS-storage/src/main/java/com/agentos/storage/session/JpaTurnStore.java)。
+入口：[JpaTurnStore.java](../../AgentOS-storage/src/main/java/com/agentos/storage/session/JpaTurnStore.java)、[AuditTransactions.java](../../AgentOS-storage/src/main/java/com/agentos/storage/audit/AuditTransactions.java)。
 
-```java
-@Transactional
-public TurnSnapshot startTurn(/* 参数见源码 */) {
-    // 确保 active session 存在
-    // 对 session 加行锁并检查租约
-    // 保存本轮 turn 和 USER 消息
-}
+```text
+startTurn(...)
+  → bounded(普通存储上限与整轮余量的较小值, ...)
+  → AuditTransactions.execute(...)
+  → TransactionTemplate(REQUIRES_NEW)
+  → 确保active会话、取锁、检查owner/lease/deadline、保存轮次和USER
+  → 提交
 ```
 
-这些动作应该作为一个整体：要么成功创建本轮，要么在异常时按事务规则回滚，避免出现只写了半套状态的情况。
+上面是当前调用路线的伪代码，使用程序式事务，不是给`startTurn`加`@Transactional`。这些动作应该作为一个整体：要么成功创建本轮，要么在异常时按事务规则回滚。连接中断/COMMIT响应超时可能使提交结果未知，此时按原turnId查证，不把“调用报错”直接等同于“已回滚”。
 
 关系数据库事务可以提供原子性、一致性、隔离性、持久性等保证，但它不会自动管理已经发到模型服务的 HTTP 请求。
 
@@ -863,10 +867,10 @@ public TurnSnapshot startTurn(/* 参数见源码 */) {
 可以把 Spring 代理理解为套在目标对象外面的服务窗口：
 
 ```text
-业务代码调用 TurnStore
+业务代码调用 SessionManager.findActive
   → Spring 事务代理
   → 开启事务或加入已有事务
-  → 调用 JpaTurnStore.startTurn
+  → 调用 JpaSessionManager.findActive
   → 方法返回后提交 / 异常时按规则回滚
   → 返回业务调用方
 ```
@@ -875,8 +879,10 @@ public TurnSnapshot startTurn(/* 参数见源码 */) {
 
 这解释了两种常见误区：
 
-- 配置类 `@Bean` 返回 `new JpaTurnStore(...)`：注册后仍可被事务代理增强。
-- 单元测试直接 `new JpaTurnStore(...)` 再调用：没有经过 Spring 代理，不能据此证明 Spring 事务有效。
+- `JpaSessionManager.findActive`当前有`@Transactional(readOnly = true)`，经`@Bean`注册后可由事务代理增强。
+- 单元测试直接`new JpaSessionManager(...)`调用这个方法，没有经过代理，不能据此证明声明式事务生效。
+
+`JpaTurnStore.startTurn`、消息追加和审计写入的主要事务边界则在`AuditTransactions`的`TransactionTemplate`回调内。没有方法注解或没有经过业务Bean的AOP代理，不等于没有事务；程序式入口仍调用同一个`PlatformTransactionManager`管理资源。
 
 具体代理可能是接口代理或类代理，受配置影响。调试时看到代理对象或 `TransactionInterceptor` 调用栈是正常的。
 
@@ -897,7 +903,7 @@ public void inner() {
 
 默认代理模式下，`this.inner()` 不会从外部再次经过代理。因此不能只靠 `inner` 的注解，保证这次调用会开启一个新事务。
 
-当前主链路是 `DefaultAgentService` 调用注入的 `TurnStore`、`MessageStore`，Provider 调用注入的 `LlmCallRecorder`，都是从其他对象进入存储 Bean，这个边界有利于事务代理生效。
+这条规则适用于依赖声明式代理的调用。当前`JpaTurnStore`的同类私有方法`start/renew/finish`在`bounded → AuditTransactions.execute`回调里执行，事务已经由模板建立；不能看到同类调用就判断事务失效。要追踪“在哪个线程进入哪个事务回调”，而不是只数注解。
 
 ### 11.4 默认传播、回滚和只读的含义
 
@@ -927,10 +933,10 @@ public void inner() {
 ```mermaid
 sequenceDiagram
     participant A as DefaultAgentService
-    participant T as TurnStore 事务代理
+    participant T as TurnStore 有界事务
     participant L as ReActLoop / Provider
-    participant R as LlmCallRecorder 事务代理
-    participant M as MessageStore 事务代理
+    participant R as LlmCallRecorder 有界事务
+    participant M as MessageStore 有界事务
     A->>T: startTurn
     Note over T: session 租约 + turn + USER，提交
     A->>L: run
@@ -947,7 +953,7 @@ sequenceDiagram
     Note over T: 更新终态、释放租约，提交
 ```
 
-图中表示成功路径；失败、超时会走相应收尾分支。这些事务不会因为同属一次 HTTP 请求就自动合成一个事务。
+图中表示纯文本成功路径；工具分支还会在外呼前提交begin、外呼后提交complete，二者之间不持有数据库连接。这些短事务由`AuditTransactions`建立，不会因为同属一次请求自动合成一个大事务。静态架构规则只能辅助检测注解事务里的外呼和等待；`LlmAuditIntegrationTest`、`ReActApplicationTest`、`AuditTransactionTest`实际检查模型/工具HTTP与审计退避期间无连接占用。
 
 ### 11.6 行锁和租约为什么同时需要
 
@@ -966,7 +972,7 @@ sequenceDiagram
 
 本项目 `TurnRunner` 会用虚拟线程执行 ReActLoop。Spring 常规声明式事务的资源上下文通常和执行线程关联，不能假设新建线程自动继承调用线程事务。
 
-但新的执行线程调用注入的存储代理时，仍然可以在那个线程上开启自己的短事务。这是“事务不自动传过去”和“新线程完全不能用事务”之间的区别。
+新线程仍可经声明式代理或`TransactionTemplate`建立自己的短事务。当前有界存储和审计等待会另起虚拟线程，事务在实际执行回调的线程里创建；调用方等待结果时不应已经持有外层事务或连接。`JpaSessionManager.archiveIfIdle`也先进入有界存储入口再取锁，没有用外层注解事务包住Future等待。
 
 项目禁止用 `ThreadLocal` 传递业务轮次上下文，指的是业务设计；Spring 内部如何关联事务资源属于框架机制。业务代码依然通过 `TurnSnapshot`、`ProviderRequest` 等参数明确传递数据。
 
@@ -985,6 +991,19 @@ spring:
 它不表示每个请求自动有事务，也不保证整个请求期间绝不会持有连接。实际连接使用仍取决于事务和查询行为。
 
 如果将来加入懒加载关系，事务外访问未初始化的数据可能失败。通常应在适当事务内读取需要的数据并转换成 DTO，而不是为方便 Controller 遍历实体就重新打开这个开关。
+
+### 11.9 为什么事务模板还需要SQL、socket和外层等待预算
+
+`TransactionTemplate.setTimeout`只能表示整秒，不能独自证明整个调用满足毫秒级时限。[AuditTransactions.execute](../../AgentOS-storage/src/main/java/com/agentos/storage/audit/AuditTransactions.java)同时设置事务局部`statement_timeout`、`lock_timeout`和JDBC`networkTimeout`，在取得连接、设置完成后及提交前检查同一个单调截止时间，提交/回滚后恢复连接设置；恢复失败淘汰连接，防止下一个借用者继承错误时限。
+
+| 操作 | 当前预算 | 如何读 |
+|---|---|---|
+| 起步/续租等普通存储 | 默认5秒，与轮次余量取小 | 外层有界等待覆盖连接池获取，迟到工作再查截止时间 |
+| 一次审计尝试 | 默认2秒，配置1ms～5秒 | 包含调度、连接、SQL与提交，不只是INSERT耗时 |
+| 最终审计、终态、释放租约、通知 | deadline后共用1秒 | 不逐项重置计时，最终审计不再退避重放 |
+| chat启动恢复 | 总30秒，候选查询/逐会话事务最多5秒 | 分会话独立提交，不延长普通轮次清理 |
+
+模型重试、工具执行和数据库审计重试是三个不同边界：Provider最多两次外呼尝试；当前工具不自动重试；`RetryingAuditWriter`仅对瞬时审计SQL故障作有限重试，退避在事务外。稳定write_id/工具唯一键负责查证未知提交，不能重复外呼“补偿”。必要持久化未确认时返回turnId + UNCONFIRMED；数据库恢复后回收失效轮次，不承诺自动补齐丢失的模型审计。
 
 ## 12. DataSource、连接池、Flyway 与建表
 
@@ -1270,7 +1289,7 @@ MockMvcBuilders.standaloneSetup(new StubController())
 
 `spring.config.import=` 清空真实 `.env` 导入，防止测试误用手工调试连接。
 
-测试会验证一个 session、一个 turn、USER/ASSISTANT 两条消息以及一条模型调用审计，并确认容器中只有一个审计记录器，没有被额外注册的 `ChatModel` / `EmbeddingModel` Bean。
+纯文本方法验证一个session、一个turn、USER/ASSISTANT两条消息及一条模型审计；同类还测试工具闭环、限次、慢工具和数据库连接边界。装配断言确认只有一个模型审计记录器，没有额外`ChatModel` / `EmbeddingModel` Bean，默认未注册调试Controller。`DefaultAgentCliIntegrationTest`进一步经过真实init/chat和SpringContextLauncher，验证默认main、自定义工作区、历史及资源关闭。
 
 ### 16.5 Testcontainers 和 `@DynamicPropertySource`
 
@@ -1285,7 +1304,7 @@ static void properties(DynamicPropertyRegistry registry) {
 
 把动态配置交给 Spring。这不同于在测试源码中写死某个开发数据库地址。
 
-当前 Boot 纵向测试使用真实 PostgreSQL 容器和本地 HTTP 模型替身；它证明模型协议桥接和持久化装配，不证明远程真实模型服务可用。
+普通Boot纵向测试使用真实PostgreSQL容器和本地HTTP模型替身；它证明模型协议桥接和持久化装配。`SessionConcurrencyIntegrationTest`额外用可控等待和数据库连接竞争固定忙时零写入、不同会话推进及接管后的迟到执行限制。
 
 ### 16.6 YAML 绑定测试甚至不需要容器
 
@@ -1295,16 +1314,25 @@ static void properties(DynamicPropertyRegistry registry) {
 
 完整源码中的测试依赖版本由 POM 管理；编写新测试时应以当前依赖和已有测试 API 为准，不照搬旧版 Boot 教程中的包路径。
 
+### 16.7 真实模型验收单独启用
+
+[ReActWeatherSmokeTest.java](../../AgentOS-boot/src/test/java/com/agentos/boot/smoke/ReActWeatherSmokeTest.java)标记`llm/db`，要求显式`-Pllm`及主模型环境变量；真实met.no方法还要求`AGENTOS_WEATHER_DEMO=true`和可执行JAR。它使用独立Testcontainers、临时Agent/Bootstrap和进程工作目录，不加载用户共享库配置。两个CLI进程分别调用天气，第二个--new后旧轮次/消息/审计逐行不变。
+
+2026-11-17默认完整质量门463项通过，真实模型专项2项另行通过，失败/错误/跳过均0。真实样本不等于保证任意外部服务一直可用，测试跳过也不能记PASS。复验开关和数据证据见[Phase 9 验证记录](../testing/phase9-validation-2026-11-17.md)。运行真实服务需安全注入环境变量，不能把properties格式`.env`作为shell脚本source。
+
 ## 17. 用一次 Debug 把知识点连起来
 
 ### 17.1 启动阶段断点
 
 | 断点 | 看什么 | 对应知识点 |
 |---|---|---|
+| `SpringContextLauncher.launch` | NONE、规范化workspace参数、runtime.chat开关 | 正式CLI启动与属性优先级 |
 | `DebugReactLoopApplication.main` | `.web(SERVLET)`、默认属性 | 启动模式 |
 | `CoreAutoConfiguration.agentLoader` | `WorkspaceProperties.root()` | 配置绑定、`@Bean` 参数注入 |
 | `StorageAutoConfiguration.turnStore` | Repository、JdbcTemplate 参数 | 自动装配、存储端口实现 |
 | `ProviderAutoConfiguration.providerService` | `recorder` 的实际实现类型 | 条件装配、默认实现退让 |
+| `ToolAutoConfiguration.toolCatalog` | ToolCallbacks、治理装饰器和注册表 | 官方组件适配与权限 |
+| `TurnReaperRunner.run` | 启动一次性回收 | ApplicationRunner与启动失败传播 |
 | `EmbeddingStartupValidator.onApplicationEvent` | 就绪事件后如何创建线程 | 生命周期、后台任务 |
 
 观察配置时只查看工作区路径、超时、实现类型等必要信息；不要整体展开或截图带有凭证的配置对象。
@@ -1315,11 +1343,12 @@ static void properties(DynamicPropertyRegistry registry) {
 |---|---|---|
 | `AgentLoopDebugController.process` | JSON 绑定后的 `DebugRequest` | MVC 参数解析 |
 | `DefaultAgentService.process` | Agent 加载、统一业务输入 | 业务与框架边界 |
-| `JpaTurnStore.startTurn` | 事务调用栈、租约、USER 入库 | AOP、JPA、原生 SQL |
+| `JpaTurnStore.startTurn` → `AuditTransactions.execute` | 有界线程和模板回调、租约、USER入库 | 程序式事务、JPA、原生SQL |
 | `ReActLoop.run` | 新线程、构造 ProviderRequest | 显式上下文、线程切换 |
 | `DefaultProviderService.call/stream` | 同步/流式选择 | Provider 适配 |
-| `JpaLlmCallRecorder.record` | 审计写库与 flush | 短事务 |
-| `JpaMessageStore.append` | ASSISTANT 入库 | 实体映射 |
+| `JpaLlmCallRecorder.record` → `RetryingAuditWriter.write` | write_id、重试/查证和确认状态 | 短事务与未知提交 |
+| `ToolExecutor.execute` → `GovernedToolCallback.call` | Manager、调用ID、begin/complete | 单一入口与先记后做 |
+| `JpaMessageStore.append` | 新增ASSISTANT/TOOL、owner/deadline校验 | JSON映射与并发保护 |
 | `JpaTurnStore.finishAndRelease` | 终态更新、释放租约 | 事务收尾 |
 | `TraceSink.onComplete/onError` | 回调发生在持久化收尾之后 | 输出适配 |
 
@@ -1334,7 +1363,8 @@ IDEA 默认全线程暂停会让整个应用停住；只暂停当前线程则可
 | 框架位置 | 用途 |
 |---|---|
 | `DispatcherServlet.doDispatch` | 看路由如何选择并调用 Handler |
-| `TransactionInterceptor.invoke` | 看存储方法何时进入事务代理 |
+| `TransactionInterceptor.invoke` | 看findActive等声明式事务方法如何进入代理 |
+| `TransactionTemplate.execute` / `AuditTransactions.execute` | 看主链路短事务在实际执行线程开始、提交和恢复设置 |
 | `TransactionSynchronizationManager.isActualTransactionActive()` | 在断点评估中检查当前线程是否有实际事务 |
 
 事务检查方法是诊断工具，不应变成业务判断身份或轮次的手段。
@@ -1350,7 +1380,9 @@ IDEA 默认全线程暂停会让整个应用停住；只暂停当前线程则可
 | 配置对象有值但行为没变 | 字段是否已被实际执行代码使用 |
 | `NoClassDefFoundError` | 运行 classpath、模块依赖、本地仓库是否还是旧 JAR |
 | `save` 成功但请求仍失败 | flush、事务提交或后续业务操作是否出错 |
-| HTTP 200 但没有正常回答 | `TurnResult.status`、异常被业务捕获的位置 |
+| HTTP 200 但没有正常回答 | `TurnResult.status`和`persistenceStatus`、异常被业务捕获的位置 |
+| 模型已返回但CLI报持久化未确认 | 稳定键查证、审计/终态/租约是否确认；不能重发模型当作补记 |
+| 第二条消息或--new被拒绝 | session行锁后的owner/lease/数据库时间；忙时零写入是预期行为 |
 | 日志线程变化且部分 MDC 丢失 | 自建虚拟线程、Reactor 回调边界 |
 | 同一次请求两组 Bootstrap 缺失警告 | Service 与 PromptBuilder 当前各读取一次，不代表模型调用两次 |
 
@@ -1365,13 +1397,18 @@ IDEA 默认全线程暂停会让整个应用停住；只暂停当前线程则可
 - 全局异常处理与 CORS 基础配置。
 - Embedding 就绪事件监听、后台校验和销毁回调。
 - 分层的单元测试、装配测试、MVC 测试和 PostgreSQL 纵向测试。
+- 默认main初始化、同根工作区、CLI交互/单消息、--new归档及跨进程历史恢复。
+- 注入官方Manager的工具循环、两道次数上限、共享deadline与完整轮次历史预算。
+- 模型/工具审计、先记后做、稳定键查证、失败UNCONFIRMED、启动/接管/关闭恢复。
+- 数据库并发竞争验收、真实primary+met.no天气CLI样本。
 
 ### 18.2 不应从配置或依赖推断成已完成的部分
 
 - 正式 REST Agent API、同步等待后返回 202 的完整流程。
-- 工具执行器与多轮工具 ReAct；当前最小循环只有一次模型请求。
-- 完整历史消息预算和自动把历史传给当前模型调用。
-- 已接入的 Agent 定时调度、完整轮次停机管理、全部租约参数可调行为。
+- 长期记忆注入、Skill元数据/正文读取、MCP和其他内置工具。
+- 工具幂等重试、完整工具策略、工具并行、上下文总结压缩。
+- Agent定时调度、正式SSE端点、多租户与容器沙箱。
+- SIGKILL后即时清理、持续数据库故障时保证全部审计落库、或外部模型/气象数据永远正确。
 - 仅因引入 ShedLock、WebFlux、Spring AI Starter 就宣称对应全部业务能力已实现。
 
 ### 18.3 注解与概念速查
@@ -1428,10 +1465,13 @@ IDEA 默认全线程暂停会让整个应用停住；只暂停当前线程则可
 | 核心业务和配置 | [AgentOS-core 导读](./AgentOS-core.md) |
 | Provider 工厂与连接 | [AgentOS-provider 导读](./AgentOS-provider.md) |
 | JPA 与数据库 | [AgentOS-storage 导读](./AgentOS-storage.md) |
+| 工具治理与官方Manager | [AgentOS-tool 导读](./AgentOS-tool.md) |
 | Web 基础设施 | [AgentOS-web 导读](./AgentOS-web.md) |
 | 容器创建位置 | [SpringContextLauncher.java](../../AgentOS-boot/src/main/java/com/agentos/boot/SpringContextLauncher.java) |
 | Prompt 与工作区读取 | [PromptBuilder.java](../../AgentOS-core/src/main/java/com/agentos/core/turn/PromptBuilder.java) |
 | JPA 审计入口 | [JpaLlmCallRecorder.java](../../AgentOS-storage/src/main/java/com/agentos/storage/audit/JpaLlmCallRecorder.java) |
+| 有界事务模板 | [AuditTransactions.java](../../AgentOS-storage/src/main/java/com/agentos/storage/audit/AuditTransactions.java) |
+| 并发端到端证据 | [SessionConcurrencyIntegrationTest.java](../../AgentOS-boot/src/test/java/com/agentos/boot/SessionConcurrencyIntegrationTest.java) |
 
 核实框架细节时，应选择与当前版本对应的官方资料，而不是直接套用旧项目示例：
 

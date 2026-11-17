@@ -41,3 +41,5 @@ sequenceDiagram
 
 它默认关闭，启用条件为 `agentos.debug.react-loop.enabled=true`。同步请求 `POST /debug/react-loop`，流式请求 `POST /debug/react-loop/stream`，都会真实进入模型与存储链路。HTTP 200 不等于业务成功，应检查 `result.status` 与 `result.persistenceStatus`；SSE 中查看终态事件。调试完成后可删除该 Controller 及 boot 中的临时启动主类。
 
+US-2内部的`TurnSink`已经支持文本、工具调用、工具结果和终结事件；此Controller的`TraceSink`只桥接了部分事件，不能当作完整协议示例。调试SSE也没有正式同步等待202或断连取消契约。2026-11-17的`ReActApplicationTest`确认默认上下文没有该Controller；US-2验收证明核心循环及CLI，正式Web Service仍属后续范围。
+

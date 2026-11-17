@@ -1,6 +1,6 @@
 # AgentOS-tool 代码导读
 
-Phase 4 已接通 `http_get`、域名沙箱、调用治理和安全解析。默认 `main` 的 `tools: []` 仍没有工具权限；要用 HTTP，必须同时在 Agent 的 `tools` 声明 `http_get`，并在应用配置中授权目标域名。
+US-2 已完成 `http_get`、域名沙箱、调用治理、安全解析、次数限制与审计恢复验收（2026-11-17）。默认 `main` 的 `tools: []` 仍没有工具权限；要用 HTTP，必须同时在 Agent 的 `tools` 声明 `http_get`，并在应用配置中授权目标域名。MCP、工具幂等重试和完整策略体系属于后续范围。
 
 ## 先看一条完整路径
 
@@ -41,7 +41,9 @@ sequenceDiagram
 
 启动装配时用官方 `validateToolCallbacks` 拒绝重名。`DefaultAgentService` 在 `startTurn` 前调用名单校验；未知名字报 `agents/<name>/AGENT.md` 的 `tools` 字段错误，零模型请求、零新轮次。
 
-`spring.ai.tools.resolution.fallback.enabled=true` 必须与这里的安全拒绝 resolver 一起使用。请求内已授权 callback 优先，fallback 只会拒绝。官方 `spring.ai.tools.limits.*` 仍生效；超限调用的补审计与迭代次数上限属于后续 Phase 5。
+`spring.ai.tools.resolution.fallback.enabled=true` 必须与这里的安全拒绝 resolver 一起使用。请求内已授权 callback 优先，fallback 只会拒绝。官方 `spring.ai.tools.limits.*` 控制工具次数；ReActLoop 的 `maxIterations` 独立限制模型调用次数。Manager 收到累计历史，不能在每次迭代把限次计数重置。
+
+Manager 正常返回后，`ToolExecutor` 扫描账本中未被领取的调用，逐条写 `limit_skipped`，执行次数为0；超限错误已经作为工具结果进入模型历史。致命异常中断整批时不会进入这个补记路径，尚未开始的后续工具不冒充超限。区别见 core 的 `ToolCallLimitsTest`、`ToolExecutorTest` 和 boot 的装配测试。
 
 ## `GovernedToolCallback`：先记后做
 
@@ -49,9 +51,9 @@ sequenceDiagram
 
 1. 从显式 `ToolContext` 取得 `TurnContext`、`ToolCallLedger`、共享预算；检查 deadline 和租约。
 2. 从本名字的队列领取 ID。即使模型连续调用两次同名工具，也按模型响应顺序关联，不比较参数或模型文本猜 ID。
-3. 脱敏完整参数，写入 `in_progress`，`attempts=0`。begin 未确认就抛出 `AuditWriteException`，没有真实执行。
+3. 脱敏完整参数，写入 `in_progress`，`attempts=0`。begin 未确认就抛出 `AuditWriteException`，没有真实执行。存储在会话锁内重新确认 RUNNING、owner、有效租约与数据库 deadline，避免接管后迟到的新意图写入。
 4. 检查 JSON 格式，再创建虚拟线程调用原 callback。等待时间取工具策略（30 秒）和剩余整轮时间的较小值；不重试工具。
-5. 记录原始字符数，超过 10000 字符就截断并注明原长，脱敏后写回原审计行。真正进入 delegate 的尝试数为 1，非法 JSON 为 0。
+5. 记录原始字符数，超过 10000 字符就截断并注明原长，脱敏后写回原审计行。真正进入 delegate 的尝试数为 1，非法 JSON 为 0。complete 未确认时说明“操作可能已经执行”，不会重跑工具；回收后的 interrupted 记录也不能被迟到 complete 覆盖。
 6. 普通业务错误、沙箱拒绝、工具自身超时转成安全 `ToolExecutionException`；整轮超时、租约和审计异常直接停止本轮。
 
 官方 `@Tool` 方法适配器会把方法抛出的异常再包成 `ToolExecutionException`。治理层必须解开这层已知包装，才能把沙箱拒绝记为 `sandbox_denied`，也避免把致命信号错当普通业务失败。Boot 集成测试实际发现并固定了这个边界。
@@ -83,5 +85,7 @@ sequenceDiagram
 ## 测试与断点
 
 先看 `WhitelistSandboxTest`、`HttpToolsTest`，理解边界，再看 `GovernedToolCallbackTest` 和 `ToolAutoConfigurationTest`。后两者验证先记后做、失败零执行、真正官方 Manager/安全 resolver、名单外 Bean 零调用和官方次数限制。网络测试只用本地 `HttpServer`。
+
+继续读 `HttpToolsDeadlineTest` 看慢正文不能靠持续分片续命；读 `AuditFailureTest` 和 storage 的 `JpaToolInvocationRecorderTest` 看执行前后审计失败；最后读 boot 的 `SessionConcurrencyIntegrationTest` 看工具运行中接管会阻断后续工具和下一次模型。真实天气样本单列在 `ReActWeatherSmokeTest`，不属于普通网络单元测试。
 
 建议断点依次放在 `ToolExecutor.execute`、`ToolCallLedger.next`、`GovernedToolCallback.call`、`JpaToolInvocationRecorder.begin`、`WhitelistSandbox.enforce`、`HttpTools.http_get`。观察 toolCallId、iteration、审计状态和第二次模型历史，不在日志中打印原始参数或密钥。

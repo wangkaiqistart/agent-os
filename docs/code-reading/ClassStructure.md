@@ -1,6 +1,6 @@
 # AgentOS 当前类结构
 
-这份文件只记录源码中已经存在的主要类。阅读时先沿着请求方向看，再回头看各个端口的实现。
+这份文件只记录源码中已经存在的主要类，核对至2026-11-17的US-2完整验收（`3228b9d`）。图中的调用箭头是协作关系，不表示跨Bean共用一个数据库事务。
 
 ## 关系含义
 
@@ -26,6 +26,9 @@ flowchart TD
     Launcher --> CoreAuto[CoreAutoConfiguration]
     Launcher --> ProviderAuto[ProviderAutoConfiguration]
     Launcher --> StorageAuto[StorageAutoConfiguration]
+    Launcher --> ToolAuto[ToolAutoConfiguration]
+    ToolAuto --> Registry[ToolRegistry / GovernedToolCallback]
+    ToolAuto --> Official[官方 ToolCallingAutoConfiguration]
     CoreAuto --> Service[DefaultAgentService]
     ProviderAuto --> Provider[DefaultProviderService]
     ProviderAuto --> Catalog[DefaultProviderCatalog]
@@ -33,9 +36,13 @@ flowchart TD
     StorageAuto --> Messages[JpaMessageStore]
     StorageAuto --> Sessions[JpaSessionManager]
     StorageAuto --> Audit[JpaLlmCallRecorder]
-    Service --> Provider
+    Service --> Loop[ReActLoop]
+    Loop --> Provider
+    Loop --> Executor[ToolExecutor]
+    Executor --> Manager[注入的 ToolCallingManager]
+    Manager --> Registry
     Service --> Turn
-    Service --> Messages
+    Loop --> Messages
     Service --> Catalog
 ```
 
@@ -84,10 +91,14 @@ classDiagram
     DefaultAgentService ..|> AgentService
     DefaultAgentService --> ReActLoop
     DefaultAgentService --> TurnStore
-    DefaultAgentService --> MessageStore
-    DefaultAgentService --> ProviderService
+    DefaultAgentService --> SessionManager
+    DefaultAgentService --> ProviderCatalog
+    DefaultAgentService --> TurnRunner
+    DefaultAgentService --> TurnBudgetRegistry
     ReActLoop --> ProviderService
     ReActLoop --> MessageStore
+    ReActLoop --> ToolExecutor
+    ToolExecutor --> ToolCallingManager
     DefaultProviderService ..|> ProviderService
     JpaTurnStore ..|> TurnStore
     JpaMessageStore ..|> MessageStore
@@ -104,12 +115,13 @@ AgentProfile / AgentSettings
 
 ```text
 SessionKey
-  -> SessionManager.findActive
   -> TurnStore.startTurn
   -> TurnSnapshot
-  -> TurnGuard.renewLease
+  -> TurnGuard.checkpoint -> TurnStore.renewLease
   -> TurnStore.finishAndRelease
 ```
+
+起步由TurnStore原子查找/创建active会话，不在服务层先查会话再创建轮次；CLI的`--new`另经SessionManager归档空闲会话。
 
 ```text
 ProviderRequest
@@ -129,7 +141,7 @@ erDiagram
     agent_turns ||--o{ tool_invocations : audits
 ```
 
-`SessionEntity` 保存租约；`AgentTurnEntity` 保存轮次状态；`SessionMessageEntity` 保存用户和助手消息；`LlmCallEntity` 保存一次模型尝试的结构化审计。Core 只拿 `SessionSnapshot`、`TurnSnapshot` 和 `HistoryTurn`，不拿 JPA 实体。
+`SessionEntity` 保存租约；`AgentTurnEntity` 保存轮次状态；`SessionMessageEntity` 保存用户、助手、工具消息及结构化请求/结果；`LlmCallEntity` 保存一次模型尝试的结构化审计；`ToolInvocationEntity` 保存执行意图及终态。Core 只拿 `SessionSnapshot`、`TurnSnapshot` 和 `HistoryTurn`，不拿 JPA 实体。
 
 ## 入口模块
 
@@ -167,7 +179,7 @@ flowchart LR
 选择规则是显式 Agent、main、旧工作区唯一 Agent。文件错误在启动器前失败；真实 Provider 校验仍在统一服务链路里。默认 main 无工具；Phase 4 已接通显式授权的 http_get 工具闭环，Phase 6 的 `--new` 会先归档空闲会话，历史恢复由 ReActLoop/MessageStore/PromptBuilder 完成。
 
 
-## Phase 4 工具对象关系
+## 工具对象关系
 
 ```mermaid
 flowchart LR
@@ -189,7 +201,7 @@ flowchart LR
 
 Provider 请求阶段只有 TurnContext；响应后才建 ToolCallLedger。全部工具共享同一 TurnExecutionBudget，callback 的参数通过 ToolContext 显式注入，不依赖日志 MDC。具体先后顺序和断点见 AgentOS-tool 导读。
 
-## Phase 7 新增协作关系
+## 审计、事务与启动恢复
 
 ```mermaid
 flowchart LR
@@ -197,6 +209,7 @@ flowchart LR
     Llm[JpaLlmCallRecorder] --> Retry[RetryingAuditWriter]
     Tool[JpaToolInvocationRecorder] --> Retry
     Retry --> Tx[AuditTransactions: 独立短事务与 I/O 上限]
+    Turn[JpaTurnStore / JpaMessageStore] --> Tx
     Launcher[chat launcher] --> Runner[TurnReaperRunner]
     Runner --> Reaper[core TurnReaper]
     Reaper --> Store[JpaTurnStore.recoverSession]
@@ -204,3 +217,19 @@ flowchart LR
 ```
 
 审计重试不拥有外部回调，因此不会重发模型或工具。恢复逻辑依据数据库 owner/lease 和终态，既清理失效 RUNNING，也清理终态父轮次的孤儿工具。关闭时 DefaultAgentService 只尝试有限清理；强杀交给下一次启动或接管恢复。
+
+`AuditTransactions` 名字含审计，但当前也承载普通轮次存储的程序式短事务。普通存储默认5秒，审计默认2秒；最终收尾共用deadline后的1秒。启动扫描另有30秒总预算，逐会话事务最多5秒，不借给单轮收尾使用。
+
+## 并发验收的对象边界
+
+```mermaid
+flowchart LR
+    A[入口实例 A] --> DB[同一 PostgreSQL session 行锁与唯一索引]
+    B[入口实例 B] --> DB
+    DB --> State[锁后检查 owner / lease / 数据库时间 / 父轮次]
+    State --> Busy[忙: 零写入拒绝]
+    State --> Recover[失效: 原子恢复后接管]
+    State --> Write[有效 owner: 续租 / 追加 / 收尾]
+```
+
+租约跨越模型/工具等待，行锁只跨短事务。旧owner的迟到消息、工具begin和finish都必须重新校验；不能清理新owner租约。对应测试是storage的`JpaTurnStoreContractTest`与boot的`SessionConcurrencyIntegrationTest`。完整覆盖和真实天气证据见[Phase 9 验证记录](../testing/phase9-validation-2026-11-17.md)。

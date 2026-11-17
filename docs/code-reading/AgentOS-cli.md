@@ -83,5 +83,7 @@ main 路径存在但缺文件或配置损坏时失败，不切换到其他 Agent
 - `WorkspaceInitializerTest`、`InitCommandBehaviorTest`：零写入、YAML round-trip、幂等、竞争和部分失败。
 - `ChatCommandTest`：选择矩阵、工作区参数、交互和上下文关闭。
 - Boot 的 `DefaultAgentCliIntegrationTest`：真实 CLI→启动器→本地模型替身→PostgreSQL。
+- Boot 的 `SessionConcurrencyIntegrationTest`：同会话第二条消息及 --new 忙时零写入，不同会话继续。
+- Boot 的 `ReActWeatherSmokeTest.realWeatherCliAndNewPreserveArchivedHistory`：显式真实模型/天气专项，两次独立JAR进程的会话归档和旧记录逐行不变；不由普通 verify 发起。
 
 理解链路时先在 `InitCommand.call`、`WorkspaceInitializer.initialize`、`InitModelResolver.resolve` 设断点，再在 `ChatCommand.call/selectProfile/process` 和 `SpringContextLauncher.launch` 设断点。随后沿 `AgentService.process` 进入 ReAct；不要把 init 误认为已经运行了模型循环。

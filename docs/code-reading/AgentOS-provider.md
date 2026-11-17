@@ -72,6 +72,17 @@ ProviderRequest
 
 流式响应仍然不会在 Provider 层执行工具；工具调用只作为模型结果返回给上层。
 
+## Provider 重试与数据库审计重试要分开读
+
+| 边界 | 实现 | 重试的对象 | 次数与后果 |
+|---|---|---|---|
+| 模型暂时性失败 | `DefaultProviderService` | 真实模型 HTTP 请求 | 最多2次尝试，每次各有一条模型审计；已输出增量不重试 |
+| 审计瞬时数据库故障 | storage 的 `JpaLlmCallRecorder` → core 的 `RetryingAuditWriter` | 同一稳定write_id对应的审计写入/查证 | 配置最多2次重试，受同一轮次预算限制，不重发模型 |
+
+正式应用注入数据库记录器，记录失败不会退回日志实现。数据库COMMIT响应超时可能已经提交，存储按原write_id和完整载荷查证；未确认时阻断循环并返回安全失败/UNCONFIRMED。Provider日志记录器中保留的旧US-2 TODO不代表当前完整应用仍只写日志，实际装配由boot的唯一记录器断言验证。
+
+断点可沿 `DefaultProviderService.execute` → `JpaLlmCallRecorder.record` → `RetryingAuditWriter.write` → `AuditTransactions.execute`；外呼时不应持有数据库连接，审计退避发生在事务结束后。`LlmAuditIntegrationTest` 用本地模型替身验证429两行审计、Recorder失败不重发模型以及请求到达时连接池活跃数为0。
+
 ## 读测试的顺序
 
 1. `ProviderRoutingTest`：具名连接路由和外呼前校验；
