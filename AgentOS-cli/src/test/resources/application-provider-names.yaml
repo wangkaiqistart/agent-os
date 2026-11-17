@@ -1,0 +1,11 @@
+agentos:
+  default-provider: primary
+  providers:
+    primary:
+      type: openai
+      base-url: ${SYNTHETIC_BASE_URL:}
+      api-key: ${SYNTHETIC_API_KEY:}
+    local-test:
+      type: openai
+      base-url: ${SYNTHETIC_LOCAL_URL:}
+      api-key: ${SYNTHETIC_LOCAL_KEY:}

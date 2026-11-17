@@ -20,6 +20,8 @@ import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -29,6 +31,13 @@ class ChatCommandTest {
     private final AgentService service = mock(AgentService.class);
     private final boolean[] closed = new boolean[1];
     private final StringWriter output = new StringWriter();
+
+    @BeforeEach
+    void config() throws Exception {
+        Files.writeString(
+                workspace.resolve("application.yaml"),
+                "agentos:\n  providers:\n    primary:\n      type: openai\n");
+    }
 
     private ContextLauncher launcher() {
         return root ->
@@ -152,7 +161,7 @@ class ChatCommandTest {
                 .isEqualTo(2);
     }
 
-    @Test
+    @RepeatedTest(20)
     void newArchivesOnlyTheSelectedAgentBeforeProcessing() throws Exception {
         agent("main");
         when(service.process(any())).thenReturn(success());
@@ -280,6 +289,27 @@ class ChatCommandTest {
         assertThat(line.execute("--workspace", workspace.toString())).isZero();
         assertThat(output.toString()).contains("上一条消息还在处理", "answer");
         assertThat(closed[0]).isTrue();
+    }
+
+    @Test
+    void injectedIdentityIsUsedForSessionRequestAndNoUserOverrideOptionExists() throws Exception {
+        agent("main");
+        when(service.process(any())).thenReturn(success());
+        var command =
+                new ChatCommand(
+                        launcher(),
+                        workspace,
+                        null,
+                        () -> "synthetic-os-user",
+                        () -> java.util.Set.of("primary"));
+        var line = new picocli.CommandLine(command);
+        line.setOut(new PrintWriter(output));
+        line.setErr(new PrintWriter(output));
+        assertThat(line.execute("--workspace", workspace.toString(), "--message", "hello"))
+                .isZero();
+        var request = ArgumentCaptor.forClass(ProcessRequest.class);
+        verify(service).process(request.capture());
+        assertThat(request.getValue().userId()).isEqualTo("synthetic-os-user");
     }
 
     private static TurnResult success() {

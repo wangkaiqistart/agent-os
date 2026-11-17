@@ -43,19 +43,42 @@ public final class ChatCommand implements Callable<Integer> {
     private final ContextLauncher launcher;
     private final Path directory;
     private final BufferedReader input;
+    private final CliIdentity identity;
+    private final ProviderNameCatalog providers;
 
     public ChatCommand() {
         this(null);
     }
 
     public ChatCommand(ContextLauncher launcher) {
-        this(launcher, Path.of(""), null);
+        this(
+                launcher,
+                Path.of(""),
+                null,
+                new SystemCliIdentity(),
+                () -> java.util.Set.of("primary"));
     }
 
     ChatCommand(ContextLauncher launcher, Path directory, BufferedReader input) {
+        this(
+                launcher,
+                directory,
+                input,
+                new SystemCliIdentity(),
+                () -> java.util.Set.of("primary"));
+    }
+
+    ChatCommand(
+            ContextLauncher launcher,
+            Path directory,
+            BufferedReader input,
+            CliIdentity identity,
+            ProviderNameCatalog providers) {
         this.launcher = launcher;
         this.directory = directory;
         this.input = input;
+        this.identity = Objects.requireNonNull(identity, "identity");
+        this.providers = Objects.requireNonNull(providers, "providers");
     }
 
     @Override
@@ -74,13 +97,20 @@ public final class ChatCommand implements Callable<Integer> {
             spec.commandLine().getErr().println("无法读取 Agent 目录，请检查工作区路径与权限");
             return 2;
         }
+        try {
+            // chat 也必须先验证配置路径；无效配置不得启动 Spring。
+            providers.names();
+        } catch (IllegalArgumentException e) {
+            spec.commandLine().getErr().println("配置不可用，请检查 --config 或本地 application.yaml");
+            return 2;
+        }
         if (launcher == null) {
             spec.commandLine().getErr().println("chat 需要完整应用的 Spring 上下文启动器");
             return 1;
         }
         ContextLauncher.RunningContext opened;
         try {
-            opened = launcher.launch(root);
+            opened = launcher.launch(root, providers.configurationPath().orElse(null));
         } catch (RuntimeException e) {
             spec.commandLine().getErr().println("聊天启动失败，请检查数据库和 Provider 配置");
             return 1;
@@ -123,9 +153,7 @@ public final class ChatCommand implements Callable<Integer> {
         }
         try {
             context.sessionManager()
-                    .archiveIfIdle(
-                            new SessionKey(
-                                    "cli", System.getProperty("user.name", "unknown"), selected));
+                    .archiveIfIdle(new SessionKey("cli", identity.userId(), selected));
             return true;
         } catch (AgentOSException e) {
             if (e.getErrorCode() == ErrorCode.SESSION_BUSY) {
@@ -182,11 +210,7 @@ public final class ChatCommand implements Callable<Integer> {
                     context.agentService()
                             .process(
                                     new ProcessRequest(
-                                            "cli",
-                                            System.getProperty("user.name", "unknown"),
-                                            selected,
-                                            text,
-                                            "cli"));
+                                            "cli", identity.userId(), selected, text, "cli"));
             if (result.persistenceStatus() == PersistenceStatus.UNCONFIRMED) {
                 spec.commandLine()
                         .getErr()

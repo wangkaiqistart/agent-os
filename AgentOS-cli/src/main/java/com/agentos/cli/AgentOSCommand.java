@@ -1,7 +1,9 @@
 package com.agentos.cli;
 
+import java.nio.file.Path;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.Spec;
 
 /**
@@ -19,6 +21,21 @@ import picocli.CommandLine.Spec;
         versionProvider = VersionInfo.class,
         description = "Java 原生、私有部署、可审计的企业级 Agent OS")
 public class AgentOSCommand implements Runnable {
+
+    private final ConfigPathRef configPath;
+
+    public AgentOSCommand() {
+        this(new ConfigPathRef());
+    }
+
+    AgentOSCommand(ConfigPathRef configPath) {
+        this.configPath = configPath;
+    }
+
+    @Option(names = "--config", description = "CLI 与 Boot 共用的 application.yaml 路径")
+    void setConfig(Path value) {
+        configPath.set(value);
+    }
 
     // Picocli 在执行命令前自动注入当前命令的描述对象。
     // 它不是 Spring 的依赖注入，而是 Picocli 自己的参数注入。

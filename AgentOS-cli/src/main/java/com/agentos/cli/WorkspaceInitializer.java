@@ -137,9 +137,11 @@ public final class WorkspaceInitializer {
     /** 用序列化器处理特殊字符，模型输入不能变成额外 YAML 字段或工具授权。 */
     private static String mainContent(DefaultAgentOptions options) {
         Map<String, Object> provider = new LinkedHashMap<>();
-        if (options.providerName() != null) {
-            provider.put("name", options.providerName());
-        }
+        provider.put(
+                "name",
+                options.providerName() == null || options.providerName().isBlank()
+                        ? "primary"
+                        : options.providerName());
         provider.put("model", options.model());
         Map<String, Object> frontmatter = new LinkedHashMap<>();
         frontmatter.put("name", "main");

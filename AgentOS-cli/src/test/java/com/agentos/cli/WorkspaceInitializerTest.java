@@ -25,7 +25,7 @@ class WorkspaceInitializerTest {
                         .initialize(root, () -> new DefaultAgentOptions("模型: '#[]\\n值", null));
         var loaded = new AgentLoader(root.resolve("agents")).load("main");
         assertThat(loaded.profile().providerProfile().model()).isEqualTo("模型: '#[]\\n值");
-        assertThat(loaded.profile().providerProfile().provider()).isNull();
+        assertThat(loaded.profile().providerProfile().provider()).isEqualTo("primary");
         assertThat(loaded.profile().providerProfile().temperature()).isNull();
         assertThat(loaded.profile().tools()).isEmpty();
         assertThat(loaded.instructions()).contains("助手");

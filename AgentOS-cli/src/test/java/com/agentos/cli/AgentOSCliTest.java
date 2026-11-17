@@ -11,12 +11,32 @@ import com.agentos.core.turn.TurnResult;
 import com.agentos.core.turn.TurnStatus;
 import java.nio.file.Files;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class AgentOSCliTest {
     @Test
+    void helpVersionAndUnknownOptionDoNotStartLauncher() throws Exception {
+        AtomicInteger launches = new AtomicInteger();
+        ContextLauncher forbidden =
+                root -> {
+                    launches.incrementAndGet();
+                    throw new AssertionError("轻命令不应启动");
+                };
+        var workspace = Files.createTempDirectory("cli-help");
+        var line = AgentOSCli.commandLine(forbidden, workspace, key -> null);
+        assertThat(line.execute("--help")).isZero();
+        assertThat(line.execute("--version")).isZero();
+        assertThat(line.execute("--unknown")).isEqualTo(2);
+        assertThat(launches).hasValue(0);
+    }
+
+    @Test
     void bootLauncherIsUsedForChatButInitDoesNotNeedIt() throws Exception {
         var workspace = Files.createTempDirectory("cli");
+        Files.writeString(
+                workspace.resolve("application.yaml"),
+                "agentos:\n  providers:\n    primary:\n      type: openai\n");
         Files.createDirectories(workspace.resolve("agents/assistant"));
         Files.writeString(
                 workspace.resolve("agents/assistant/AGENT.md"),
@@ -49,6 +69,8 @@ class AgentOSCliTest {
         int exit =
                 AgentOSCli.execute(
                         launcher,
+                        "--config",
+                        workspace.resolve("application.yaml").toString(),
                         "chat",
                         "--workspace",
                         workspace.toString(),
@@ -61,6 +83,8 @@ class AgentOSCliTest {
         verify(service).process(org.mockito.ArgumentMatchers.any());
         assertThat(
                         AgentOSCli.execute(
+                                "--config",
+                                workspace.resolve("application.yaml").toString(),
                                 "init",
                                 "--workspace",
                                 workspace.toString(),

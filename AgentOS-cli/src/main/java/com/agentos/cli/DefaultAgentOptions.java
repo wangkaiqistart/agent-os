@@ -8,7 +8,7 @@ public record DefaultAgentOptions(String model, String providerName) {
                 || model.contains("${")
                 || model.contains("{{")
                 || (model.startsWith("<") && model.endsWith(">"))) {
-            throw new IllegalArgumentException("model 必须是具体非空白值，请提供 --model 或 AGENTOS_LLM_MODEL");
+            throw new IllegalArgumentException("model 必须是具体非空白值，请提供 --model");
         }
         if (providerName != null && providerName.isBlank()) {
             throw new IllegalArgumentException("provider 必须是非空白连接名");

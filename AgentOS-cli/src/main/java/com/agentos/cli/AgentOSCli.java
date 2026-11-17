@@ -1,6 +1,7 @@
 package com.agentos.cli;
 
 import java.nio.file.Path;
+import java.util.Objects;
 import java.util.function.Function;
 import picocli.CommandLine;
 
@@ -41,19 +42,50 @@ public final class AgentOSCli {
             Path directory,
             Function<String, String> environment,
             String... args) {
-        return commandLine(launcher, directory, environment).execute(args);
+        return execute(launcher, directory, environment, new SystemCliIdentity(), args);
     }
 
-    static CommandLine commandLine(
+    /** 测试或嵌入式宿主可注入身份；生产入口仍固定使用当前操作系统账号。 */
+    public static int execute(
+            ContextLauncher launcher,
+            Path directory,
+            Function<String, String> environment,
+            CliIdentity identity,
+            String... args) {
+        return commandLine(launcher, directory, environment, identity).execute(args);
+    }
+
+    public static CommandLine commandLine(
             ContextLauncher launcher, Path directory, Function<String, String> environment) {
-        CommandLine commandLine = new CommandLine(new AgentOSCommand());
+        return commandLine(launcher, directory, environment, new SystemCliIdentity());
+    }
+
+    /** 构造命令树时注入身份，避免测试通过命令行参数伪造使用者标识。 */
+    public static CommandLine commandLine(
+            ContextLauncher launcher,
+            Path directory,
+            Function<String, String> environment,
+            CliIdentity identity) {
+        Objects.requireNonNull(identity, "identity");
+        Path executionDirectory = directory.toAbsolutePath().normalize();
+        ConfigPathRef configPath = new ConfigPathRef();
+        ProviderNameCatalog providers =
+                new LocalProviderNameCatalog(
+                        new ProviderNameProjectionLoader(),
+                        executionDirectory,
+                        configPath::get,
+                        environment,
+                        Path.of(System.getProperty("user.home", ".")));
+        CommandLine commandLine = new CommandLine(new AgentOSCommand(configPath));
         commandLine.addSubcommand(
                 "init",
                 new InitCommand(
                         new WorkspaceInitializer(),
-                        new InitModelResolver(environment, directory),
-                        directory));
-        commandLine.addSubcommand("chat", new ChatCommand(launcher, directory, null));
+                        new InitModelResolver(environment, executionDirectory),
+                        directory,
+                        providers));
+        commandLine.addSubcommand(
+                "chat", new ChatCommand(launcher, directory, null, identity, providers));
         // 参数解析也可能包含用户输入原值，统一输出安全用法说明，不泄露解析器原文。
         commandLine.setParameterExceptionHandler((error, arguments) -> {
             error.getCommandLine().getErr().println("命令参数不合法，请使用 --help 检查参数");

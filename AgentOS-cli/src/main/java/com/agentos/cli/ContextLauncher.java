@@ -15,6 +15,11 @@ public interface ContextLauncher {
     /** 接收规范化绝对工作区；启动一次上下文，由命令通过 try-with-resources 关闭。 */
     RunningContext launch(Path workspaceRoot);
 
+    /** 使用与 CLI 名称投影相同的配置路径启动；旧实现可继续只接收工作区。 */
+    default RunningContext launch(Path workspaceRoot, Path configPath) {
+        return launch(workspaceRoot);
+    }
+
     /** 只暴露业务入口和关闭能力，CLI 无需持有 Spring 的 ApplicationContext 类型。 */
     interface RunningContext extends AutoCloseable {
         AgentService agentService();
