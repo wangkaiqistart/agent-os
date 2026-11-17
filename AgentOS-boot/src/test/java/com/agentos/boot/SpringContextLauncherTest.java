@@ -58,6 +58,27 @@ class SpringContextLauncherTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void forwardsNormalizedConfigPathToSpringCommandLine() throws Exception {
+        Path config = directory.resolve("application.yaml");
+        java.nio.file.Files.writeString(config, "agentos:\n  providers:\n    primary: {}\n");
+        var opened = new AtomicReference<ConfigurableApplicationContext>();
+        SpringContextLauncher launcher =
+                new SpringContextLauncher(() ->
+                        new SpringApplicationBuilder(Fixture.class)
+                                .environment(
+                                        isolatedEnvironment(Map.of("spring.config.import", "")))
+                                .registerShutdownHook(false)
+                                .initializers(opened::set));
+        try (var running = launcher.launch(directory, config.toAbsolutePath().normalize())) {
+            assertThat(
+                            opened.get()
+                                    .getEnvironment()
+                                    .getProperty("spring.config.additional-location"))
+                    .isEqualTo(config.toAbsolutePath().normalize().toUri().toString());
+        }
+    }
+
     /** 去除机器环境与 JVM 属性，只使用合成本地连接；仍低于 launcher 的 commandLineArgs。 */
     static StandardEnvironment isolatedEnvironment(Map<String, Object> values) {
         StandardEnvironment environment = new StandardEnvironment();

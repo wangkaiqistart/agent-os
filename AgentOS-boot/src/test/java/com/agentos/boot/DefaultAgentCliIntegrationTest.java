@@ -38,6 +38,9 @@ class DefaultAgentCliIntegrationTest {
 
     @Test
     void initThenDefaultChatLoadsOnlyChosenWorkspaceAndPersistsConfirmedTurn() throws Exception {
+        Files.writeString(
+                directory.resolve("application.yaml"),
+                "agentos:\n  providers:\n    primary:\n      type: openai\n");
         Path chosen = directory.resolve("chosen");
         Path conflicting = directory.resolve(".AgentOS");
         // 两个目录都由 init 生成 Agent；测试不手写 main。
@@ -132,6 +135,26 @@ class DefaultAgentCliIntegrationTest {
             var resumed = JsonMapper.builder().build().readTree(model.requests().get(1));
             assertThat(resumed.path("messages").toString())
                     .contains("你好", "local answer", "继续刚才的话题");
+
+            // 每次 execute 都会重建 Spring 上下文；重复 20 次验证同一 OS 身份和 Agent
+            // 能跨进程恢复同一个 active session，而不是只在单个 JVM 上复用内存状态。
+            int recovered = 0;
+            for (int i = 0; i < 20; i++) {
+                assertThat(
+                                AgentOSCli.execute(
+                                        launcher,
+                                        directory,
+                                        key -> null,
+                                        "chat",
+                                        "--workspace",
+                                        chosen.toString(),
+                                        "--message",
+                                        "恢复第 " + i + " 轮"))
+                        .isZero();
+                recovered++;
+            }
+            assertThat(recovered).isEqualTo(20);
+            assertThat(model.calls()).isEqualTo(22);
             var jdbc =
                     new JdbcTemplate(
                             new DriverManagerDataSource(
@@ -144,18 +167,19 @@ class DefaultAgentCliIntegrationTest {
             assertThat(jdbc.queryForObject("select lease_owner from sessions", String.class))
                     .isNull();
             assertThat(jdbc.queryForObject("select count(*) from agent_turns", Integer.class))
-                    .isEqualTo(2);
+                    .isEqualTo(22);
             assertThat(
                             jdbc.queryForObject(
                                     "select count(*) from agent_turns where status = 'SUCCEEDED'",
                                     Integer.class))
-                    .isEqualTo(2);
+                    .isEqualTo(22);
             assertThat(
                             jdbc.queryForList(
                                     "select type from session_messages order by id", String.class))
-                    .containsExactly("USER", "ASSISTANT", "USER", "ASSISTANT");
+                    .hasSize(44)
+                    .contains("USER", "ASSISTANT");
             assertThat(jdbc.queryForObject("select count(*) from llm_calls", Integer.class))
-                    .isEqualTo(2);
+                    .isEqualTo(22);
             assertThat(jdbc.queryForObject("select count(*) from tool_invocations", Integer.class))
                     .isZero();
         }

@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -155,7 +156,7 @@ class SessionConcurrencyIntegrationTest {
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.SESSION_BUSY));
     }
 
-    @Test
+    @RepeatedTest(20)
     void secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses() throws Exception {
         model.reset();
         var entered = new CountDownLatch(1);

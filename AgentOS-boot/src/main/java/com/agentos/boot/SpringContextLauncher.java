@@ -30,17 +30,30 @@ public final class SpringContextLauncher implements ContextLauncher {
 
     @Override
     public RunningContext launch(Path workspaceRoot) {
+        return launch(workspaceRoot, null);
+    }
+
+    @Override
+    public RunningContext launch(Path workspaceRoot, Path configPath) {
         Objects.requireNonNull(workspaceRoot, "workspaceRoot");
         if (!workspaceRoot.isAbsolute() || !workspaceRoot.equals(workspaceRoot.normalize())) {
             throw new IllegalArgumentException("workspaceRoot 必须是规范化绝对路径");
         }
         // 每次 chat 命令启动一个容器；ChatCommand 在交互期间复用它，退出时 close。
-        ConfigurableApplicationContext context =
-                builders.get()
-                        .web(WebApplicationType.NONE)
-                        .run(
+        if (configPath != null
+                && (!configPath.isAbsolute() || !configPath.equals(configPath.normalize()))) {
+            throw new IllegalArgumentException("configPath 必须是规范化绝对路径");
+        }
+        java.util.List<String> arguments =
+                new java.util.ArrayList<>(
+                        java.util.List.of(
                                 "--agentos.workspace.root=" + workspaceRoot,
-                                "--agentos.runtime.chat=true");
+                                "--agentos.runtime.chat=true"));
+        if (configPath != null) {
+            arguments.add("--spring.config.additional-location=" + configPath.toUri());
+        }
+        ConfigurableApplicationContext context =
+                builders.get().web(WebApplicationType.NONE).run(arguments.toArray(String[]::new));
         return new RunningContext() {
             @Override
             public AgentService agentService() {

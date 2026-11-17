@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,6 +20,7 @@ import org.springframework.ai.model.tool.autoconfigure.ToolCallingAutoConfigurat
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.boot.logging.LoggingSystem;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.PropertySource;
@@ -45,6 +47,9 @@ class LlmCallJsonLogTest {
     void recorderWritesEveryFieldAsEcsJson() throws Exception {
         Path configDir = Files.createDirectory(tempDir.resolve("config"));
         Path logFile = tempDir.resolve("agentos.log");
+        // 同一个 Surefire fork 中前面的 Spring 上下文可能已经初始化过全局 Logback；
+        // 清理后让本测试的 logging.file.name 和 ECS 格式重新生效。
+        LoggingSystem.get(LlmCallJsonLogTest.class.getClassLoader()).cleanUp();
         try (ConfigurableApplicationContext context =
                 new SpringApplicationBuilder(RecorderOnlyConfig.class)
                         .web(WebApplicationType.NONE)
@@ -73,11 +78,7 @@ class LlmCallJsonLogTest {
             recorder.record(failureRecord());
         }
 
-        List<JsonNode> events =
-                Files.readAllLines(logFile).stream()
-                        .filter(line -> line.contains("llm_call"))
-                        .map(JSON::readTree)
-                        .toList();
+        List<JsonNode> events = readEventsEventually(logFile);
         assertThat(events).hasSize(2);
 
         JsonNode success = events.get(0);
@@ -115,6 +116,26 @@ class LlmCallJsonLogTest {
                  "errorSummary":"RATE_LIMITED status=429 type=rate_limit_error",
                  "startedAt":"2026-11-14T08:30:00.123Z","durationMs":0}
                 """);
+    }
+
+    /** Logback 的文件 appender 在上下文关闭后仍可能需要一个短暂的 flush 时间。 */
+    private static List<JsonNode> readEventsEventually(Path logFile) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        List<JsonNode> events = List.of();
+        while (System.nanoTime() < deadline) {
+            if (Files.exists(logFile)) {
+                events =
+                        Files.readAllLines(logFile).stream()
+                                .filter(line -> line.contains("llm_call"))
+                                .map(JSON::readTree)
+                                .toList();
+                if (events.size() >= 2) {
+                    return events;
+                }
+            }
+            Thread.sleep(50);
+        }
+        return events;
     }
 
     /** 逐个字段比较；字段缺失时 path() 返回 MissingNode，与 null 字面量不相等。 */
