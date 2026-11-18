@@ -26,6 +26,17 @@ class MigrationTest extends PostgresIntegrationTest {
                                 "select count(*) from information_schema.tables where table_schema='public' and table_name in ('sessions','agent_turns','session_messages','llm_calls','tool_invocations')")) {
             rows.next();
             assertThat(rows.getInt(1)).isEqualTo(5);
+            try (var constraints =
+                    connection
+                            .createStatement()
+                            .executeQuery(
+                                    "select pg_get_constraintdef(oid) from pg_constraint where conrelid='tool_invocations'::regclass and contype='c'")) {
+                String definitions = "";
+                while (constraints.next()) {
+                    definitions += constraints.getString(1);
+                }
+                assertThat(definitions).contains("unconfirmed");
+            }
         }
     }
 }

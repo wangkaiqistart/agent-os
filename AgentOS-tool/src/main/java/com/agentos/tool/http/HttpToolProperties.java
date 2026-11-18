@@ -14,6 +14,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param maxRedirects 绑定缺省 3，显式 0 禁止重定向
  * @param maxResponseBytes 缺省且最大为 1 MiB，0 视为缺省值
  * @param timeout 正数时长，缺省 30 秒；实际连接、跳转和正文读取共用此上限
+ * @param maxResultChars 普通工具结果字符上限，缺省 10000
  */
 @ConfigurationProperties("agentos.tools.http")
 public record HttpToolProperties(
@@ -21,7 +22,8 @@ public record HttpToolProperties(
         String userAgent,
         @DefaultValue("3") int maxRedirects,
         int maxResponseBytes,
-        Duration timeout) {
+        Duration timeout,
+        @DefaultValue("10000") int maxResultChars) {
     /** 紧凑构造器先归一化缺省值再校验；record 最终保存归一化后的不可变字段。 */
     public HttpToolProperties {
         allowedDomains =
@@ -44,6 +46,9 @@ public record HttpToolProperties(
         timeout = timeout == null ? Duration.ofSeconds(30) : timeout;
         if (timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("HTTP timeout 必须为正数");
+        }
+        if (maxResultChars < 1) {
+            throw new IllegalArgumentException("max-result-chars 必须为正数");
         }
     }
 }

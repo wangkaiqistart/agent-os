@@ -25,7 +25,8 @@ class HttpToolsDeadlineTest {
                                         "AgentOS-test",
                                         3,
                                         1024 * 1024,
-                                        Duration.ofSeconds(2)),
+                                        Duration.ofSeconds(2),
+                                        10_000),
                                 new WhitelistSandbox(List.of("127.0.0.1")))) {
             server.route(
                     "/slow",
@@ -59,7 +60,8 @@ class HttpToolsDeadlineTest {
                                         "AgentOS-test",
                                         3,
                                         1024,
-                                        Duration.ofSeconds(2)),
+                                        Duration.ofSeconds(2),
+                                        10_000),
                                 new WhitelistSandbox(List.of("127.0.0.1")))) {
             server.text("/never", 200, "unexpected");
             var budget = TurnExecutionBudget.start(Duration.ofNanos(1));

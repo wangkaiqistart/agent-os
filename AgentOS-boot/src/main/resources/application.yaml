@@ -116,6 +116,7 @@ agentos:
       max-redirects: 3
       max-response-bytes: 1048576
       timeout: 30s
+      max-result-chars: 10000
   default-provider: primary                # Profile 未写 provider 时使用
   # 每个 provider 只配连接：类型、地址、凭证、超时。聊天模型和生成参数由 Agent 的 Profile 提供（spec 001 FR-001）
   providers:

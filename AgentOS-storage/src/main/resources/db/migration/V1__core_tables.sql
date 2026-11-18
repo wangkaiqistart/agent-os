@@ -82,7 +82,7 @@ CREATE TABLE tool_invocations (
     tool_call_id text NOT NULL,
     tool_name text NOT NULL,
     tool_source text NOT NULL,
-    status text NOT NULL CHECK (status IN ('in_progress', 'success', 'failed', 'timeout', 'sandbox_denied', 'limit_skipped', 'interrupted')),
+    status text NOT NULL CHECK (status IN ('in_progress', 'success', 'failed', 'timeout', 'sandbox_denied', 'limit_skipped', 'interrupted', 'unconfirmed')),
     input_json jsonb,
     result_text text,
     result_chars int,

@@ -12,7 +12,6 @@ import com.agentos.tool.http.HttpToolProperties;
 import com.agentos.tool.http.HttpTools;
 import com.agentos.tool.registry.ToolRegistry;
 import com.agentos.tool.sandbox.WhitelistSandbox;
-import java.time.Duration;
 import java.util.Arrays;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.execution.ToolExecutionExceptionProcessor;
@@ -38,14 +37,21 @@ public class ToolAutoConfiguration {
     }
 
     @Bean
-    ToolCatalog toolCatalog(HttpTools http, ToolInvocationRecorder recorder, Redactor redactor) {
+    ToolCatalog toolCatalog(
+            HttpTools http,
+            HttpToolProperties properties,
+            ToolInvocationRecorder recorder,
+            Redactor redactor) {
         return new ToolRegistry(
                 Arrays.stream(ToolCallbacks.from(http))
                         .map(cb ->
                                 (org.springframework.ai.tool.ToolCallback)
                                         new GovernedToolCallback(
                                                 cb,
-                                                new ToolPolicy(true, Duration.ofSeconds(30), 10000),
+                                                new ToolPolicy(
+                                                        true,
+                                                        properties.timeout(),
+                                                        properties.maxResultChars()),
                                                 recorder,
                                                 redactor))
                         .toList());

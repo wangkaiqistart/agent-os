@@ -10,9 +10,20 @@ import org.junit.jupiter.api.Test;
 class HttpToolPropertiesTest {
     @Test
     void defaultsAndBoundsAreApplied() {
-        assertThat(new HttpToolProperties(List.of(), null, 0, 0, null).maxRedirects()).isZero();
-        assertThatThrownBy(
-                        () -> new HttpToolProperties(List.of(), "ua", 4, 1, Duration.ofSeconds(1)))
+        assertThat(new HttpToolProperties(List.of(), null, 0, 0, null, 10_000).maxRedirects())
+                .isZero();
+        assertThat(new HttpToolProperties(List.of(), null, 0, 0, null, 10_000).maxResultChars())
+                .isEqualTo(10_000);
+        assertThat(
+                        new HttpToolProperties(List.of(), "ua", 3, 1, Duration.ofSeconds(1), 128)
+                                .maxResultChars())
+                .isEqualTo(128);
+        assertThatThrownBy(() ->
+                        new HttpToolProperties(
+                                List.of(), "ua", 4, 1, Duration.ofSeconds(1), 10_000))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() ->
+                        new HttpToolProperties(List.of(), "ua", 3, 1, Duration.ofSeconds(1), 0))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

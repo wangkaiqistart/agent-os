@@ -25,7 +25,8 @@ class HttpToolsTest {
 
     private HttpTools tools(int cap, Duration timeout) {
         return new HttpTools(
-                new HttpToolProperties(List.of("127.0.0.1"), "AgentOS-test", 3, cap, timeout),
+                new HttpToolProperties(
+                        List.of("127.0.0.1"), "AgentOS-test", 3, cap, timeout, 10_000),
                 new WhitelistSandbox(List.of("127.0.0.1")));
     }
 
@@ -100,7 +101,8 @@ class HttpToolsTest {
                                         "test",
                                         0,
                                         1024,
-                                        Duration.ofSeconds(2)),
+                                        Duration.ofSeconds(2),
+                                        10_000),
                                 new WhitelistSandbox(List.of("127.0.0.1")))) {
             server.redirect("/start", "/end");
             server.text("/end", 200, "unexpected");
