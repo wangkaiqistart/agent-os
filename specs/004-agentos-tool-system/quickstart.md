@@ -22,7 +22,17 @@ mvn -B -ntp -pl AgentOS-boot -am test                PASS (64 tests; PostgreSQL 
 
 Storage 与 Boot 测试已使用 Docker Testcontainers 启动 `pgvector/pgvector:pg17`，PostgreSQL 集成场景实际执行并通过；没有使用 H2、SQLite 或共享数据库替代。测试期间出现的数据库超时、重复键和审计未确认日志均来自主动覆盖的预期故障场景，未造成测试失败。
 
-本次数据库验证完成后应继续运行 `python3 scripts/check_db_test_reports.py`，确认报告中的数据库测试均已分类且没有 `NOT_RUN`。完整质量门 `mvn -B -ntp verify` 仍需在本分支最终交付前执行。
+Phase 1–3 的完整质量门 `mvn -B -ntp verify` 已通过；`python3 scripts/check_db_test_reports.py` 已确认 PostgreSQL 连通性测试实际执行并通过。该脚本只检查连通性用例，不能代替其余数据库测试报告。
+
+### V1 旧库兼容回归
+
+直接修改已执行的 V1 会触发 Flyway checksum mismatch，导致 `chat` 在启动阶段失败。本次修复恢复原始 `V1__core_tables.sql`（校验和 `129473985`），并通过 `V2__tool_invocation_unconfirmed_status.sql` 扩展工具审计状态，不修改 Flyway 历史记录。
+
+`MigrationTest.upgradesOriginalV1WithoutRepairOrChangingHistory` 使用固定历史 V1 快照和独立 PostgreSQL Testcontainers：先确认修复前复现 `129473985` 与 `-1073444995` 不匹配，再验证恢复 V1 后仅执行 V2、旧会话/轮次/工具记录逐字段保持不变、可写入 `unconfirmed`，并且重复迁移没有新增执行。新库同时验证完整 V1 + V2 初始化。全部验证不连接共享数据库，也不执行 repair 或 clean。
+
+迁移修复后的 `mvn -B -ntp verify` 于 2026-11-18 14:20（Asia/Shanghai）通过：Storage 64 个测试、Boot 64 个测试均无失败或跳过；数据库连通性报告门禁通过。已重新生成 `AgentOS-boot/target/AgentOS.jar`，检查其嵌套 Storage JAR 确认包含与源码一致的原始 V1、新增 V2，且不包含历史测试快照。共享数据库启动升级尚未执行。
+
+对于日志中已执行原始 V1 的数据库，重新构建后可由用户再次运行 `java -jar AgentOS-boot/target/AgentOS.jar chat`；正常启动应显示 V1 校验通过并迁移到 V2。若数据库已应用修改过的 V1 或已被 repair，需要另行核对历史，不能把上述旧库回归当作该情形的验证。
 
 ## 1. Static and unit validation
 

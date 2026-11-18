@@ -112,7 +112,8 @@ AgentOS-storage/
 │   ├── JpaToolInvocationRecorder.java
 │   └── AuditTransactions.java
 └── src/main/resources/db/migration/
-    └── V1__core_tables.sql
+    ├── V1__core_tables.sql
+    └── V2__tool_invocation_unconfirmed_status.sql
 
 AgentOS-boot/
 ├── src/main/resources/application.yaml

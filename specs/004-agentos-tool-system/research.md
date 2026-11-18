@@ -77,7 +77,7 @@
 - 完成写入失败后自动重跑工具：可能重复外部动作，拒绝。
 - 用内存 map 作为生产审计：进程重启即丢失，拒绝。
 
-**Evidence**: `AgentOS-storage/.../JpaToolInvocationRecorder.java`、`ToolInvocationEntity.java`、`V1__core_tables.sql`、`AuditTransactionTest`。
+**Evidence**: `AgentOS-storage/.../JpaToolInvocationRecorder.java`、`ToolInvocationEntity.java`、`V1__core_tables.sql`、`V2__tool_invocation_unconfirmed_status.sql`、`MigrationTest`、`AuditTransactionTest`。已发布 V1 保持原校验和，`unconfirmed` 状态通过 V2 增量迁移加入；旧库升级不得通过修改历史迁移或执行 repair 绕过校验。
 
 ## R5. 预算、取消和结果安全
 
