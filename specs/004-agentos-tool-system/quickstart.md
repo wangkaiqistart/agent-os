@@ -34,6 +34,16 @@ Phase 1–3 的完整质量门 `mvn -B -ntp verify` 已通过；`python3 scripts
 
 对于日志中已执行原始 V1 的数据库，重新构建后可由用户再次运行 `java -jar AgentOS-boot/target/AgentOS.jar chat`；正常启动应显示 V1 校验通过并迁移到 V2。若数据库已应用修改过的 V1 或已被 repair，需要另行核对历史，不能把上述旧库回归当作该情形的验证。
 
+### US1 CLI 验收收尾
+
+未知工具配置的错误定位已修复：`UnknownAgentToolException` 由 core 定义，ToolRegistry 生成包含 Agent 相对文件、tools 字段和具体工具名的提示，CLI 只定向展示该类型；其他异常原文和 cause 继续隐藏。
+
+新增回归先实际复现失败，再完成修复：目录提示漏工具名、真实 CLI 隐藏配置位置。`CliAcceptanceIntegrationTest.unknownToolReportsAgentFileAndNameWithoutExternalCallsOrRecords` 使用真实装配和 PostgreSQL 验证退出码 2、零模型请求及零新增会话/轮次/消息/审计记录；CLI 单测额外验证 cause 和其他参数错误不泄露。
+
+修复后 `mvn -B -ntp verify` 通过：521 项测试，失败 0、错误 0、跳过 0；数据库连通性报告检查通过。使用新 JAR 和全新 Testcontainers 数据库重跑六项 CLI 用例，全部 PASS，包括未知工具错误中的配置文件与具体名称。临时模型、HTTP 服务和数据库容器均已清理；没有连接真实模型或业务数据库。
+
+复现步骤见 [manual-us1.md](./manual-us1.md)，实测报告见 [manual-us1-results.md](./manual-us1-results.md)，安全统计与数据库读回见 [us1-cli-evidence-2026-11-18.json](./fixtures/us1-cli-evidence-2026-11-18.json)。Phase 4 及后续阶段继续保留未完成状态。
+
 ## 1. Static and unit validation
 
 From repository root:

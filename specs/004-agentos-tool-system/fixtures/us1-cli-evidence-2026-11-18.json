@@ -1,0 +1,322 @@
+{
+  "executed_at": "2026-11-18T16:31:43.298150+08:00",
+  "commit": "4d8ad2192a8631a485f2290aa270e9b47d518a84",
+  "jar_sha256": "caf4d5fdbffaef452bca932745086bf12da5fef6ddc4d6d4ebecbe98df195f78",
+  "environment": {
+    "java": "21.0.9",
+    "docker_server": "29.9.2",
+    "database": "Testcontainers pgvector/pgvector:pg17 (PostgreSQL 17.12)",
+    "model": "local OpenAI-compatible fixture",
+    "existing_database_accessed": false
+  },
+  "maven_verify": {
+    "exit_code": 0,
+    "tests": 521,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "database_report_check_exit_code": 0,
+  "tdd": {
+    "registry_missing_tool_name": "RED before fix; GREEN after fix",
+    "real_cli_missing_error_location": "RED before fix; GREEN after fix",
+    "unrelated_errors_and_causes": "GREEN, details remain hidden"
+  },
+  "cases": [
+    {
+      "case": "01-authorized",
+      "profile": "us1-20261118163019-http",
+      "exit_code": 0,
+      "elapsed_seconds": 6.61,
+      "checks": {
+        "exit_code": true,
+        "model_requests": true,
+        "http_requests": true,
+        "cli_output": true,
+        "visible_tools": true,
+        "tools_field": true,
+        "tool_result": true,
+        "definition": true
+      },
+      "stats": {
+        "mode": "normal",
+        "model_requests": 2,
+        "http_requests": 1,
+        "events": [
+          {
+            "tools_field_present": true,
+            "visible_tools": [
+              "http_get"
+            ],
+            "definitions": [
+              {
+                "name": "http_get",
+                "description_present": true,
+                "parameters_type": "object",
+                "parameter_names": [
+                  "url"
+                ]
+              }
+            ],
+            "emitted_tool": "http_get",
+            "tool_result_kind": "none"
+          },
+          {
+            "tools_field_present": true,
+            "visible_tools": [
+              "http_get"
+            ],
+            "definitions": [
+              {
+                "name": "http_get",
+                "description_present": true,
+                "parameters_type": "object",
+                "parameter_names": [
+                  "url"
+                ]
+              }
+            ],
+            "emitted_tool": null,
+            "tool_result_kind": "ok"
+          }
+        ]
+      },
+      "behavior_pass": true
+    },
+    {
+      "case": "02-empty",
+      "profile": "us1-20261118163019-none",
+      "exit_code": 0,
+      "elapsed_seconds": 8.32,
+      "checks": {
+        "exit_code": true,
+        "model_requests": true,
+        "http_requests": true,
+        "cli_output": true,
+        "visible_tools": true,
+        "tools_field": true,
+        "tool_result": true
+      },
+      "stats": {
+        "mode": "normal",
+        "model_requests": 1,
+        "http_requests": 0,
+        "events": [
+          {
+            "tools_field_present": false,
+            "visible_tools": [],
+            "definitions": [],
+            "emitted_tool": null,
+            "tool_result_kind": "none"
+          }
+        ]
+      },
+      "behavior_pass": true
+    },
+    {
+      "case": "03-unknown-config",
+      "profile": "us1-20261118163019-unknown",
+      "exit_code": 2,
+      "elapsed_seconds": 4.97,
+      "checks": {
+        "exit_code": true,
+        "model_requests": true,
+        "http_requests": true,
+        "cli_output": true
+      },
+      "stats": {
+        "mode": "normal",
+        "model_requests": 0,
+        "http_requests": 0,
+        "events": []
+      },
+      "behavior_pass": true,
+      "error_location_pass": true
+    },
+    {
+      "case": "04-duplicate-config",
+      "profile": "us1-20261118163019-duplicate",
+      "exit_code": 2,
+      "elapsed_seconds": 0.29,
+      "checks": {
+        "exit_code": true,
+        "model_requests": true,
+        "http_requests": true,
+        "cli_output": true
+      },
+      "stats": {
+        "mode": "normal",
+        "model_requests": 0,
+        "http_requests": 0,
+        "events": []
+      },
+      "behavior_pass": true
+    },
+    {
+      "case": "05-unauthorized-runtime",
+      "profile": "us1-20261118163019-none",
+      "exit_code": 0,
+      "elapsed_seconds": 5.12,
+      "checks": {
+        "exit_code": true,
+        "model_requests": true,
+        "http_requests": true,
+        "cli_output": true,
+        "visible_tools": true,
+        "tools_field": true,
+        "tool_result": true
+      },
+      "stats": {
+        "mode": "force-http",
+        "model_requests": 2,
+        "http_requests": 0,
+        "events": [
+          {
+            "tools_field_present": false,
+            "visible_tools": [],
+            "definitions": [],
+            "emitted_tool": "http_get",
+            "tool_result_kind": "none"
+          },
+          {
+            "tools_field_present": false,
+            "visible_tools": [],
+            "definitions": [],
+            "emitted_tool": null,
+            "tool_result_kind": "denied"
+          }
+        ]
+      },
+      "behavior_pass": true
+    },
+    {
+      "case": "06-unknown-runtime",
+      "profile": "us1-20261118163019-http",
+      "exit_code": 0,
+      "elapsed_seconds": 4.88,
+      "checks": {
+        "exit_code": true,
+        "model_requests": true,
+        "http_requests": true,
+        "cli_output": true,
+        "visible_tools": true,
+        "tools_field": true,
+        "tool_result": true,
+        "definition": true
+      },
+      "stats": {
+        "mode": "force-unknown",
+        "model_requests": 2,
+        "http_requests": 0,
+        "events": [
+          {
+            "tools_field_present": true,
+            "visible_tools": [
+              "http_get"
+            ],
+            "definitions": [
+              {
+                "name": "http_get",
+                "description_present": true,
+                "parameters_type": "object",
+                "parameter_names": [
+                  "url"
+                ]
+              }
+            ],
+            "emitted_tool": "outside",
+            "tool_result_kind": "none"
+          },
+          {
+            "tools_field_present": true,
+            "visible_tools": [
+              "http_get"
+            ],
+            "definitions": [
+              {
+                "name": "http_get",
+                "description_present": true,
+                "parameters_type": "object",
+                "parameter_names": [
+                  "url"
+                ]
+              }
+            ],
+            "emitted_tool": null,
+            "tool_result_kind": "denied"
+          }
+        ]
+      },
+      "behavior_pass": true
+    }
+  ],
+  "database": {
+    "counts": [
+      {
+        "profile_name": "us1-20261118163019-http",
+        "sessions": 2,
+        "turns": 2,
+        "messages": 8,
+        "model_calls": 4,
+        "tool_records": 2
+      },
+      {
+        "profile_name": "us1-20261118163019-none",
+        "sessions": 2,
+        "turns": 2,
+        "messages": 6,
+        "model_calls": 3,
+        "tool_records": 1
+      }
+    ],
+    "turns": [
+      {
+        "profile_name": "us1-20261118163019-http",
+        "turn_id": "8c5dbec8-ac2a-4a57-a839-5c0d63bc98da",
+        "turn_status": "SUCCEEDED",
+        "tool_name": "http_get",
+        "tool_status": "success",
+        "tool_error": null
+      },
+      {
+        "profile_name": "us1-20261118163019-none",
+        "turn_id": "236edf00-27cf-4eec-bace-9fe55277d7f3",
+        "turn_status": "SUCCEEDED",
+        "tool_name": null,
+        "tool_status": null,
+        "tool_error": null
+      },
+      {
+        "profile_name": "us1-20261118163019-none",
+        "turn_id": "834682ad-1d10-4e34-bbcc-134f66cf3ad9",
+        "turn_status": "SUCCEEDED",
+        "tool_name": "http_get",
+        "tool_status": "failed",
+        "tool_error": "本 Agent 没有名为 http_get 的工具"
+      },
+      {
+        "profile_name": "us1-20261118163019-http",
+        "turn_id": "0239faf2-081f-4200-a086-8fdd43047dd8",
+        "turn_status": "SUCCEEDED",
+        "tool_name": "outside",
+        "tool_status": "failed",
+        "tool_error": "本 Agent 没有名为 outside 的工具"
+      }
+    ],
+    "migrations": [
+      {
+        "version": "1",
+        "success": true
+      },
+      {
+        "version": "2",
+        "success": true
+      }
+    ]
+  },
+  "cleanup": {
+    "mock_server_closed": true,
+    "database_container_removed": true
+  },
+  "overall_result": "PASS: six CLI cases passed including unknown configuration file and tool name; internal registration/assembly contracts covered by existing tests, real services not exercised"
+}

@@ -8,6 +8,8 @@
 
 本功能把 Agent 声明的工具名称收敛为最小可见集合，并通过唯一工具执行入口完成调用标识关联、租约与预算检查、执行前审计、沙箱授权、受限执行、结果脱敏和执行后审计。首期保留内置 `http_get`，使用现有 Spring AI `ToolCallback` 契约，不在循环外建立第二套工具协议。
 
+未知工具配置由 core 的 `UnknownAgentToolException` 表达，提示只包含 Agent 相对配置路径、字段与工具名；tool 目录负责产生该错误，CLI 按专用类型展示提示，不转发其他异常原文或 cause。真实 CLI 与 PostgreSQL 集成测试同时验证错误定位、零模型请求及零新增会话/轮次/消息/审计记录。
+
 技术方案沿用当前仓库已落地的模块边界：`AgentOS-core` 只持有 `ToolCatalog`、`Sandbox`、`ToolInvocationRecorder` 等端口；`AgentOS-tool` 提供目录、治理回调、HTTP 工具和白名单沙箱；`AgentOS-storage` 以 PostgreSQL 的 `tool_invocations` 表记录意图与终态；`AgentOS-boot` 负责官方工具管理器的装配验证和集成验收。工具循环继续由 `ReActLoop` 驱动，实际执行只委托注入的官方 `ToolCallingManager`。
 
 ## Technical Context
@@ -72,6 +74,7 @@ specs/004-agentos-tool-system/
 AgentOS-core/
 ├── src/main/java/com/agentos/core/tool/
 │   ├── ToolCatalog.java
+│   ├── UnknownAgentToolException.java
 │   ├── Sandbox.java
 │   ├── SandboxAction.java
 │   └── Redactor.java
