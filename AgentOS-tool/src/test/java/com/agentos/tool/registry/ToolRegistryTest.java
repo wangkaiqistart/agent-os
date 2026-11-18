@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.agentos.core.agent.AgentProfile;
 import com.agentos.core.provider.Profile;
+import com.agentos.core.tool.UnknownAgentToolException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
@@ -45,8 +46,10 @@ class ToolRegistryTest {
         assertThatThrownBy(() -> new ToolRegistry(List.of(callback("a"), callback("a"))))
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> new ToolRegistry(List.of()).validate(profile(List.of("unknown"))))
+                .isInstanceOf(UnknownAgentToolException.class)
                 .hasMessageContaining("agents/a/AGENT.md")
-                .hasMessageContaining("tools");
+                .hasMessageContaining("tools")
+                .hasMessageContaining("unknown");
     }
 
     @Test

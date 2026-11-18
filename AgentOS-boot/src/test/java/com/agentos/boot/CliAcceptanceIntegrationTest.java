@@ -89,6 +89,49 @@ class CliAcceptanceIntegrationTest {
     }
 
     @Test
+    void unknownToolReportsAgentFileAndNameWithoutExternalCallsOrRecords() throws Exception {
+        model.reset();
+        String profile = "unknown-tool-" + UUID.randomUUID();
+        String user = "cli-unknown-" + UUID.randomUUID();
+        Path agent = Files.createDirectories(workspace.resolve("agents").resolve(profile));
+        Files.writeString(
+                agent.resolve("AGENT.md"),
+                "---\nname: "
+                        + profile
+                        + "\nprovider:\n  model: test-model\ntools: [does_not_exist]\n---\nprivate-agent-body\n");
+        var output = new java.io.StringWriter();
+        var line = AgentOSCli.commandLine(sharedLauncher(), workspace, key -> null, () -> user);
+        line.setOut(new java.io.PrintWriter(output));
+        line.setErr(new java.io.PrintWriter(output));
+
+        assertThat(
+                        line.execute(
+                                "--config",
+                                workspace.resolve("application.yaml").toString(),
+                                "chat",
+                                "--workspace",
+                                workspace.toString(),
+                                "--profile",
+                                profile,
+                                "--message",
+                                "private-user-message"))
+                .isEqualTo(2);
+        assertThat(output.toString())
+                .contains("agents/" + profile + "/AGENT.md", "tools", "does_not_exist")
+                .doesNotContain("private-agent-body", "private-user-message", "Exception");
+        assertThat(model.requests()).isEmpty();
+        assertThat(counts(user, profile)).isEqualTo(new Counts(0, 0, 0, 0, 0, 0));
+        assertThat(
+                        jdbc.queryForObject(
+                                "select count(*) from tool_invocations i join sessions s on s.session_id=i.session_id"
+                                        + " where s.channel='cli' and s.user_id=? and s.profile_name=?",
+                                Integer.class,
+                                user,
+                                profile))
+                .isZero();
+    }
+
+    @Test
     void identityAndAgentIsolationMatrixHasTwentyPairsWithoutHistoryLeaks() throws Exception {
         model.reset();
         int pairs = 20;

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.agentos.core.error.AgentOSException;
 import com.agentos.core.error.ErrorCode;
 import com.agentos.core.session.SessionManager;
+import com.agentos.core.tool.UnknownAgentToolException;
 import com.agentos.core.turn.AgentService;
 import com.agentos.core.turn.PersistenceStatus;
 import com.agentos.core.turn.ProcessRequest;
@@ -135,6 +136,37 @@ class ChatCommandTest {
         assertThat(chat(launcher())).isEqualTo(3);
         assertThat(closed[0]).isTrue();
         assertThat(output.toString()).doesNotContain("synthetic-secret", "Exception");
+    }
+
+    @Test
+    void unknownToolShowsConfigurationLocationWithoutExposingCause() throws Exception {
+        agent("main");
+        var error = new UnknownAgentToolException("main", "does_not_exist");
+        error.initCause(new IllegalStateException("synthetic-cause-secret"));
+        when(service.process(any())).thenThrow(error);
+
+        assertThat(chat(launcher())).isEqualTo(2);
+        assertThat(output.toString())
+                .contains("agents/main/AGENT.md 的 tools 包含未注册工具：does_not_exist")
+                .doesNotContain("synthetic-cause-secret", "Exception");
+        assertThat(closed[0]).isTrue();
+    }
+
+    @Test
+    void unrelatedArgumentErrorsKeepSafeOutputAndDoNotExposeCauses() throws Exception {
+        agent("main");
+        when(service.process(any()))
+                .thenThrow(
+                        new AgentOSException(
+                                ErrorCode.INVALID_ARGUMENT,
+                                "synthetic-secret",
+                                new IllegalStateException("synthetic-cause-secret")));
+
+        assertThat(chat(launcher())).isEqualTo(2);
+        assertThat(output.toString())
+                .contains("对话请求失败，请检查 Agent 和运行配置")
+                .doesNotContain("synthetic-secret", "synthetic-cause-secret", "Exception");
+        assertThat(closed[0]).isTrue();
     }
 
     @Test

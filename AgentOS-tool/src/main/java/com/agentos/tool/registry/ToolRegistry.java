@@ -1,9 +1,8 @@
 package com.agentos.tool.registry;
 
 import com.agentos.core.agent.AgentProfile;
-import com.agentos.core.error.AgentOSException;
-import com.agentos.core.error.ErrorCode;
 import com.agentos.core.tool.ToolCatalog;
+import com.agentos.core.tool.UnknownAgentToolException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,9 +62,7 @@ public final class ToolRegistry implements ToolCatalog {
     public void validate(AgentProfile profile) {
         for (String name : profile.tools()) {
             if (!callbacks.containsKey(name)) {
-                throw new AgentOSException(
-                        ErrorCode.INVALID_ARGUMENT,
-                        "agents/" + profile.name() + "/AGENT.md 的 tools 包含未注册工具");
+                throw new UnknownAgentToolException(profile.name(), name);
             }
         }
     }
