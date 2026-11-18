@@ -36,6 +36,23 @@ class HttpToolPropertiesTest {
                                 .isEqualTo(3));
     }
 
+    @Test
+    void normalizesDomainsAndRejectsAllInvalidBoundaries() {
+        var defaults =
+                new HttpToolProperties(List.of("  example.com  ", " "), null, 3, 0, null, 10000);
+        assertThat(defaults.allowedDomains()).containsExactly("example.com");
+        assertThat(defaults.maxResponseBytes()).isEqualTo(1048576);
+        assertThat(defaults.timeout()).isEqualTo(Duration.ofSeconds(30));
+        for (int bytes : List.of(-1, 1048577)) {
+            assertThatThrownBy(() -> new HttpToolProperties(List.of(), null, 3, bytes, null, 10000))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        for (Duration timeout : List.of(Duration.ZERO, Duration.ofMillis(-1))) {
+            assertThatThrownBy(() -> new HttpToolProperties(List.of(), null, 3, 0, timeout, 10000))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
     @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
     @org.springframework.boot.context.properties.EnableConfigurationProperties(
             HttpToolProperties.class)

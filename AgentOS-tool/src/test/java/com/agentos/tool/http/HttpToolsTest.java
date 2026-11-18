@@ -135,4 +135,61 @@ class HttpToolsTest {
             assertThat(System.nanoTime() - start).isLessThan(TimeUnit.MILLISECONDS.toNanos(600));
         }
     }
+
+    @Test
+    void bodyOverOneMiBReturnsExplicitSafeSizeErrorWithNoRetryOrBody() throws Exception {
+        try (var server = new LocalHttpServer();
+                var tools = tools(1048576, Duration.ofSeconds(2))) {
+            server.text("/oversized", 200, "BODY_PRIVATE" + "x".repeat(1048576));
+            assertThatThrownBy(() -> tools.http_get(server.url("/oversized"), context()))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("HTTP 响应正文超过大小上限")
+                    .hasNoCause();
+            assertThat(server.calls).hasValue(1);
+        }
+    }
+
+    @Test
+    void cancelledBudgetNeverSendsRequestAndUnsafeRedirectNeverSendsNextHop() throws Exception {
+        try (var server = new LocalHttpServer();
+                var tools = tools(1048576, Duration.ofSeconds(2))) {
+            server.text("/never", 200, "unexpected");
+            var budget = TurnExecutionBudget.start(Duration.ofSeconds(3));
+            budget.cancel();
+            assertThatThrownBy(() ->
+                            tools.http_get(
+                                    server.url("/never"),
+                                    new ToolContext(Map.of(ToolContextKeys.TURN_BUDGET, budget))))
+                    .isInstanceOf(com.agentos.core.turn.TurnDeadlineExceededException.class);
+            assertThat(server.calls).hasValue(0);
+            server.redirect("/invalid", "http://[invalid?token=URL_SECRET");
+            assertThatThrownBy(() -> tools.http_get(server.url("/invalid"), context()))
+                    .isInstanceOf(SandboxViolationException.class)
+                    .hasMessageNotContaining("URL_SECRET");
+            assertThat(server.calls).hasValue(1);
+        }
+    }
+
+    @Test
+    void schemaExposesOnlyUrlAndRejectedInitialUrlsSendZeroRequests() throws Exception {
+        try (var server = new LocalHttpServer();
+                var http = tools(1048576, Duration.ofSeconds(2))) {
+            var callback = org.springframework.ai.support.ToolCallbacks.from(http)[0];
+            var schema =
+                    tools.jackson.databind.json.JsonMapper.builder()
+                            .build()
+                            .readTree(callback.getToolDefinition().inputSchema());
+            assertThat(schema.get("properties").propertyNames()).containsExactly("url");
+            for (String url :
+                    List.of(
+                            server.url("/no").replace("127.0.0.1", "localhost"),
+                            "file:///private",
+                            "http://user:URL_SECRET@127.0.0.1/private")) {
+                assertThatThrownBy(() -> http.http_get(url, context()))
+                        .isInstanceOf(SandboxViolationException.class)
+                        .hasMessageNotContaining("URL_SECRET");
+            }
+            assertThat(server.calls).hasValue(0);
+        }
+    }
 }

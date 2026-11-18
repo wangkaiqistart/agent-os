@@ -76,4 +76,55 @@ class HttpToolsDeadlineTest {
             org.assertj.core.api.Assertions.assertThat(server.calls).hasValue(0);
         }
     }
+
+    @Test
+    void sustainedBodyP95RemainsBoundedAcrossTwentyRequestsWithoutRetry() throws Exception {
+        try (var server = new LocalHttpServer();
+                var tools =
+                        new HttpTools(
+                                new HttpToolProperties(
+                                        List.of("127.0.0.1"),
+                                        "test",
+                                        3,
+                                        1048576,
+                                        Duration.ofSeconds(2),
+                                        10000),
+                                new WhitelistSandbox(List.of("127.0.0.1")))) {
+            server.route(
+                    "/chunks",
+                    e -> {
+                        e.sendResponseHeaders(200, 0);
+                        try {
+                            for (int i = 0; i < 100; i++) {
+                                e.getResponseBody().write('a');
+                                e.getResponseBody().flush();
+                                Thread.sleep(5);
+                            }
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                    });
+            var samples = new java.util.ArrayList<Long>();
+            for (int n = 0; n < 20; n++) {
+                var budget = TurnExecutionBudget.start(Duration.ofMillis(100));
+                long start = System.nanoTime();
+                assertThatThrownBy(() ->
+                                tools.http_get(
+                                        server.url("/chunks"),
+                                        new ToolContext(
+                                                Map.of(ToolContextKeys.TURN_BUDGET, budget))))
+                        .isInstanceOf(TurnDeadlineExceededException.class);
+                samples.add(
+                        java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                                System.nanoTime() - start));
+            }
+            samples.sort(Long::compareTo);
+            org.assertj.core.api.Assertions.assertThat(samples.get(18)).isLessThanOrEqualTo(1100);
+            org.assertj.core.api.Assertions.assertThat(server.calls).hasValue(20);
+            org.slf4j.LoggerFactory.getLogger(getClass())
+                    .info(
+                            "deadline_acceptance scenario=slow_body samples=20 budget_ms=100 p95_ms={}",
+                            samples.get(18));
+        }
+    }
 }

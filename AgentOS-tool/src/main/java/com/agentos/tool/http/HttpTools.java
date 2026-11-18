@@ -61,7 +61,7 @@ public final class HttpTools implements AutoCloseable {
             if (ledger != null) {
                 ledger.checkpoint();
             }
-            if (budget.expired()) {
+            if (budget.expired() || budget.cancelled()) {
                 throw new TurnDeadlineExceededException();
             }
             sandbox.enforce(new SandboxAction(ActionType.HTTP, uri.toString()));
@@ -86,19 +86,28 @@ public final class HttpTools implements AutoCloseable {
             } catch (InterruptedException e) {
                 future.cancel(true);
                 Thread.currentThread().interrupt();
-                if (budget.expired()) {
+                if (budget.expired() || budget.cancelled()) {
                     throw new TurnDeadlineExceededException();
                 }
                 throw new IllegalStateException("HTTP 请求中断");
             } catch (TimeoutException | ExecutionException e) {
                 future.cancel(true);
-                if (budget.expired()) {
+                if (budget.expired() || budget.cancelled()) {
                     throw new TurnDeadlineExceededException();
                 }
-                // 不附带 SDK cause：其中可能含完整 URL、代理凭证或响应正文。
-                throw new IllegalStateException("HTTP 请求失败或超时（响应可能超过大小上限）");
+                // 只识别本地固定类型，不附带可能含完整 URL 或响应正文的 SDK cause。
+                for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+                    if (cause instanceof ResponseTooLargeException) {
+                        throw new IllegalStateException("HTTP 响应正文超过大小上限");
+                    }
+                    if (cause instanceof java.net.http.HttpTimeoutException
+                            || cause instanceof TimeoutException) {
+                        throw new IllegalStateException("HTTP 请求超时");
+                    }
+                }
+                throw new IllegalStateException("HTTP 请求失败");
             }
-            if (budget.expired()) {
+            if (budget.expired() || budget.cancelled()) {
                 throw new TurnDeadlineExceededException();
             }
             if (response.statusCode() >= 300 && response.statusCode() < 400) {
@@ -122,6 +131,10 @@ public final class HttpTools implements AutoCloseable {
             }
             return new String(response.body(), StandardCharsets.UTF_8);
         }
+    }
+
+    private static final class ResponseTooLargeException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 
     /** 在接收每批字节时检查上限；超限立即取消订阅，不先把整个正文读进内存。 */
@@ -155,7 +168,7 @@ public final class HttpTools implements AutoCloseable {
             for (var buffer : buffers) {
                 if (buffer.remaining() > cap - bytes.size()) {
                     subscription.cancel();
-                    result.completeExceptionally(new IllegalStateException("响应超过上限"));
+                    result.completeExceptionally(new ResponseTooLargeException());
                     return;
                 }
                 byte[] part = new byte[buffer.remaining()];
