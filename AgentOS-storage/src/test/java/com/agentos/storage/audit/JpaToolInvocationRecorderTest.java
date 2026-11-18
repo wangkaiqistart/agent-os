@@ -149,6 +149,59 @@ class JpaToolInvocationRecorderTest extends PostgresIntegrationTest {
         assertThat(saved.getAttempts()).isZero();
     }
 
+    @Test
+    void failedCompletionMarksOriginalIntentUnconfirmedWithoutReplayingTool() {
+        var t = turn();
+        var intent = record(t, "uncertain", "{}", "in_progress");
+        recorder.begin(intent);
+        long id =
+                repository
+                        .findByTurnIdAndIterationAndToolCallId(t.turnId(), 1, "uncertain")
+                        .orElseThrow()
+                        .getId();
+        var failing =
+                org.mockito.Mockito.mock(
+                        ToolInvocationRepository.class,
+                        org.mockito.AdditionalAnswers.delegatesTo(repository));
+        org.mockito.Mockito.doAnswer(
+                        invocation -> {
+                            com.agentos.storage.session.ToolInvocationEntity row =
+                                    invocation.getArgument(0);
+                            if ("success".equals(row.getStatus())) {
+                                throw new org.springframework.dao
+                                        .DataAccessResourceFailureException(
+                                        "simulated commit failure");
+                            }
+                            return repository.saveAndFlush(row);
+                        })
+                .when(failing)
+                .saveAndFlush(org.mockito.ArgumentMatchers.any());
+        var audit =
+                new JpaToolInvocationRecorder(
+                        failing,
+                        new Redactor(List::of),
+                        transactions,
+                        budgets,
+                        new com.agentos.core.config.AuditProperties(0, null, null, null));
+        assertThatThrownBy(() -> audit.complete(record(t, "uncertain", "{}", "success")))
+                .isInstanceOf(AuditWriteException.class)
+                .hasMessageContaining("可能已经执行");
+        var row =
+                repository
+                        .findByTurnIdAndIterationAndToolCallId(t.turnId(), 1, "uncertain")
+                        .orElseThrow();
+        assertThat(row.getId()).isEqualTo(id);
+        assertThat(row.getStatus()).isEqualTo("unconfirmed");
+        assertThat(row.getAttempts()).isOne();
+        assertThat(row.getResultText()).isNull();
+        assertThat(budgets.get(t.turnId()).auditsConfirmed()).isFalse();
+        assertThatThrownBy(() -> recorder.complete(record(t, "uncertain", "{}", "success")))
+                .isInstanceOf(AuditWriteException.class);
+        assertThat(repository.findByTurnIdAndStatus(t.turnId(), "unconfirmed")).hasSize(1);
+    }
+
+    @jakarta.annotation.Resource AuditTransactions transactions;
+
     @SpringBootConfiguration
     @EnableAutoConfiguration(excludeName = "com.agentos.core.config.CoreAutoConfiguration")
     static class App {

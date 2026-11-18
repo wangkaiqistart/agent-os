@@ -6,6 +6,7 @@ import com.agentos.core.audit.ToolInvocationRecorder;
 import com.agentos.core.tool.Redactor;
 import com.agentos.core.tool.SandboxViolationException;
 import com.agentos.core.tool.ToolPolicy;
+import com.agentos.core.tool.TransientToolException;
 import com.agentos.core.turn.LeaseLostException;
 import com.agentos.core.turn.ToolCallLedger;
 import com.agentos.core.turn.ToolContextKeys;
@@ -32,16 +33,36 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public final class GovernedToolCallback implements ToolCallback {
     private final ToolCallback delegate;
+    private final int perToolLimit;
+    private final int totalLimit;
     private final ToolPolicy policy;
     private final ToolInvocationRecorder recorder;
     private final Redactor redactor;
-    private final JsonMapper json = JsonMapper.builder().build();
+    private final JsonMapper json =
+            JsonMapper.builder()
+                    .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                    .build();
 
     public GovernedToolCallback(
             ToolCallback delegate,
             ToolPolicy policy,
             ToolInvocationRecorder recorder,
             Redactor redactor) {
+        this(delegate, policy, recorder, redactor, 10, 30);
+    }
+
+    public GovernedToolCallback(
+            ToolCallback delegate,
+            ToolPolicy policy,
+            ToolInvocationRecorder recorder,
+            Redactor redactor,
+            int perToolLimit,
+            int totalLimit) {
+        if (perToolLimit < -1 || totalLimit < -1) {
+            throw new IllegalArgumentException("工具限次必须非负或为 -1");
+        }
+        this.perToolLimit = perToolLimit;
+        this.totalLimit = totalLimit;
         this.delegate = delegate;
         this.policy = policy;
         this.recorder = recorder;
@@ -73,7 +94,7 @@ public final class GovernedToolCallback implements ToolCallback {
         var budget = (TurnExecutionBudget) context.getContext().get(ToolContextKeys.TURN_BUDGET);
         ledger.checkpoint();
         var call = ledger.next(getToolDefinition().name());
-        String safeInput = redactor.redact(input);
+        String safeInput = summary(input, 10000);
         // begin 的正常返回是执行许可；失败时不会创建任务，更不会调用真实工具。
         var beginRecord =
                 new ToolInvocationRecord(
@@ -114,88 +135,66 @@ public final class GovernedToolCallback implements ToolCallback {
         try {
             ledger.checkpoint();
             try {
-                if (input == null || json.readTree(input) == null) {
+                if (input == null || !json.readTree(input).isObject()) {
                     throw new IllegalArgumentException();
                 }
             } catch (RuntimeException invalid) {
                 throw new IllegalArgumentException("参数不是合法 JSON");
             }
-            long remaining = budget.remainingNanos();
-            boolean wholeTurnFirst = remaining <= policy.timeout().toNanos();
-            long wait = Math.min(remaining, policy.timeout().toNanos());
-            if (wait <= 0) {
-                throw new TurnDeadlineExceededException();
-            }
-            var executor = Executors.newVirtualThreadPerTaskExecutor();
-            Future<String> future = null;
-            try {
-                attempts = 1;
-                future =
-                        executor.submit(() -> {
-                            // 虚拟线程不继承业务身份；只从显式 TurnContext 重建日志关联。
-                            MDC.put("sessionId", turn.sessionId().toString());
-                            MDC.put("turnId", turn.turnId().toString());
-                            MDC.put("agent", turn.agent().profile().name());
-                            MDC.put("iteration", Integer.toString(turn.iteration()));
-                            try {
-                                ledger.checkpoint();
-                                return delegate.call(input, context);
-                            } finally {
-                                MDC.clear();
-                            }
-                        });
-                result = future.get(wait, TimeUnit.NANOSECONDS);
-            } catch (TimeoutException timeout) {
-                status = "timeout";
-                if (wholeTurnFirst || budget.expired()) {
+            long toolDeadline =
+                    System.nanoTime()
+                            + Math.min(budget.remainingNanos(), policy.timeout().toNanos());
+            for (; ; ) {
+                ledger.checkpoint();
+                if (budget.cancelled() || budget.expired()) {
                     throw new TurnDeadlineExceededException();
                 }
-                throw new IllegalStateException("工具自身超时");
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                if (budget.expired()) {
-                    throw new TurnDeadlineExceededException();
+                if (!budget.reserveToolAttempt(call.name(), perToolLimit, totalLimit)) {
+                    // 整个模型调用未执行才是 limit_skipped；已有失败尝试时保留 failed 及实际次数。
+                    status = attempts == 0 ? "limit_skipped" : "failed";
+                    throw new IllegalStateException("工具调用次数达到上限");
                 }
-                throw new LeaseLostException();
-            } catch (ExecutionException execution) {
-                Throwable cause = execution.getCause();
-                // 官方 @Tool 方法适配器会包装反射目标异常；恢复业务类型后才能正确区分沙箱与致命信号。
-                if (cause instanceof ToolExecutionException tool && tool.getCause() != null) {
-                    cause = tool.getCause();
+                attempts++;
+                try {
+                    result = attempt(input, context, turn, ledger, budget, toolDeadline);
+                    break;
+                } catch (TransientToolException transientFailure) {
+                    if (!policy.idempotent()
+                            || transientFailure.executionStarted()
+                            || attempts >= 2) {
+                        throw transientFailure;
+                    }
+                    // 重试不领取新的模型调用 ID，不重复 begin；下一次使用同一绝对截止时间。
                 }
-                if (cause instanceof RuntimeException runtime) {
-                    throw runtime;
-                }
-                throw new IllegalStateException("工具内部错误");
-            } finally {
-                if (future != null && !future.isDone()) {
-                    future.cancel(true);
-                }
-                // 不使用 ExecutorService.close：不合作的 I/O 不能无限拖住整轮 hard stop。
-                executor.shutdownNow();
             }
             ledger.checkpoint();
             result = result == null ? "" : result;
             original = result.length();
             truncated = original > policy.maxResultChars();
-            if (truncated) {
-                result =
-                        result.substring(0, policy.maxResultChars())
-                                + "\n[结果已截断，原长 "
-                                + original
-                                + " 字符]";
-            }
             result = redactor.redact(result);
+            if (truncated || result.length() > policy.maxResultChars()) {
+                truncated = true;
+                String marker = "\n[结果已截断，原长 " + original + " 字符]";
+                int cap = policy.maxResultChars();
+                result =
+                        marker.length() >= cap
+                                ? marker.substring(0, cap)
+                                : result.substring(
+                                                0, Math.min(result.length(), cap - marker.length()))
+                                        + marker;
+            }
             status = "success";
         } catch (RuntimeException ex) {
             if (ex instanceof TurnDeadlineExceededException) {
                 status = "timeout";
             } else if (ex instanceof LeaseLostException || ex instanceof AuditWriteException) {
                 status = "interrupted";
+            } else if (ex instanceof ToolTimeoutException) {
+                status = "timeout";
             } else if (ex instanceof SandboxViolationException) {
                 status = "sandbox_denied";
             }
-            error = redactor.redact(ex.getMessage() == null ? "工具内部错误" : ex.getMessage());
+            error = summary(ex.getMessage() == null ? "工具内部错误" : ex.getMessage(), 1000);
             failure = ex;
         }
         var end =
@@ -245,6 +244,78 @@ public final class GovernedToolCallback implements ToolCallback {
                             redactor.redact("工具 " + call.name() + " 执行失败：" + error + "；本轮不自动重试")));
         }
         return result;
+    }
+
+    private String summary(String raw, int cap) {
+        String safe = redactor.redact(raw);
+        return safe == null || safe.length() <= cap ? safe : safe.substring(0, cap - 6) + "[摘要截断]";
+    }
+
+    private String attempt(
+            String input,
+            ToolContext context,
+            TurnContext turn,
+            ToolCallLedger ledger,
+            TurnExecutionBudget budget,
+            long toolDeadline) {
+        long wait = Math.min(budget.remainingNanos(), toolDeadline - System.nanoTime());
+        if (wait <= 0) {
+            if (budget.expired()) {
+                throw new TurnDeadlineExceededException();
+            }
+            throw new ToolTimeoutException();
+        }
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        Future<String> future =
+                executor.submit(() -> {
+                    MDC.put("sessionId", turn.sessionId().toString());
+                    MDC.put("turnId", turn.turnId().toString());
+                    MDC.put("agent", turn.agent().profile().name());
+                    MDC.put("iteration", Integer.toString(turn.iteration()));
+                    try {
+                        ledger.checkpoint();
+                        return delegate.call(input, context);
+                    } finally {
+                        MDC.clear();
+                    }
+                });
+        try {
+            return future.get(wait, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException timeout) {
+            if (budget.expired()) {
+                throw new TurnDeadlineExceededException();
+            }
+            throw new ToolTimeoutException();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            if (budget.expired()) {
+                throw new TurnDeadlineExceededException();
+            }
+            throw new LeaseLostException();
+        } catch (ExecutionException execution) {
+            Throwable cause = execution.getCause();
+            if (cause instanceof ToolExecutionException tool && tool.getCause() != null) {
+                cause = tool.getCause();
+            }
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            throw new IllegalStateException("工具内部错误");
+        } finally {
+            if (!future.isDone()) {
+                future.cancel(true);
+            }
+            // 不等待不合作的 I/O，确保调用方仍能在共享 hard stop 内结束。
+            executor.shutdownNow();
+        }
+    }
+
+    private static final class ToolTimeoutException extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        ToolTimeoutException() {
+            super("工具自身超时");
+        }
     }
 
     /** 审计写入使用独立虚拟线程等待，等待上限取业务 deadline 或 hard stop 的剩余时间。 */

@@ -15,8 +15,20 @@ import org.springframework.ai.tool.resolution.ToolCallbackResolver;
 public final class UnknownToolResolver implements ToolCallbackResolver {
     private final ToolInvocationRecorder recorder;
     private final Redactor redactor;
+    private final java.util.function.ToIntFunction<String> perToolLimit;
+    private final int totalLimit;
 
     public UnknownToolResolver(ToolInvocationRecorder recorder, Redactor redactor) {
+        this(recorder, redactor, name -> 10, 30);
+    }
+
+    public UnknownToolResolver(
+            ToolInvocationRecorder recorder,
+            Redactor redactor,
+            java.util.function.ToIntFunction<String> perToolLimit,
+            int totalLimit) {
+        this.perToolLimit = perToolLimit;
+        this.totalLimit = totalLimit;
         this.recorder = recorder;
         this.redactor = redactor;
     }
@@ -38,6 +50,11 @@ public final class UnknownToolResolver implements ToolCallbackResolver {
                     }
                 };
         return new GovernedToolCallback(
-                denied, new ToolPolicy(true, Duration.ofSeconds(30), 10000), recorder, redactor);
+                denied,
+                new ToolPolicy(true, Duration.ofSeconds(30), 10000),
+                recorder,
+                redactor,
+                perToolLimit.applyAsInt(name),
+                totalLimit);
     }
 }

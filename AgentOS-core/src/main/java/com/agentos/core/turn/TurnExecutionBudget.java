@@ -22,6 +22,27 @@ public final class TurnExecutionBudget {
     private final java.util.concurrent.atomic.AtomicBoolean auditUnconfirmed =
             new java.util.concurrent.atomic.AtomicBoolean();
 
+    private final java.util.Map<String, Integer> toolAttempts = new java.util.HashMap<>();
+    private int totalToolAttempts;
+    private final Object attemptLock = new Object();
+
+    /** 官方 Manager 按模型调用计数；此处补记回调内部重试，避免实际尝试突破同一配置上限。 */
+    public boolean reserveToolAttempt(String name, int perToolLimit, int totalLimit) {
+        synchronized (attemptLock) {
+            if (expired() || cancelled()) {
+                throw new TurnDeadlineExceededException();
+            }
+            int used = toolAttempts.getOrDefault(name, 0);
+            if ((perToolLimit >= 0 && used >= perToolLimit)
+                    || (totalLimit >= 0 && totalToolAttempts >= totalLimit)) {
+                return false;
+            }
+            toolAttempts.put(name, used + 1);
+            totalToolAttempts++;
+            return true;
+        }
+    }
+
     /** 任一必要审计未确认后，最终结果不能再宣称 CONFIRMED。 */
     public void auditUnconfirmed() {
         auditUnconfirmed.set(true);

@@ -333,4 +333,180 @@ class GovernedToolCallbackTest {
             }
         }
     }
+
+    @Test
+    void truncationIncludesMarkerAndRedactsBeforeCuttingSecret() {
+        for (int cap : List.of(1, 30, 10000)) {
+            var recorder = mock(ToolInvocationRecorder.class);
+            when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+            String raw = "x".repeat(cap - 1) + "KNOWN_SECRET" + "y".repeat(40);
+            var tool =
+                    new GovernedToolCallback(
+                            callback(c -> raw),
+                            new ToolPolicy(true, Duration.ofSeconds(1), cap),
+                            recorder,
+                            REDACTOR);
+            String result = tool.call("{}", context(Duration.ofSeconds(3), () -> {}));
+            assertThat(result.length()).isLessThanOrEqualTo(cap);
+            assertThat(result).doesNotContain("KNOWN");
+            if (cap >= 30) {
+                assertThat(result).contains("已截断", "原长 " + raw.length());
+            }
+            var record = org.mockito.ArgumentCaptor.forClass(ToolInvocationRecord.class);
+            verify(recorder).complete(record.capture());
+            assertThat(record.getValue().resultChars()).isEqualTo(raw.length());
+            assertThat(record.getValue().resultTruncated()).isTrue();
+        }
+    }
+
+    @Test
+    void onlyDefinitelyNotStartedIdempotentTransientFailureRetriesAtMostOnce() {
+        for (boolean idempotent : List.of(false, true)) {
+            for (String mode : List.of("not_started", "started", "unknown", "always")) {
+                var recorder = mock(ToolInvocationRecorder.class);
+                when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+                var executions = new AtomicInteger();
+                var tool =
+                        new GovernedToolCallback(
+                                callback(c -> {
+                                    int attempt = executions.incrementAndGet();
+                                    if (attempt == 1 || mode.equals("always")) {
+                                        if (mode.equals("unknown")) {
+                                            throw new IllegalStateException("连接中断");
+                                        }
+                                        throw new com.agentos.core.tool.TransientToolException(
+                                                mode.equals("started"));
+                                    }
+                                    return "ok";
+                                }),
+                                new ToolPolicy(idempotent, Duration.ofSeconds(1), 100),
+                                recorder,
+                                REDACTOR);
+                var ctx = context(Duration.ofSeconds(3), () -> {});
+                boolean retry = idempotent && (mode.equals("not_started") || mode.equals("always"));
+                if (retry && !mode.equals("always")) {
+                    assertThat(tool.call("{}", ctx)).isEqualTo("ok");
+                } else {
+                    assertThatThrownBy(() -> tool.call("{}", ctx))
+                            .isInstanceOf(ToolExecutionException.class);
+                }
+                assertThat(executions).hasValue(retry ? 2 : 1);
+                var record = org.mockito.ArgumentCaptor.forClass(ToolInvocationRecord.class);
+                verify(recorder).begin(any());
+                verify(recorder).complete(record.capture());
+                assertThat(record.getValue().attempts()).isEqualTo(executions.get());
+            }
+        }
+    }
+
+    @Test
+    void jsonMustBeOneObjectAndInvalidInputNeverStartsTool() {
+        for (String invalid : List.of("null", "[]", "1", "{} {}", "{} trailing")) {
+            var recorder = mock(ToolInvocationRecorder.class);
+            when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+            var executions = new AtomicInteger();
+            var tool =
+                    govern(
+                            callback(c -> {
+                                executions.incrementAndGet();
+                                return "ok";
+                            }),
+                            recorder,
+                            Duration.ofSeconds(1));
+            assertThatThrownBy(() -> tool.call(invalid, context(Duration.ofSeconds(3), () -> {})))
+                    .isInstanceOf(ToolExecutionException.class);
+            assertThat(executions).hasValue(0);
+        }
+    }
+
+    @Test
+    void retryConsumesSameTurnAttemptLimitsAcrossCallsAndIterations() {
+        var recorder = mock(ToolInvocationRecorder.class);
+        when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+        var executions = new AtomicInteger();
+        var tool =
+                govern(
+                        callback(c -> {
+                            int n = executions.incrementAndGet();
+                            if (n % 2 == 1) {
+                                throw new com.agentos.core.tool.TransientToolException(false);
+                            }
+                            return "ok";
+                        }),
+                        recorder,
+                        Duration.ofSeconds(1));
+        var first = context(Duration.ofSeconds(5), () -> {});
+        var budget = (TurnExecutionBudget) first.getContext().get(ToolContextKeys.TURN_BUDGET);
+        for (int n = 0; n < 5; n++) {
+            var values =
+                    new java.util.HashMap<String, Object>(
+                            context(Duration.ofSeconds(5), () -> {}).getContext());
+            values.put(ToolContextKeys.TURN_BUDGET, budget);
+            assertThat(tool.call("{}", new ToolContext(values))).isEqualTo("ok");
+        }
+        assertThat(executions).hasValue(10);
+        var values =
+                new java.util.HashMap<String, Object>(
+                        context(Duration.ofSeconds(5), () -> {}).getContext());
+        values.put(ToolContextKeys.TURN_BUDGET, budget);
+        assertThatThrownBy(() -> tool.call("{}", new ToolContext(values)))
+                .isInstanceOf(ToolExecutionException.class)
+                .hasMessageContaining("上限");
+        assertThat(executions).hasValue(10);
+        var records = org.mockito.ArgumentCaptor.forClass(ToolInvocationRecord.class);
+        verify(recorder, org.mockito.Mockito.times(6)).complete(records.capture());
+        assertThat(records.getValue().status()).isEqualTo("limit_skipped");
+        assertThat(records.getValue().attempts()).isZero();
+    }
+
+    @Test
+    void auditInputAndErrorSummariesAreBoundedAfterRedaction() {
+        var recorder = mock(ToolInvocationRecorder.class);
+        when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+        var tool =
+                govern(
+                        callback(c -> {
+                            throw new IllegalStateException(
+                                    "token=KNOWN_SECRET " + "e".repeat(20000));
+                        }),
+                        recorder,
+                        Duration.ofSeconds(1));
+        assertThatThrownBy(() ->
+                        tool.call(
+                                "{\"value\":\"" + "i".repeat(20000) + "\"}",
+                                context(Duration.ofSeconds(3), () -> {})))
+                .isInstanceOf(ToolExecutionException.class)
+                .satisfies(e -> assertThat(e.getMessage().length()).isLessThan(1200));
+        var records = org.mockito.ArgumentCaptor.forClass(ToolInvocationRecord.class);
+        verify(recorder).complete(records.capture());
+        assertThat(records.getValue().inputJson().length()).isLessThanOrEqualTo(10000);
+        assertThat(records.getValue().errorMessage().length()).isLessThanOrEqualTo(1000);
+        assertThat(records.getValue().errorMessage()).doesNotContain("KNOWN_SECRET");
+    }
+
+    @Test
+    void exhaustedRetryBudgetKeepsAttemptedCallFailedAndDoesNotStartSecondAttempt() {
+        var recorder = mock(ToolInvocationRecorder.class);
+        when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+        var calls = new AtomicInteger();
+        var tool =
+                new GovernedToolCallback(
+                        callback(c -> {
+                            calls.incrementAndGet();
+                            throw new com.agentos.core.tool.TransientToolException(false);
+                        }),
+                        new ToolPolicy(true, Duration.ofSeconds(1), 10000),
+                        recorder,
+                        REDACTOR,
+                        1,
+                        1);
+        assertThatThrownBy(() -> tool.call("{}", context(Duration.ofSeconds(3), () -> {})))
+                .isInstanceOf(ToolExecutionException.class)
+                .hasMessageContaining("上限");
+        assertThat(calls).hasValue(1);
+        var record = org.mockito.ArgumentCaptor.forClass(ToolInvocationRecord.class);
+        verify(recorder).complete(record.capture());
+        assertThat(record.getValue().status()).isEqualTo("failed");
+        assertThat(record.getValue().attempts()).isOne();
+    }
 }

@@ -32,11 +32,10 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-tool-search-tool</artifactId>
         </dependency>
-        <!-- 工具治理测试走官方装配路径，避免在测试里裸建 Manager。 -->
+        <!-- 复用官方工具限次配置；治理重试补记实际尝试，不创建另一套 Manager。 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-autoconfigure-model-tool</artifactId>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

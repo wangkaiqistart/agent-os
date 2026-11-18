@@ -145,6 +145,9 @@ public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
             if (budget != null) {
                 budget.auditUnconfirmed();
             }
+            if (finalAudit) {
+                markUnconfirmed(record);
+            }
             // 仅记关联和固定文案，不输出 SQL、参数、Throwable 或数据库地址。
             var previous = org.slf4j.MDC.getCopyOfContextMap();
             org.slf4j.MDC.clear();
@@ -165,6 +168,67 @@ public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
             }
             throw new AuditWriteException(
                     finalAudit ? "工具执行后的审计未确认，操作可能已经执行" : "工具执行前的审计未确认，未执行本次工具", finalAudit);
+        }
+    }
+
+    /** 完成写入无法查证时，仅在原 hard stop 内尽力标记；永不覆盖已确认或已回收的终态。 */
+    private void markUnconfirmed(ToolInvocationRecord record) {
+        var budget = budgets.get(record.turnId());
+        if (budget == null || budget.hardStopped()) {
+            return;
+        }
+        try {
+            writer.write(
+                    budget,
+                    true,
+                    new RetryingAuditWriter.Operation<Void>() {
+                        @Override
+                        public Void write(Duration timeout) {
+                            return transactions.execute(
+                                    timeout,
+                                    () -> {
+                                        var row =
+                                                find(record)
+                                                        .orElseThrow(() ->
+                                                                new AuditWriteException(
+                                                                        "缺少工具审计意图"));
+                                        if (!sameIdentity(row, record)) {
+                                            throw new AuditWriteException("工具审计身份冲突");
+                                        }
+                                        if ("in_progress".equals(row.getStatus())) {
+                                            row.complete(
+                                                    "unconfirmed",
+                                                    null,
+                                                    record.resultChars(),
+                                                    record.resultTruncated(),
+                                                    "工具执行后的审计未确认，操作可能已经执行",
+                                                    record.attempts(),
+                                                    record.durationMs(),
+                                                    Instant.now());
+                                            repository.saveAndFlush(row);
+                                        }
+                                        return null;
+                                    });
+                        }
+
+                        @Override
+                        public boolean confirmed(Duration timeout) {
+                            return transactions.execute(
+                                    timeout,
+                                    () ->
+                                            find(record)
+                                                    .map(row ->
+                                                            sameIdentity(row, record)
+                                                                    && !"in_progress"
+                                                                            .equals(
+                                                                                    row
+                                                                                            .getStatus()))
+                                                    .orElse(false));
+                        }
+                    },
+                    null);
+        } catch (RuntimeException unavailable) {
+            // 数据库持续不可用时保留未确认事实，由回收路径处理原 in_progress；不得重跑工具。
         }
     }
 

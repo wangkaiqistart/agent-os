@@ -13,6 +13,7 @@ import com.agentos.tool.http.HttpTools;
 import com.agentos.tool.registry.ToolRegistry;
 import com.agentos.tool.sandbox.WhitelistSandbox;
 import java.util.Arrays;
+import org.springframework.ai.model.tool.autoconfigure.ToolCallingProperties;
 import org.springframework.ai.support.ToolCallbacks;
 import org.springframework.ai.tool.execution.ToolExecutionExceptionProcessor;
 import org.springframework.ai.tool.resolution.ToolCallbackResolver;
@@ -24,7 +25,7 @@ import org.springframework.context.annotation.Bean;
 @AutoConfiguration(
         beforeName = "org.springframework.ai.model.tool.autoconfigure.ToolCallingAutoConfiguration",
         afterName = "com.agentos.storage.StorageAutoConfiguration")
-@EnableConfigurationProperties(HttpToolProperties.class)
+@EnableConfigurationProperties({HttpToolProperties.class, ToolCallingProperties.class})
 public class ToolAutoConfiguration {
     @Bean
     Sandbox sandbox(HttpToolProperties properties) {
@@ -41,7 +42,9 @@ public class ToolAutoConfiguration {
             HttpTools http,
             HttpToolProperties properties,
             ToolInvocationRecorder recorder,
-            Redactor redactor) {
+            Redactor redactor,
+            ToolCallingProperties toolProperties) {
+        var limits = toolProperties.getLimits();
         return new ToolRegistry(
                 Arrays.stream(ToolCallbacks.from(http))
                         .map(cb ->
@@ -53,13 +56,38 @@ public class ToolAutoConfiguration {
                                                         properties.timeout(),
                                                         properties.maxResultChars()),
                                                 recorder,
-                                                redactor))
+                                                redactor,
+                                                perToolLimit(limits, cb.getToolDefinition().name()),
+                                                requiredLimit(limits.getMaxTotalToolCalls())))
                         .toList());
     }
 
     @Bean
-    ToolCallbackResolver toolCallbackResolver(ToolInvocationRecorder recorder, Redactor redactor) {
-        return new UnknownToolResolver(recorder, redactor);
+    ToolCallbackResolver toolCallbackResolver(
+            ToolInvocationRecorder recorder,
+            Redactor redactor,
+            ToolCallingProperties toolProperties) {
+        var limits = toolProperties.getLimits();
+        return new UnknownToolResolver(
+                recorder,
+                redactor,
+                name -> perToolLimit(limits, name),
+                requiredLimit(limits.getMaxTotalToolCalls()));
+    }
+
+    private static int perToolLimit(ToolCallingProperties.Limits limits, String name) {
+        return limits.getExcludedTools().contains(name)
+                ? -1
+                : requiredLimit(
+                        limits.getMaxCallsPerTool()
+                                .getOrDefault(name, limits.getMaxCallsPerToolDefault()));
+    }
+
+    private static int requiredLimit(Integer value) {
+        if (value == null || value < -1) {
+            throw new IllegalArgumentException("工具限次必须非空，且非负或为 -1");
+        }
+        return value;
     }
 
     @Bean

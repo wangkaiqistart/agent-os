@@ -187,4 +187,35 @@ class ToolAutoConfigurationTest {
                             .isEqualTo("request-scoped");
                 });
     }
+
+    @Test
+    void invalidOrNullAttemptLimitsFailWithSafeConfigurationError() {
+        for (String mode : List.of("null_total", "negative", "null_per_tool")) {
+            var properties =
+                    new org.springframework.ai.model.tool.autoconfigure.ToolCallingProperties();
+            if (mode.equals("null_per_tool")) {
+                properties.getLimits().setMaxCallsPerToolDefault(null);
+            } else {
+                properties.getLimits().setMaxTotalToolCalls(mode.equals("negative") ? -2 : null);
+            }
+            var httpProperties =
+                    new com.agentos.tool.http.HttpToolProperties(
+                            List.of(), null, 3, 0, null, 10000);
+            try (var http =
+                    new com.agentos.tool.http.HttpTools(
+                            httpProperties,
+                            new com.agentos.tool.sandbox.WhitelistSandbox(List.of()))) {
+                org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                                new ToolAutoConfiguration()
+                                        .toolCatalog(
+                                                http,
+                                                httpProperties,
+                                                mock(ToolInvocationRecorder.class),
+                                                new Redactor(List::of),
+                                                properties))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessageContaining("工具限次");
+            }
+        }
+    }
 }
