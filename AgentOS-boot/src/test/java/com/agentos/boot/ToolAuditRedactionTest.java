@@ -32,4 +32,14 @@ class ToolAuditRedactionTest {
                     assertThat(redactor.redact("SYNTHETIC_ROTATED_KEY")).isEqualTo("***");
                 });
     }
+
+    @Test
+    void escapedJsonSecretsAreRedactedBeforeTheyReachToolAuditAndHistory() {
+        var redactor = new Redactor(() -> java.util.List.of("SYNTHETIC_SECRET"));
+        String input =
+                "{\"url\":\"https://example.test/?token=URL_PRIVATE\",\"nested\":{\"authorization\":\"Bearer HEADER_PRIVATE\"},\"note\":\"SYNTHETIC_SECRET\"}";
+        String safe = redactor.redact(input);
+        assertThat(safe).doesNotContain("URL_PRIVATE", "HEADER_PRIVATE", "SYNTHETIC_SECRET");
+        assertThat(safe).contains("***");
+    }
 }

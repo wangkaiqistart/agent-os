@@ -544,9 +544,9 @@ AgentOS 的所有工具都是 Spring AI 的 `ToolCallback`：`getToolDefinition(
 1. 从 `ToolContext` 取出 `TurnContext`，检查整轮截止时间并续租会话租约（见 4.3）
 2. 调用 MCP 来源的工具时，传给原回调的 `ToolContext` 去掉 AgentOS 内部的键（见 6.4）
 3. 先把脱敏参数写成in_progress工具记录并确认，再在虚拟线程执行原回调，最多等待"工具策略 `timeout`"与"剩余整轮时间"中的较小值
-4. 幂等工具遇到可重试失败（I/O 异常、超时、HTTP 5xx / 429）时指数退避重试，最多 3 次，总时长不超过整轮截止时间；非幂等工具不重试
-5. 结果超过 `max_result_chars` 时截断，末尾注明"结果已截断，原长 N 字符"
-6. 脱敏后更新原tool_invocations记录的终态（含重试次数、结果状态、原始长度）；崩溃或致命中止遗留的in_progress由正常finally或恢复清理改interrupted
+4. 仅当工具声明幂等，并通过 `TransientToolException(executionStarted=false)` 明确报告瞬时故障且外部动作尚未开始时，最多自动重试 1 次（最多 2 次尝试）；普通 I/O 异常、超时、HTTP 5xx / 429 本身不足以证明未执行，不自动重试。所有尝试共享一个工具 deadline、整轮预算和调用次数上限；非幂等、完成状态未知、审计未确认或租约丢失均禁止重试
+5. 记录原始字符数，先脱敏再按 `max_result_chars` 截断，标记“结果已截断，原长 N 字符”计入上限；上限太小无法容纳完整标记时仅保留标记前缀，原始字符数仍存入审计字段
+6. 更新原 tool_invocations 终态（含实际尝试数、结果状态、原始长度）；完成写入无法确认时，在原 hard stop 内尽力将原 in_progress 标为 unconfirmed，报告操作可能已发生并停止本轮。数据库持续不可用时不伪称标记成功；崩溃遗留的 in_progress 由恢复清理改 interrupted
 7. 失败时抛 `ToolExecutionException`，交给异常处理器（见下文）
 
 Sandbox 检查不放在装饰器里，而在内置工具内部：只有工具自己知道要访问的路径、命令或 URL（见 6.7）。MCP 工具在独立进程里执行，不经过 AgentOS 的 Sandbox，靠 MCP server 自身配置和 `McpToolFilter` 约束暴露范围。
@@ -588,6 +588,8 @@ HTTP 客户端的异常信息经常带完整 URL，所以 `error_message` 也要
 
 tool_invocations由GovernedToolCallback先记后做、结束更新。只对审计瞬时写故障作有限重试，稳定写入ID/唯一键保证提交结果未知时不双记；不重发模型或重复执行工具。持续数据库故障停止轮次、写安全ERROR并报告持久化未确认，不能保证缺失模型用量自动补齐；数据库恢复后按失效租约和终态孤儿工具记录回收，不把日志视为落库成功。
 
+**重试次数也计入限次。** 官方 Manager 基于本轮累计工具消息计数，不知道 callback 内部重试。治理层复用同一 `ToolCallingProperties` 的默认、按名称和总数配置，在 `TurnExecutionBudget` 中跨迭代补记每次底层尝试，不替换官方 Manager。整个调用未执行时记 limit_skipped/attempts=0；只有重试预算耗尽而已有失败尝试时保留 failed 和真实 attempts。
+
 **次数超限的调用。** `on-limit-exceeded=RETURN_ERROR_RESPONSE` 时，`DefaultToolCallingManager` 跳过超限的调用，不会进入 `GovernedToolCallback`。`ToolExecutor` 对比响应里请求的调用与实际执行的调用，仅在Manager正常返回时为因次数上限跳过者补写tool_invocations（limit_skipped）；中途致命中止的后续请求不冒充超限。
 
 **观测。** Spring AI 用 Micrometer 以 `spring.ai.tool` 为名称记录每次工具调用（工具名、耗时、链路追踪上下文）。工具参数和结果导出到 Span 默认关闭，AgentOS 保持关闭，因为它们可能包含文件内容、webhook 地址等敏感数据。审计以 `tool_invocations` 为准，观测数据用于监控。
@@ -595,6 +597,8 @@ tool_invocations由GovernedToolCallback先记后做、结束更新。只对审�
 ![Tool 调用流程：LLM 决定调用 → AgentOS 执行 → 外部世界 → 结果回填](../website/public/images/docs-tool-flow.svg)
 
 ### 6.2 内置 Tool（九个）
+
+> **004 首期实现边界（2026-11-18）**：当前仅注册 `http_get`，已接入统一授权、治理、审计和预算；本节其余工具及 6.3–6.5 的完整三档扩展仍为目标设计。没有自动扫描任意 `@Tool` Bean，MCP、文件/Shell、Memory/Notify 工具、交互/搜索及 `tool list` 尚未实现。004 Phase 4–7 不等于完整 Tool 体系交付。
 
 核心阶段提供九个内置 Tool，分五组：
 

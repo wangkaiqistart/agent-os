@@ -66,19 +66,19 @@ description: "Task list template for AgentOS tool registration and secure execut
 
 ### Tests for User Story 2
 
-- [ ] T017 [P] [US2] 先编写并确认失败的治理回调行为测试，覆盖账本 FIFO 领取、JSON 参数校验、begin 先于 delegate、工具超时取消、普通工具默认 10000 字符截断、结果脱敏、幂等工具仅在 `executionStarted=false` 的瞬时失败时最多重试 1 次、完成状态未知禁止重试、普通错误可继续、致命错误重抛，文件：AgentOS-tool/src/test/java/com/agentos/tool/govern/GovernedToolCallbackTest.java
-- [ ] T018 [P] [US2] 先编写并确认失败的审计故障测试，覆盖 begin 失败零执行、complete 未确认进入 `unconfirmed` 并提示可能已执行、唯一键查证不重复插入、interrupted 终态不被迟到完成覆盖，文件：AgentOS-tool/src/test/java/com/agentos/tool/govern/AuditFailureTest.java、AgentOS-storage/src/test/java/com/agentos/storage/audit/JpaToolInvocationRecorderTest.java、AgentOS-storage/src/test/java/com/agentos/storage/audit/AuditTransactionTest.java
-- [ ] T019 [P] [US2] 先编写并确认失败的 ToolExecutor/ReAct 历史测试，覆盖完整 conversationHistory 回填、调用 ID 关联、returnDirect 收口和过程 sink 异常停止后续通知，文件：AgentOS-core/src/test/java/com/agentos/core/turn/ToolExecutorTest.java、AgentOS-core/src/test/java/com/agentos/core/turn/ReActLoopStreamingTest.java
-- [ ] T020 [P] [US2] 先编写并确认失败的 Boot PostgreSQL 闭环测试，按数据库 ID 核对 begin/complete 状态、工具消息、调用 ID、敏感信息缺失和审计未确认结果，文件：AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ToolAuditRedactionTest.java
+- [X] T017 [P] [US2] 先编写并确认失败的治理回调行为测试，覆盖账本 FIFO 领取、JSON 参数校验、begin 先于 delegate、工具超时取消、普通工具默认 10000 字符截断、结果脱敏、幂等工具仅在 `executionStarted=false` 的瞬时失败时最多重试 1 次、完成状态未知禁止重试、普通错误可继续、致命错误重抛，文件：AgentOS-tool/src/test/java/com/agentos/tool/govern/GovernedToolCallbackTest.java
+- [X] T018 [P] [US2] 先编写并确认失败的审计故障测试，覆盖 begin 失败零执行、complete 未确认进入 `unconfirmed` 并提示可能已执行、唯一键查证不重复插入、interrupted 终态不被迟到完成覆盖，文件：AgentOS-tool/src/test/java/com/agentos/tool/govern/AuditFailureTest.java、AgentOS-storage/src/test/java/com/agentos/storage/audit/JpaToolInvocationRecorderTest.java、AgentOS-storage/src/test/java/com/agentos/storage/audit/AuditTransactionTest.java
+- [X] T019 [P] [US2] 先编写并确认失败的 ToolExecutor/ReAct 历史测试，覆盖完整 conversationHistory 回填、调用 ID 关联、returnDirect 收口和过程 sink 异常停止后续通知，文件：AgentOS-core/src/test/java/com/agentos/core/turn/ToolExecutorTest.java、AgentOS-core/src/test/java/com/agentos/core/turn/ReActLoopStreamingTest.java
+- [X] T020 [P] [US2] 先编写并确认失败的 Boot PostgreSQL 闭环测试，按数据库 ID 核对 begin/complete 状态、工具消息、调用 ID、敏感信息缺失和审计未确认结果，文件：AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ToolAuditRedactionTest.java
 
 ### Implementation for User Story 2
 
-- [ ] T021 [US2] 实现 GovernedToolCallback 的统一治理顺序：检查 TurnContext/租约/预算、领取调用 ID、begin 审计、可取消执行、普通结果默认 10000 字符截断、幂等工具瞬时失败最多 1 次重试、完成状态未知禁止重试、complete 审计和错误分类，文件：AgentOS-tool/src/main/java/com/agentos/tool/govern/GovernedToolCallback.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolCallLedger.java
-- [ ] T022 [US2] 实现 JpaToolInvocationRecorder 的独立短事务、有限瞬时故障重试、唯一键查证和 `unconfirmed` 持久化语义，要求 complete 只更新原 `in_progress` 行，文件：AgentOS-storage/src/main/java/com/agentos/storage/audit/JpaToolInvocationRecorder.java、AgentOS-storage/src/main/java/com/agentos/storage/audit/AuditTransactions.java、AgentOS-core/src/main/java/com/agentos/core/audit/RetryingAuditWriter.java
-- [ ] T023 [US2] 实现工具异常处理器，将普通业务错误、参数错误、未授权工具、沙箱拒绝和工具自身超时转成安全工具结果；审计失败、租约丢失和整轮超时继续抛出，文件：AgentOS-tool/src/main/java/com/agentos/tool/govern/AgentOsToolExecutionExceptionProcessor.java、AgentOS-core/src/main/java/com/agentos/core/turn/TurnDeadlineExceededException.java
-- [ ] T024 [US2] 完善 ToolExecutor 对官方 Manager 的唯一调用、完整历史切片和 limit_skipped 补记，禁止自行遍历 callback 或构造 Manager，文件：AgentOS-core/src/main/java/com/agentos/core/turn/ToolExecutor.java
-- [ ] T025 [US2] 将治理 callback、审计 recorder、resolver 和异常处理器接入唯一自动配置，确认请求级工具优先且 fallback 永不暴露真实未授权 Bean，文件：AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java、AgentOS-tool/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports、AgentOS-boot/src/main/resources/application.yaml
-- [ ] T026 [US2] 运行 US2 独立闭环并记录先记后做、执行后未确认、历史回填、脱敏和 PostgreSQL 行状态证据，文件：specs/004-agentos-tool-system/quickstart.md、AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ToolAuditRedactionTest.java
+- [X] T021 [US2] 实现 GovernedToolCallback 的统一治理顺序：检查 TurnContext/租约/预算、领取调用 ID、begin 审计、可取消执行、普通结果默认 10000 字符截断、幂等工具瞬时失败最多 1 次重试、完成状态未知禁止重试、complete 审计和错误分类，文件：AgentOS-tool/src/main/java/com/agentos/tool/govern/GovernedToolCallback.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolCallLedger.java
+- [X] T022 [US2] 实现 JpaToolInvocationRecorder 的独立短事务、有限瞬时故障重试、唯一键查证和 `unconfirmed` 持久化语义，要求 complete 只更新原 `in_progress` 行，文件：AgentOS-storage/src/main/java/com/agentos/storage/audit/JpaToolInvocationRecorder.java、AgentOS-storage/src/main/java/com/agentos/storage/audit/AuditTransactions.java、AgentOS-core/src/main/java/com/agentos/core/audit/RetryingAuditWriter.java
+- [X] T023 [US2] 实现工具异常处理器，将普通业务错误、参数错误、未授权工具、沙箱拒绝和工具自身超时转成安全工具结果；审计失败、租约丢失和整轮超时继续抛出，文件：AgentOS-tool/src/main/java/com/agentos/tool/govern/AgentOsToolExecutionExceptionProcessor.java、AgentOS-core/src/main/java/com/agentos/core/turn/TurnDeadlineExceededException.java
+- [X] T024 [US2] 完善 ToolExecutor 对官方 Manager 的唯一调用、完整历史切片和 limit_skipped 补记，禁止自行遍历 callback 或构造 Manager，文件：AgentOS-core/src/main/java/com/agentos/core/turn/ToolExecutor.java
+- [X] T025 [US2] 将治理 callback、审计 recorder、resolver 和异常处理器接入唯一自动配置，确认请求级工具优先且 fallback 永不暴露真实未授权 Bean，文件：AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java、AgentOS-tool/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports、AgentOS-boot/src/main/resources/application.yaml
+- [X] T026 [US2] 运行 US2 独立闭环并记录先记后做、执行后未确认、历史回填、脱敏和 PostgreSQL 行状态证据，文件：specs/004-agentos-tool-system/quickstart.md、AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ToolAuditRedactionTest.java
 
 **Checkpoint**: 任一内部工具均可复用统一治理和审计链；底层副作用没有审计许可不得发生。
 
@@ -92,17 +92,17 @@ description: "Task list template for AgentOS tool registration and secure execut
 
 ### Tests for User Story 3
 
-- [ ] T027 [P] [US3] 先编写并确认失败的 WhitelistSandbox 契约测试，覆盖默认空白、大小写、精确域名、子域通配符、根域拒绝、精确 IP、非法协议、user-info 和非 HTTP 动作，文件：AgentOS-tool/src/test/java/com/agentos/tool/sandbox/WhitelistSandboxTest.java
-- [ ] T028 [P] [US3] 先编写并确认失败的 HTTP GET 行为测试，覆盖 2xx 正文、非 2xx 安全状态、白名单拒绝零请求、逐跳重定向、缺失/非法 Location、最多 3 次跳转和工具 Schema，文件：AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsTest.java、AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolPropertiesTest.java
-- [ ] T029 [P] [US3] 先编写并确认失败的 HTTP 截止时间测试，覆盖首字节等待、响应头后慢正文、持续分片不续命、正文超过 1 MiB 只返回安全错误、取消后零重试，文件：AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsDeadlineTest.java、AgentOS-tool/src/test/java/com/agentos/tool/support/LocalHttpServer.java
+- [X] T027 [P] [US3] 先编写并确认失败的 WhitelistSandbox 契约测试，覆盖默认空白、大小写、精确域名、子域通配符、根域拒绝、精确 IP、非法协议、user-info 和非 HTTP 动作，文件：AgentOS-tool/src/test/java/com/agentos/tool/sandbox/WhitelistSandboxTest.java
+- [X] T028 [P] [US3] 先编写并确认失败的 HTTP GET 行为测试，覆盖 2xx 正文、非 2xx 安全状态、白名单拒绝零请求、逐跳重定向、缺失/非法 Location、最多 3 次跳转和工具 Schema，文件：AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsTest.java、AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolPropertiesTest.java
+- [X] T029 [P] [US3] 先编写并确认失败的 HTTP 截止时间测试，覆盖首字节等待、响应头后慢正文、持续分片不续命、正文超过 1 MiB 只返回安全错误、取消后零重试，文件：AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsDeadlineTest.java、AgentOS-tool/src/test/java/com/agentos/tool/support/LocalHttpServer.java
 
 ### Implementation for User Story 3
 
-- [ ] T030 [US3] 实现 WhitelistSandbox 的 URL 解析与默认拒绝规则，要求绝对 HTTP/HTTPS、无 user-info、精确域名/精确 IP和仅子域通配，文件：AgentOS-tool/src/main/java/com/agentos/tool/sandbox/WhitelistSandbox.java、AgentOS-core/src/main/java/com/agentos/core/tool/SandboxAction.java
-- [ ] T031 [US3] 实现 HttpToolProperties 的配置归一化和边界校验，默认重定向 3、正文 1 MiB、超时 30 秒，拒绝非法范围和非正超时，文件：AgentOS-tool/src/main/java/com/agentos/tool/http/HttpToolProperties.java
-- [ ] T032 [US3] 在 T030 和 T031 完成后实现 HttpTools 的只读 GET、禁用自动跳转、逐跳沙箱检查、有界 BodySubscriber、共享单调 deadline、超限安全错误和非 2xx 安全结果，文件：AgentOS-tool/src/main/java/com/agentos/tool/http/HttpTools.java
-- [ ] T033 [US3] 将 http_get 以 GovernedToolCallback 注册，并确保 ToolContext 不进入模型 Schema、HTTP 结果经过统一脱敏和治理长度限制，文件：AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java、AgentOS-tool/src/main/java/com/agentos/tool/http/HttpTools.java
-- [ ] T034 [US3] 运行 US3 独立 HTTP 验证并记录白名单零请求、重定向边界、正文超限不回传、持续分片截止时间和非 2xx 脱敏证据，文件：specs/004-agentos-tool-system/quickstart.md、AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsTest.java、AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsDeadlineTest.java
+- [X] T030 [US3] 实现 WhitelistSandbox 的 URL 解析与默认拒绝规则，要求绝对 HTTP/HTTPS、无 user-info、精确域名/精确 IP和仅子域通配，文件：AgentOS-tool/src/main/java/com/agentos/tool/sandbox/WhitelistSandbox.java、AgentOS-core/src/main/java/com/agentos/core/tool/SandboxAction.java
+- [X] T031 [US3] 实现 HttpToolProperties 的配置归一化和边界校验，默认重定向 3、正文 1 MiB、超时 30 秒，拒绝非法范围和非正超时，文件：AgentOS-tool/src/main/java/com/agentos/tool/http/HttpToolProperties.java
+- [X] T032 [US3] 在 T030 和 T031 完成后实现 HttpTools 的只读 GET、禁用自动跳转、逐跳沙箱检查、有界 BodySubscriber、共享单调 deadline、超限安全错误和非 2xx 安全结果，文件：AgentOS-tool/src/main/java/com/agentos/tool/http/HttpTools.java
+- [X] T033 [US3] 将 http_get 以 GovernedToolCallback 注册，并确保 ToolContext 不进入模型 Schema、HTTP 结果经过统一脱敏和治理长度限制，文件：AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java、AgentOS-tool/src/main/java/com/agentos/tool/http/HttpTools.java
+- [X] T034 [US3] 运行 US3 独立 HTTP 验证并记录白名单零请求、重定向边界、正文超限不回传、持续分片截止时间和非 2xx 脱敏证据，文件：specs/004-agentos-tool-system/quickstart.md、AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsTest.java、AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsDeadlineTest.java
 
 **Checkpoint**: Agent 声明 `http_get` 后可通过本地替身完成受治理读取；未授权地址和超大响应不产生越权结果。
 
@@ -116,17 +116,17 @@ description: "Task list template for AgentOS tool registration and secure execut
 
 ### Tests for User Story 4
 
-- [ ] T035 [P] [US4] 先编写并确认失败的 ReAct 模型迭代限制测试，覆盖默认 10、覆盖 3、最后一次工具请求不发送下一次模型、正常完成不误报上限、不额外发送总结调用，文件：AgentOS-core/src/test/java/com/agentos/core/turn/ReActLoopLimitsTest.java
-- [ ] T036 [P] [US4] 先编写并确认失败的工具调用限次测试，覆盖单工具、总工具、跨迭代累计、多个同名调用、limit_skipped 一一对应和致命异常不误标超限，文件：AgentOS-core/src/test/java/com/agentos/core/turn/ToolCallLimitsTest.java、AgentOS-core/src/test/java/com/agentos/core/turn/ToolExecutorTest.java
-- [ ] T037 [P] [US4] 先编写并确认失败的整轮 deadline 与流式事件测试，覆盖同步/流式一致、持续 delta 不续命、过程 sink 异常停止回调、最终通知最多一次、工具/审计等待共享预算和 hard stop 收尾；对慢模型、慢工具、慢正文、审计等待和持续流式响应各重复 20 次，核对每类 p95 在预算加 1 秒内返回，文件：AgentOS-core/src/test/java/com/agentos/core/turn/TurnDeadlineTest.java、AgentOS-core/src/test/java/com/agentos/core/turn/ReActLoopStreamingTest.java、AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsDeadlineTest.java
-- [ ] T038 [P] [US4] 先编写并确认失败的 Boot 全链路限次/截止时间集成测试，使用真实装配的官方 Manager、治理 callback、数据库和本地模型/HTTP 替身核对实际调用数、跳过数和耗时，文件：AgentOS-boot/src/test/java/com/agentos/boot/ReActDeadlineIntegrationTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java
+- [X] T035 [P] [US4] 先编写并确认失败的 ReAct 模型迭代限制测试，覆盖默认 10、覆盖 3、最后一次工具请求不发送下一次模型、正常完成不误报上限、不额外发送总结调用，文件：AgentOS-core/src/test/java/com/agentos/core/turn/ReActLoopLimitsTest.java
+- [X] T036 [P] [US4] 先编写并确认失败的工具调用限次测试，覆盖单工具、总工具、跨迭代累计、多个同名调用、limit_skipped 一一对应和致命异常不误标超限，文件：AgentOS-core/src/test/java/com/agentos/core/turn/ToolCallLimitsTest.java、AgentOS-core/src/test/java/com/agentos/core/turn/ToolExecutorTest.java
+- [X] T037 [P] [US4] 先编写并确认失败的整轮 deadline 与流式事件测试，覆盖同步/流式一致、持续 delta 不续命、过程 sink 异常停止回调、最终通知最多一次、工具/审计等待共享预算和 hard stop 收尾；对慢模型、慢工具、慢正文、审计等待和持续流式响应各重复 20 次，核对每类 p95 在预算加 1 秒内返回，文件：AgentOS-core/src/test/java/com/agentos/core/turn/TurnDeadlineTest.java、AgentOS-core/src/test/java/com/agentos/core/turn/ReActLoopStreamingTest.java、AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsDeadlineTest.java
+- [X] T038 [P] [US4] 先编写并确认失败的 Boot 全链路限次/截止时间集成测试，使用真实装配的官方 Manager、治理 callback、数据库和本地模型/HTTP 替身核对实际调用数、跳过数和耗时，文件：AgentOS-boot/src/test/java/com/agentos/boot/ReActDeadlineIntegrationTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java
 
 ### Implementation for User Story 4
 
-- [ ] T039 [US4] 实现 ReActLoop 的模型迭代计数、MAX_ITERATIONS 安全收口、同步/流式工具闭环、完整历史追加和最终事件收口，文件：AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java、AgentOS-core/src/main/java/com/agentos/core/turn/ManagedTurnSink.java、AgentOS-core/src/main/java/com/agentos/core/turn/TurnSink.java
-- [ ] T040 [US4] 接入并校验 Spring AI 工具限次配置，默认单工具 10、总工具 30、超限返回错误结果，且计数跨迭代不重置；幂等重试的每次底层尝试同样计入限次，文件：AgentOS-boot/src/main/resources/application.yaml、AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolExecutor.java
-- [ ] T041 [US4] 强化 TurnExecutionBudget、ToolCallLedger、GovernedToolCallback 和 HttpTools 的共享 deadline、Future/HTTP 取消、资源清理和租约丢失终止，文件：AgentOS-core/src/main/java/com/agentos/core/turn/TurnExecutionBudget.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolCallLedger.java、AgentOS-tool/src/main/java/com/agentos/tool/govern/GovernedToolCallback.java、AgentOS-tool/src/main/java/com/agentos/tool/http/HttpTools.java
-- [ ] T042 [US4] 运行 US4 独立验收并记录模型次数、底层工具次数、limit_skipped 数量、过程/终结事件数量和实际耗时，文件：specs/004-agentos-tool-system/quickstart.md、AgentOS-boot/src/test/java/com/agentos/boot/ReActDeadlineIntegrationTest.java
+- [X] T039 [US4] 实现 ReActLoop 的模型迭代计数、MAX_ITERATIONS 安全收口、同步/流式工具闭环、完整历史追加和最终事件收口，文件：AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java、AgentOS-core/src/main/java/com/agentos/core/turn/ManagedTurnSink.java、AgentOS-core/src/main/java/com/agentos/core/turn/TurnSink.java
+- [X] T040 [US4] 接入并校验 Spring AI 工具限次配置，默认单工具 10、总工具 30、超限返回错误结果，且计数跨迭代不重置；幂等重试的每次底层尝试同样计入限次，文件：AgentOS-boot/src/main/resources/application.yaml、AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolExecutor.java
+- [X] T041 [US4] 强化 TurnExecutionBudget、ToolCallLedger、GovernedToolCallback 和 HttpTools 的共享 deadline、Future/HTTP 取消、资源清理和租约丢失终止，文件：AgentOS-core/src/main/java/com/agentos/core/turn/TurnExecutionBudget.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolCallLedger.java、AgentOS-tool/src/main/java/com/agentos/tool/govern/GovernedToolCallback.java、AgentOS-tool/src/main/java/com/agentos/tool/http/HttpTools.java
+- [X] T042 [US4] 运行 US4 独立验收并记录模型次数、底层工具次数、limit_skipped 数量、过程/终结事件数量和实际耗时，文件：specs/004-agentos-tool-system/quickstart.md、AgentOS-boot/src/test/java/com/agentos/boot/ReActDeadlineIntegrationTest.java
 
 **Checkpoint**: 同步和流式工具闭环均有硬上限；持续响应不能续命，正常最终回答不触发额外模型调用。
 
@@ -136,11 +136,11 @@ description: "Task list template for AgentOS tool registration and secure execut
 
 **Purpose**: 完成跨故事质量门、文档和可演示证据。
 
-- [ ] T043 [P] 更新 Tool 代码导读、配置说明和边界文档，准确反映已实现的 HTTP、审计、限次和未实现的远程工具/复杂策略范围，文件：docs/code-reading/AgentOS-tool.md、docs/TechnicalSolution.md
-- [ ] T044 [P] 增补架构、脱敏和数据库测试报告中的 Tool 证据索引，文件：AgentOS-boot/src/test/java/com/agentos/boot/ArchitectureRulesTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ToolAuditRedactionTest.java、scripts/check_db_test_reports.py
-- [ ] T045 运行 Spotless、全量 Maven 质量门和数据库测试执行检查，修复失败但不得新增排除项或跳过 PostgreSQL 测试，文件：pom.xml、specs/004-agentos-tool-system/quickstart.md
-- [ ] T046 [P] 在显式 `llm` profile 下运行真实模型天气冒烟；缺少凭证时标记 NOT_RUN，不在默认验证中发送真实请求，文件：AgentOS-boot/src/test/java/com/agentos/boot/smoke/ReActWeatherSmokeTest.java、specs/004-agentos-tool-system/quickstart.md
-- [ ] T047 完成本 Feature 的三类工具 Demo/验收证据：合法 `http_get`、白名单拒绝且零网络请求、超时/正文超限/审计未确认；逐项核对 FR-001–FR-025、FR-003a、FR-011a、SC-001–SC-009、审计状态和敏感信息扫描，文件：specs/004-agentos-tool-system/quickstart.md、specs/004-agentos-tool-system/tasks.md
+- [X] T043 [P] 更新 Tool 代码导读、配置说明和边界文档，准确反映已实现的 HTTP、审计、限次和未实现的远程工具/复杂策略范围，文件：docs/code-reading/AgentOS-tool.md、docs/TechnicalSolution.md
+- [X] T044 [P] 增补架构、脱敏和数据库测试报告中的 Tool 证据索引，文件：AgentOS-boot/src/test/java/com/agentos/boot/ArchitectureRulesTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ToolAuditRedactionTest.java、scripts/check_db_test_reports.py
+- [X] T045 运行 Spotless、全量 Maven 质量门和数据库测试执行检查，修复失败但不得新增排除项或跳过 PostgreSQL 测试，文件：pom.xml、specs/004-agentos-tool-system/quickstart.md
+- [X] T046 [P] 在显式 `llm` profile 下运行真实模型天气冒烟；缺少凭证时标记 NOT_RUN，不在默认验证中发送真实请求，文件：AgentOS-boot/src/test/java/com/agentos/boot/smoke/ReActWeatherSmokeTest.java、specs/004-agentos-tool-system/quickstart.md
+- [X] T047 完成本 Feature 的三类工具 Demo/验收证据：合法 `http_get`、白名单拒绝且零网络请求、超时/正文超限/审计未确认；逐项核对 FR-001–FR-025、FR-003a、FR-011a、SC-001–SC-009、审计状态和敏感信息扫描，文件：specs/004-agentos-tool-system/quickstart.md、specs/004-agentos-tool-system/tasks.md
 
 ---
 
@@ -242,3 +242,7 @@ description: "Task list template for AgentOS tool registration and secure execut
 - `[P]` 仅用于可在不同文件上并行且不依赖未完成任务的工作。
 - 任务路径均为仓库内精确文件路径；新增测试文件必须在实现任务前创建。
 - 本任务清单不创建 worktree、不修改 constitution、不自动提交/推送/合并/发布。
+
+## Phase 4–7 完成说明（2026-11-18）
+
+T017–T047 已按阶段实施并执行适用验证，完整证据见 `acceptance-results.md`。T046 按任务内缺凭证分支处理：显式 llm 路径的两项测试被环境门禁跳过，真实模型状态为 NOT_RUN，不视为真实联调通过。完整 Tool 工具清单和 MCP 客户端不在本 Feature 范围。

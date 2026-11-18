@@ -1,0 +1,117 @@
+{
+  "date": "2026-11-18",
+  "branch": "specs/004-agentos-tool-system",
+  "feature": "004-agentos-tool-system",
+  "scope": "Phase 4–7; http_get and unified governance",
+  "quality_gate": {
+    "command": "mvn -B -ntp verify",
+    "status": "PASS",
+    "tests": 540,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "finished_at": "2026-11-18T17:16:50+08:00"
+  },
+  "database_evidence": {
+    "command": "python3 scripts/check_db_test_reports.py --tools",
+    "status": "PASS",
+    "required_tool_cases": 7,
+    "database": "isolated PostgreSQL Testcontainers, pgvector/pgvector:pg17"
+  },
+  "python_gate_tests": {
+    "status": "PASS",
+    "tests": 8
+  },
+  "deadline_acceptance": [
+    {
+      "scenario": "slow_model",
+      "samples": 20,
+      "budget_ms": 50,
+      "p95_ms": 130,
+      "status": "PASS"
+    },
+    {
+      "scenario": "sustained_stream",
+      "samples": 20,
+      "budget_ms": 80,
+      "p95_ms": 87,
+      "status": "PASS"
+    },
+    {
+      "scenario": "slow_body",
+      "samples": 20,
+      "budget_ms": 100,
+      "p95_ms": 105,
+      "status": "PASS"
+    },
+    {
+      "scenario": "slow_tool",
+      "samples": 20,
+      "budget_ms": 80,
+      "p95_ms": 86,
+      "status": "PASS"
+    },
+    {
+      "scenario": "audit_wait",
+      "samples": 20,
+      "budget_ms": 80,
+      "p95_ms": 85,
+      "status": "PASS"
+    }
+  ],
+  "real_model_smoke": {
+    "command": "mvn -B -ntp -Pllm -pl AgentOS-boot -am -Dtest=ReActWeatherSmokeTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "status": "NOT_RUN",
+    "skipped": 2,
+    "reason": "AGENTOS_LLM_API_KEY is absent; .env not read"
+  },
+  "integrated_assertions": [
+    {
+      "case": "retryAndNextIterationShareActualAttemptBudget",
+      "status": "PASS",
+      "model_calls": 4,
+      "retry_tool_attempts": 2,
+      "http_requests": 1,
+      "tool_rows": 3,
+      "skipped_ids": [
+        "skipped"
+      ]
+    },
+    {
+      "case": "sameResponseAndLaterIterationRespectOfficialPerToolLimit",
+      "status": "PASS",
+      "model_calls": 3,
+      "http_requests": 2,
+      "tool_rows": 4,
+      "skipped_ids": [
+        "three",
+        "four"
+      ]
+    },
+    {
+      "case": "slowBodyStopsTurnWithoutNextModelOrHttpRetry",
+      "status": "PASS",
+      "turn_status": "TIMED_OUT",
+      "model_calls": 1,
+      "http_requests": 1,
+      "audit_status": "timeout"
+    },
+    {
+      "case": "oversizedBodyReturnsSafeToolErrorAndContinuesWithOneHttpRequest",
+      "status": "PASS",
+      "model_calls": 2,
+      "http_requests": 1,
+      "audit_status": "failed",
+      "response_body_returned": false
+    },
+    {
+      "case": "completionFailurePersistsUnconfirmedAndNeverReplaysSideEffect",
+      "status": "PASS",
+      "turn_status": "FAILED",
+      "persistence_status": "UNCONFIRMED",
+      "model_calls": 1,
+      "http_requests": 1,
+      "audit_status": "unconfirmed"
+    }
+  ]
+}

@@ -142,3 +142,40 @@ Record:
 - retry eligibility, attempt count and shared-budget consumption;
 - elapsed time versus the shared deadline;
 - redaction checks over user output, logs and database fields.
+
+## Phase 4 / US2 实施记录（2026-11-18）
+
+- 红灯：`GovernedToolCallbackTest` 实际复现超长标记、非对象/尾随 JSON 被接受、幂等且明确未开始动作的瞬时故障没有重试；PostgreSQL `JpaToolInvocationRecorderTest` 实际复现 complete 失败后原行仍为 `in_progress`。
+- 修复：新增 `TransientToolException(executionStarted)` 契约，只有幂等且明确未开始动作的瞬时故障最多重试一次；普通异常、超时、未知完成、审计失败和租约丢失不重试。两次尝试共享一个工具 deadline、模型调用 ID 和审计行；实际尝试数写入 `attempts`。
+- 修复：只接受单个 JSON 对象；先脱敏再截断，原始字符数保留在审计元数据中，截断标记计入结果上限。极小字符上限无法容纳完整标记时保留标记前缀，完整原长仍可从审计查询。
+- 修复：complete 未确认时，在原 hard stop 内尽力将同身份的原 `in_progress` 行改为 `unconfirmed`；不覆盖已确认或回收终态。数据库持续不可用时仍报告 UNCONFIRMED，原意图交由恢复路径处理，不伪称标记已持久化。
+- 定向测试通过：GovernedToolCallbackTest、AuditFailureTest、JpaToolInvocationRecorderTest。整阶段 `mvn -B -ntp -pl AgentOS-boot -am test` 通过，包括 PostgreSQL 审计、恢复、唯一 Manager、完整历史、returnDirect、sink 故障和 Boot 工具闭环。后续 Phase 6 补齐重试次数与官方工具限次的联合验收。
+
+## Phase 5 / US3 实施记录（2026-11-18）
+
+新增 HTTP 红灯测试确认：已取消预算仍会发送请求，1 MiB 超限仅返回模糊的网络失败。修复后 `mvn -B -ntp -pl AgentOS-tool -am test` 通过（Tool 36 项测试，无失败、错误、跳过）。
+
+- GET 允许路径正常返回，三次相对跳转共四个请求；第四次跳转及跨域拒绝不发送下一跳。
+- 非白名单初始地址、非法协议、user-info URL、已取消或耗尽预算均零网络请求。
+- 模型 Schema 只有 `url`，不暴露 ToolContext。
+- 正文超过 1 MiB 只返回固定“HTTP 响应正文超过大小上限”，无正文、原始 cause 或自动重试；本地服务计数为 1。
+- 非 2xx、缺失/非法 Location、慢正文均有安全错误；配置归一化与非法范围检查通过。五类 p95 重复验证见 Phase 6。
+
+## Phase 6 / US4 实施记录（2026-11-18）
+
+新增红灯测试确认回调内部重试未计入单工具上限；另确认超长审计参数和错误未受长度限制。修复后治理输入摘要最多 10000 字符、错误摘要最多 1000 字符，均先脱敏后截断。
+
+- 官方 Manager 仍为唯一入口，按本轮累计工具消息限制模型调用；`TurnExecutionBudget` 只补记回调内部的实际尝试，自动配置复用同一 `ToolCallingProperties` 的默认/按名称/总数配置，不建立第二个 Manager。
+- 默认单工具 10 次；五次各重试一次消耗 10 次后，下次调用执行为 0，审计为 `limit_skipped`。只有重试被拒绝而之前已有失败尝试时，原调用保留 `failed` 和实际 attempts，避免伪称整次调用未执行。
+- Boot 联合验证：重试工具执行 2 次 + HTTP 执行 1 次消耗总预算 3；下一次 HTTP 为 0，审计 `limit_skipped/attempts=0`，四次模型请求后正常回答；同批三个同名调用与下一迭代调用累计只执行 2 次，对应两条跳过记录。
+- 模型默认 10 次、覆盖 3 次、最后一次正常回答与 returnDirect、同步/流式 ID 回填、致命中止与 sink 故障均由 core 独立验收覆盖。
+- `mvn -B -ntp -pl AgentOS-boot -am -Dtest=GovernedToolCallbackTest,GovernanceDeadlineAcceptanceTest,HttpToolsDeadlineTest,TurnDeadlineTest,ReActLoopLimitsTest,ToolCallLimitsTest,ToolExecutorTest,ReActLoopStreamingTest,ReActDeadlineIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test` 通过；包含真实 PostgreSQL 的 5 项 Boot 新增联合用例。
+- 五类截止时间场景各运行 20 次；测试内排序计算第 19 个样本为 p95，每类须在原预算 + 1000ms 内返回；最终质量门重新运行并记录最终数据，见 acceptance-results.md。
+
+## Phase 7 / 最终质量门（2026-11-18）
+
+`mvn -B -ntp verify` 通过：540 项测试，失败/错误/跳过均为 0；`python3 scripts/check_db_test_reports.py --tools` 及检查器 8 项 Python 回归通过。质量门发现的公开对象锁与空配置拆箱风险均已修复，未放宽规则或新增排除。FR-001–FR-025、FR-003a、FR-011a 和 SC-001–SC-009 的覆盖索引、五类共 100 次 p95 与三类 Demo 见 [acceptance-results.md](./acceptance-results.md)。
+
+显式 `-Pllm` 的 ReActWeatherSmokeTest 路径已执行，2 项测试因缺少进程环境变量 AGENTOS_LLM_API_KEY 跳过，真实模型验收为 **NOT_RUN**；普通全量质量门的 540 项零跳过与此独立记录，不混算。后续有测试凭证时可按第 7 节执行，仍使用隔离数据库和本地天气服务。
+
+实施前后均检查 `.specify/extensions.yml`，文件不存在，无扩展 hooks。requirements checklist 保持原始 16/16，不修改其勾选状态。

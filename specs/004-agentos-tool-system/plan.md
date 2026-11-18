@@ -162,3 +162,10 @@ AgentOS-boot/
 ## Complexity Tracking
 
 无宪章违规，无需复杂度记录。
+
+## Phase 4–7 实施补充
+
+- 官方 Manager 的消息计数看不到回调内部重试，因此 `TurnExecutionBudget` 用私有锁补记实际尝试，治理装配复用官方 `ToolCallingProperties` 的默认/按名称/总数配置，不创建第二个 Manager。非法空限次配置明确拒绝。
+- `TransientToolException(executionStarted)` 位于 core，作为内部工具明确报告瞬时故障的契约；它不封装原始敏感异常链。
+- complete 未确认后的原行标记也使用独立短事务、稳定身份和原 hard stop；持续故障时保持 UNCONFIRMED，不承诺数据库不可用时仍能落库。
+- 新增 `GovernanceDeadlineAcceptanceTest` 和 `ReActDeadlineIntegrationTest`，分别补齐五类 100 次截止时间验收与真实 PostgreSQL/官方 Manager/本地模型和 HTTP 的联合证据。最终结果及 FR/SC 映射见 `acceptance-results.md`。

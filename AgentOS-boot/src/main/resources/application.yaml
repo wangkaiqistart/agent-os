@@ -55,7 +55,7 @@ spring:
           enabled: true                    # 仅启用受治理的拒绝 resolver，绝不解析名单外 Bean
       observations:
         include-content: false             # 工具参数和结果不导出到 Span，审计以 tool_invocations 为准（技术方案 6.1）
-      limits:                              # 单轮工具调用上限，见 4.3
+      limits:                              # 单轮工具调用上限；治理层内部重试的每次尝试也计入，见 4.3
         max-calls-per-tool-default: 10
         max-calls-per-tool:
           notify: 3

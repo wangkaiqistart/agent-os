@@ -58,6 +58,36 @@ class CheckDatabaseReportsTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("SECRET-REPORT", result.stdout + result.stderr)
 
+    def test_tool_evidence_requires_every_mapped_case_to_execute(self):
+        for missing in (False, True):
+            for skipped in (False, True):
+                with self.subTest(missing=missing, skipped=skipped), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    storage = root / "AgentOS-storage/target/surefire-reports"
+                    storage.mkdir(parents=True)
+                    (storage / f"TEST-{CLASS_NAME}.xml").write_text(self.report())
+                    targets = {
+                        ("AgentOS-storage", "com.agentos.storage.audit.JpaToolInvocationRecorderTest"): [
+                            "beginThenCompleteUpdatesSameRowAndPreservesDefaultsAndJson",
+                            "failedCompletionMarksOriginalIntentUnconfirmedWithoutReplayingTool"],
+                        ("AgentOS-boot", "com.agentos.boot.ReActDeadlineIntegrationTest"): [
+                            "retryAndNextIterationShareActualAttemptBudget",
+                            "sameResponseAndLaterIterationRespectOfficialPerToolLimit",
+                            "slowBodyStopsTurnWithoutNextModelOrHttpRetry",
+                            "oversizedBodyReturnsSafeToolErrorAndContinuesWithOneHttpRequest",
+                            "completionFailurePersistsUnconfirmedAndNeverReplaysSideEffect"]}
+                    for (module, name), methods in targets.items():
+                        if missing and module == "AgentOS-boot":
+                            continue
+                        path = root / module / "target/surefire-reports"
+                        path.mkdir(parents=True, exist_ok=True)
+                        cases = "".join(f'<testcase classname="{name}" name="{method}">'
+                                        + ("<skipped/>" if skipped else "") + "</testcase>" for method in methods)
+                        (path / f"TEST-{name}.xml").write_text(f'<testsuite>{cases}</testsuite>')
+                    result = subprocess.run([sys.executable, str(SCRIPT), str(storage), "--tools"],
+                                            check=False, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0 if not missing and not skipped else 1)
+
 
 if __name__ == "__main__":
     unittest.main()

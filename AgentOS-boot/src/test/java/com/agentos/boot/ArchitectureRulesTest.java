@@ -67,6 +67,9 @@ class ArchitectureRulesTest {
                         "com.agentos.core.turn.ReActLoop",
                         "com.agentos.provider.chat.DefaultProviderService",
                         "com.agentos.tool.http.HttpTools",
+                        "com.agentos.tool.govern.GovernedToolCallback",
+                        "com.agentos.core.turn.ToolExecutor",
+                        "com.agentos.storage.audit.JpaToolInvocationRecorder",
                         "com.agentos.storage.session.JpaTurnStore",
                         "com.agentos.channel.cli.CliChannel")) {
             assertThat(classes.contain(type)).as(type).isTrue();
