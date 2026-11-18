@@ -179,3 +179,25 @@ Record:
 显式 `-Pllm` 的 ReActWeatherSmokeTest 路径已执行，2 项测试因缺少进程环境变量 AGENTOS_LLM_API_KEY 跳过，真实模型验收为 **NOT_RUN**；普通全量质量门的 540 项零跳过与此独立记录，不混算。后续有测试凭证时可按第 7 节执行，仍使用隔离数据库和本地天气服务。
 
 实施前后均检查 `.specify/extensions.yml`，文件不存在，无扩展 hooks。requirements checklist 保持原始 16/16，不修改其勾选状态。
+
+## Phase 8 / 收敛修复验证（2026-11-18）
+
+T048–T052 已完成，五项缺口均先通过新增失败测试复现，再修复并运行定向验证：
+
+| 任务 | 修复及验收结果 |
+|------|----------------|
+| T048 | 原始参数只用于执行；助手工具请求历史脱敏后落库、传给下一次模型并用于跨轮恢复。PostgreSQL/本地模型验收覆盖 URL query token、嵌套 authorization 和已知密钥；调用 ID、名称、顺序与元数据保持一致。 |
+| T049 | Manager 前预检整批 JSON；损坏、非对象或尾随内容导致整批零执行，按原 ID 记 failed/attempts=0，安全错误交模型继续。错误项在首、尾时，HTTP 请求均为 0。 |
+| T050 | 过程事件与跳过审计共用先脱敏再截断的摘要，上限 10000 字符且包含标记；超长敏感参数、数据库读回、跳过 ID 与零执行断言通过。 |
+| T051 | 已返回结果先治理，再执行后置检查点；租约丢失/整轮超时时，原审计行只保存受限脱敏结果，保留原长、截断状态和 attempts=1，终止原因不变且不重试。数据库联合验收放在 Boot 模块，避免 storage 测试反向依赖 tool。 |
+| T052 | 重复工具声明使用专用安全配置异常；CLI 显示相对配置路径、tools 字段和名称，隐藏 cause。真实 CLI 验收确认零模型请求、零新增会话/轮次/消息/审计。 |
+
+最终质量门 `mvn -B -ntp verify` 于 **2026-11-18 17:50:40（Asia/Shanghai）**通过：**550 项测试，0 失败、0 错误、0 跳过**；Spotless、Checkstyle、SpotBugs/FindSecBugs、依赖禁令与 ArchUnit 均通过。`python3 scripts/check_db_test_reports.py --tools` 通过，确认 PostgreSQL 连通性和 7 项关键 Tool 数据库证据实际执行；新增 Phase 8 数据库用例另逐项核对 Surefire，全部通过。`git diff --check` 通过。
+
+本轮使用 PostgreSQL Testcontainers 与本地模型/HTTP 替身；未启用真实模型验收。只读 `$speckit-analyze` 未发现本轮引入的规格/计划/任务冲突或宪章违规，36 项 FR/SC 均有关联任务。实施及分析前后检查 extensions.yml 均不存在；checklist 保持 16/16 原状态。没有提交、推送或修改共享数据库。
+
+## Phase 9 / 慢正文采样稳定性（2026-11-18）
+
+T053 完成后，tasks.md 共 53/53 项完成。`HttpToolsDeadlineTest` 先独立预热同一个工具实例，再用 500ms 共享预算运行 20 个慢正文请求；每次均核对响应头、正文分片、单次请求和取消后关闭，避免将连接阶段超时算作慢正文覆盖。实际取消确认计入样本耗时，不依靠服务端 teardown 制造取消成功。
+
+定向 3 项测试通过。最终 `mvn -B -ntp verify` 于 **2026-11-18 19:15:14（Asia/Shanghai）**通过，550 项测试、0 失败/错误/跳过；数据库报告检查通过。慢正文实际请求/正文开始/取消关闭均为 20，另有预热 1 次，p95=517ms，符合 500+1000ms 上限。生产配置与质量标准未改变；真实模型本轮为 NOT_RUN。完整步骤、五类 p95 和证据见 [phase9-results.md](./phase9-results.md)。

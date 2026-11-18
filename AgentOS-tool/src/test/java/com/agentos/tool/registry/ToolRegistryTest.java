@@ -100,7 +100,10 @@ class ToolRegistryTest {
     @Test
     void agentToolNamesKeepDeclarationOrderAndRejectDuplicates() {
         assertThatThrownBy(() -> profile(List.of("b", "b")))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("重复");
+                .isInstanceOf(com.agentos.core.tool.DuplicateAgentToolException.class)
+                .hasMessageContaining("agents/a/AGENT.md")
+                .hasMessageContaining("tools")
+                .hasMessageContaining("重复")
+                .hasMessageContaining("b");
     }
 }

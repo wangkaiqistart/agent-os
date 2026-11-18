@@ -4,6 +4,7 @@ import com.agentos.core.agent.AgentLoader;
 import com.agentos.core.error.AgentOSException;
 import com.agentos.core.error.ErrorCode;
 import com.agentos.core.session.SessionKey;
+import com.agentos.core.tool.DuplicateAgentToolException;
 import com.agentos.core.tool.UnknownAgentToolException;
 import com.agentos.core.turn.PersistenceStatus;
 import com.agentos.core.turn.ProcessRequest;
@@ -224,7 +225,7 @@ public final class ChatCommand implements Callable<Integer> {
             }
             spec.commandLine().getErr().println(result.text());
             return 3;
-        } catch (UnknownAgentToolException e) {
+        } catch (UnknownAgentToolException | DuplicateAgentToolException e) {
             // 仅展示专用配置错误的固定提示；其他业务错误和底层异常继续隐藏细节。
             spec.commandLine().getErr().println(e.getMessage());
             return 2;

@@ -139,6 +139,36 @@ class ChatCommandTest {
     }
 
     @Test
+    void duplicateToolsShowSafeConfigurationLocationWithoutLaunchingContext() throws Exception {
+        agent("main");
+        Files.writeString(
+                workspace.resolve("agents/main/AGENT.md"),
+                "---\nname: main\nprovider:\n  model: test-model\ntools: [http_get, http_get]\n---\nprivate-agent-body\n");
+        assertThat(
+                        chat(root -> {
+                            throw new AssertionError("重复声明不得启动上下文");
+                        }))
+                .isEqualTo(2);
+        assertThat(output.toString())
+                .contains("agents/main/AGENT.md", "tools", "http_get", "重复")
+                .doesNotContain("private-agent-body", "Exception");
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void duplicateToolErrorNeverExposesCauseDuringProcessing() throws Exception {
+        agent("main");
+        var error = new com.agentos.core.tool.DuplicateAgentToolException("main", "http_get");
+        error.initCause(new IllegalStateException("synthetic-cause-secret"));
+        when(service.process(any())).thenThrow(error);
+        assertThat(chat(launcher())).isEqualTo(2);
+        assertThat(output.toString())
+                .contains("agents/main/AGENT.md", "tools", "http_get", "重复")
+                .doesNotContain("synthetic-cause-secret", "Exception");
+        assertThat(closed[0]).isTrue();
+    }
+
+    @Test
     void unknownToolShowsConfigurationLocationWithoutExposingCause() throws Exception {
         agent("main");
         var error = new UnknownAgentToolException("main", "does_not_exist");

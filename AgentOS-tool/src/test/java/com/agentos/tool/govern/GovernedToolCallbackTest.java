@@ -101,6 +101,59 @@ class GovernedToolCallbackTest {
     }
 
     @Test
+    void postResultFatalCheckpointStillAuditsOnlyGovernedResultWithoutRetry() {
+        for (boolean deadline : List.of(false, true)) {
+            var recorder = mock(ToolInvocationRecorder.class);
+            when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+            var done = new AtomicReference<ToolInvocationRecord>();
+            doAnswer(
+                            i -> {
+                                done.set(i.getArgument(0));
+                                return null;
+                            })
+                    .when(recorder)
+                    .complete(any());
+            var returned = new java.util.concurrent.atomic.AtomicBoolean();
+            var executions = new AtomicInteger();
+            String raw = "token=KNOWN_SECRET\n" + "x".repeat(12000);
+            var ctx =
+                    context(
+                            Duration.ofSeconds(5),
+                            () -> {
+                                if (returned.get()) {
+                                    if (deadline) {
+                                        throw new TurnDeadlineExceededException();
+                                    }
+                                    throw new LeaseLostException();
+                                }
+                            });
+            var tool =
+                    govern(
+                            callback(c -> {
+                                executions.incrementAndGet();
+                                returned.set(true);
+                                return raw;
+                            }),
+                            recorder,
+                            Duration.ofSeconds(1));
+            assertThatThrownBy(() -> tool.call("{}", ctx))
+                    .isInstanceOf(
+                            deadline
+                                    ? TurnDeadlineExceededException.class
+                                    : LeaseLostException.class);
+            assertThat(executions).hasValue(1);
+            assertThat(done.get().status()).isEqualTo(deadline ? "timeout" : "interrupted");
+            assertThat(done.get().resultText())
+                    .hasSizeLessThanOrEqualTo(10000)
+                    .contains("结果已截断")
+                    .doesNotContain("KNOWN_SECRET");
+            assertThat(done.get().resultChars()).isEqualTo(raw.length());
+            assertThat(done.get().resultTruncated()).isTrue();
+            assertThat(done.get().attempts()).isOne();
+        }
+    }
+
+    @Test
     void knownLeaseLossAtIntentBoundaryRemainsInterruptedWithoutAuditUncertainty() {
         var recorder = mock(ToolInvocationRecorder.class);
         when(recorder.begin(any())).thenThrow(new LeaseLostException());

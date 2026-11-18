@@ -228,6 +228,8 @@ class ReActApplicationTest {
                 .extracting(r -> r.get("type"))
                 .containsExactly("USER", "ASSISTANT", "TOOL", "ASSISTANT");
         assertThat(messages.get(1).get("calls").toString()).contains(id);
+        assertThat(messages.get(1).get("calls").toString())
+                .doesNotContain("URL_SECRET", "local-test-key");
         assertThat(messages.get(2).get("responses").toString())
                 .contains(id)
                 .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
@@ -242,8 +244,18 @@ class ReActApplicationTest {
                 .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
         assertThat(model.requests().get(1))
                 .contains(id, "晴")
-                .doesNotContain("RESPONSE_SECRET", "local-test-key");
+                .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
         assertThat(output.getAll())
+                .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
+        model.reset(LocalModelServer.textResponse("继续回答"));
+        var resumed =
+                context.getBean(AgentService.class)
+                        .process(
+                                new ProcessRequest(
+                                        "test", "weather-user", "weather", "继续", "test"));
+        assertThat(resumed.status()).isEqualTo(TurnStatus.SUCCEEDED);
+        assertThat(model.requests().getFirst())
+                .contains(id)
                 .doesNotContain("URL_SECRET", "RESPONSE_SECRET", "local-test-key");
     }
 

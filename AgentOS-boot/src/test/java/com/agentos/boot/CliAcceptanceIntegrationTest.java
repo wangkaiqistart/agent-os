@@ -90,6 +90,15 @@ class CliAcceptanceIntegrationTest {
 
     @Test
     void unknownToolReportsAgentFileAndNameWithoutExternalCallsOrRecords() throws Exception {
+        assertInvalidTools("[does_not_exist]", "does_not_exist");
+    }
+
+    @Test
+    void duplicateToolsReportAgentFileAndNameWithoutExternalCallsOrRecords() throws Exception {
+        assertInvalidTools("[http_get, http_get]", "http_get");
+    }
+
+    private void assertInvalidTools(String declaration, String toolName) throws Exception {
         model.reset();
         String profile = "unknown-tool-" + UUID.randomUUID();
         String user = "cli-unknown-" + UUID.randomUUID();
@@ -98,7 +107,9 @@ class CliAcceptanceIntegrationTest {
                 agent.resolve("AGENT.md"),
                 "---\nname: "
                         + profile
-                        + "\nprovider:\n  model: test-model\ntools: [does_not_exist]\n---\nprivate-agent-body\n");
+                        + "\nprovider:\n  model: test-model\ntools: "
+                        + declaration
+                        + "\n---\nprivate-agent-body\n");
         var output = new java.io.StringWriter();
         var line = AgentOSCli.commandLine(sharedLauncher(), workspace, key -> null, () -> user);
         line.setOut(new java.io.PrintWriter(output));
@@ -117,7 +128,7 @@ class CliAcceptanceIntegrationTest {
                                 "private-user-message"))
                 .isEqualTo(2);
         assertThat(output.toString())
-                .contains("agents/" + profile + "/AGENT.md", "tools", "does_not_exist")
+                .contains("agents/" + profile + "/AGENT.md", "tools", toolName)
                 .doesNotContain("private-agent-body", "private-user-message", "Exception");
         assertThat(model.requests()).isEmpty();
         assertThat(counts(user, profile)).isEqualTo(new Counts(0, 0, 0, 0, 0, 0));

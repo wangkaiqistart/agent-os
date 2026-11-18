@@ -246,3 +246,21 @@ description: "Task list template for AgentOS tool registration and secure execut
 ## Phase 4–7 完成说明（2026-11-18）
 
 T017–T047 已按阶段实施并执行适用验证，完整证据见 `acceptance-results.md`。T046 按任务内缺凭证分支处理：显式 llm 路径的两项测试被环境门禁跳过，真实模型状态为 NOT_RUN，不视为真实联调通过。完整 Tool 工具清单和 MCP 客户端不在本 Feature 范围。
+
+
+## Phase 8: Convergence
+
+**Purpose**: 修复 2026-11-18 收敛检查发现的现有范围缺口；保持唯一官方 Manager、最小授权与既有质量门。本阶段先补充能暴露缺口的失败测试，再实现修复；完成后运行适用阶段验证及 `mvn -B -ntp verify`。
+
+- [X] T048 [HIGH] 修复工具请求历史的敏感参数泄漏：底层工具仍接收本次调用的原始参数，Manager 返回后对用于消息落库、下一次模型请求及后续轮次恢复的工具请求参数脱敏，保留调用 ID、名称、顺序和必要消息结构；补充 PostgreSQL/本地模型闭环断言，覆盖 URL query token、嵌套凭证和已知密钥，明确检查 `session_messages.tool_calls`、第二次模型请求与历史恢复而非仅检查工具响应；文件：AgentOS-core/src/main/java/com/agentos/core/turn/ToolExecutor.java、AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java、AgentOS-storage/src/main/java/com/agentos/storage/session/JpaMessageStore.java、AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java；per FR-012、FR-009、SC-006、T007、T020 (partial)
+- [X] T049 [HIGH] 在进入官方 Manager 前完成整批工具调用的 JSON 格式预检，拒绝损坏 JSON、非对象和尾随内容，不生成假调用 ID；补充“第一项合法、后一项 JSON 损坏”和相反顺序的多调用测试，断言整批零底层执行、无半批成功历史，且安全错误不回显原参数；保持普通工具业务/参数错误的可继续语义及唯一 Manager 执行入口；文件：AgentOS-core/src/main/java/com/agentos/core/turn/ToolCallLedger.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolExecutor.java、AgentOS-core/src/test/java/com/agentos/core/turn/ToolExecutorTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ReActDeadlineIntegrationTest.java；per spec: Edge Cases（输入 JSON 无法解析时整批安全失败）、FR-009、FR-010、T019、T024 (contradicts)
+- [X] T050 [HIGH] 补齐超限跳过审计及工具调用过程事件的参数摘要长度限制，统一使用先脱敏再截断的安全摘要边界并保留明确截断标记；不改变真实工具输入或调用 ID；补充超长且带敏感字段的参数用例，核对官方 Manager 跳过分支的 `limit_skipped` 数据库摘要和 `TurnSink.onToolCall` 参数均受限且无凭证，跳过调用仍零执行并逐 ID 记账；文件：AgentOS-core/src/main/java/com/agentos/core/turn/ToolExecutor.java、AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java、AgentOS-core/src/main/java/com/agentos/core/tool/Redactor.java、AgentOS-core/src/test/java/com/agentos/core/turn/ToolCallLimitsTest.java、AgentOS-core/src/test/java/com/agentos/core/turn/ReActLoopStreamingTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ReActDeadlineIntegrationTest.java；per FR-012、SC-006、T007、T024 (partial)
+- [X] T051 [HIGH] 修复工具已返回但后置租约/预算检查失败时绕过结果治理的路径，保证失败完成审计不携带未经脱敏及长度限制的正文，并保持正确的终止原因、尝试次数及结果长度/截断元数据；补充返回超长敏感结果后检查点分别抛出租约丢失与整轮超时的测试，核对 recorder.complete 的载荷、原行终态、无下一次工具/模型调用及无自动重试；文件：AgentOS-tool/src/main/java/com/agentos/tool/govern/GovernedToolCallback.java、AgentOS-tool/src/test/java/com/agentos/tool/govern/GovernedToolCallbackTest.java、AgentOS-storage/src/test/java/com/agentos/storage/audit/JpaToolInvocationRecorderTest.java；per FR-012、FR-015、T021、T041 (partial)
+- [X] T052 [MEDIUM] 为 Agent 的重复工具声明提供专用安全配置诊断，使加载及 CLI 提示包含相对配置路径、tools 字段和具体重复工具名，不展示其他解析异常原文或 cause；补充真实 CLI 的重复声明验收，断言零模型/网络请求、零新增会话/轮次/消息/审计，并保持未知工具与其他配置错误的既有安全边界；文件：AgentOS-core/src/main/java/com/agentos/core/agent/AgentProfile.java、AgentOS-core/src/main/java/com/agentos/core/agent/AgentLoader.java、AgentOS-cli/src/main/java/com/agentos/cli/ChatCommand.java、AgentOS-cli/src/test/java/com/agentos/cli/ChatCommandTest.java、AgentOS-boot/src/test/java/com/agentos/boot/CliAcceptanceIntegrationTest.java；per FR-003、T011、T012 (partial)
+
+
+## Phase 9: Convergence
+
+**Purpose**: 稳定 2026-11-18 完整验收中暴露的慢正文截止时间抽样；仅修复测试准备与场景确认，不放宽产品截止时间或跳过验收。
+
+- [X] T053 [MEDIUM] 稳定慢正文 20 次截止时间验收：当前 `HttpToolsDeadlineTest.sustainedBodyP95RemainsBoundedAcrossTwentyRequestsWithoutRetry` 在全量运行中出现服务端仅收到 19/20 次请求、定向复跑通过，100ms 预算可能在连接/调度阶段耗尽，无法保证 20 个样本都实际进入正文读取；通过独立预热、逐样本响应头/正文开始观测及合理的本地测试预算消除准备阶段干扰，仍要求 20 次实际慢正文样本、零自动重试、共享绝对 deadline、每类 p95 不超过所配预算加 1 秒，并在定向与全量验证中核对请求数及取消后资源清理，不删除断言、不将失败样本计为已覆盖；文件：AgentOS-tool/src/test/java/com/agentos/tool/http/HttpToolsDeadlineTest.java、AgentOS-tool/src/test/java/com/agentos/tool/support/LocalHttpServer.java；per SC-005、T029、T037 (partial)

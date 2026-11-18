@@ -170,7 +170,8 @@ public final class ReActLoop {
                 ToolCallLedger.validate(output.getToolCalls());
                 for (var call : output.getToolCalls()) {
                     guard.checkpoint(turn, budget);
-                    sink.onToolCall(call.id(), call.name(), redactor.redact(call.arguments()));
+                    sink.onToolCall(
+                            call.id(), call.name(), redactor.summarize(call.arguments(), 10000));
                 }
                 if (executor == null) {
                     throw new IllegalStateException("工具执行器未装配");

@@ -80,6 +80,7 @@ class ReActDeadlineIntegrationTest {
 
     @jakarta.annotation.Resource AgentService service;
     @jakarta.annotation.Resource JdbcTemplate jdbc;
+    @jakarta.annotation.Resource org.springframework.context.ApplicationContext application;
 
     @BeforeAll
     static void start() throws Exception {
@@ -165,6 +166,46 @@ class ReActDeadlineIntegrationTest {
     }
 
     @Test
+    void nestedCredentialsAreAbsentFromPersistedAndRestoredToolHistory() {
+        var json = tools.jackson.databind.json.JsonMapper.builder().build();
+        var scripted = json.readTree(response("nested-history", "/"));
+        var function =
+                (tools.jackson.databind.node.ObjectNode)
+                        scripted.get("choices")
+                                .get(0)
+                                .get("message")
+                                .get("tool_calls")
+                                .get(0)
+                                .get("function");
+        function.put("name", "retry_tool");
+        function.put(
+                "arguments",
+                "{\"nested\":{\"authorization\":\"Bearer NESTED_SECRET\",\"note\":\"local-test-key\"},\"url\":\"https://example.com/?token=QUERY_SECRET\"}");
+        model.reset(json.writeValueAsString(scripted), LocalModelServer.textResponse("完成"));
+        String user = UUID.randomUUID().toString();
+        var result = service.process(new ProcessRequest("test", user, "normal", "执行", "test"));
+        assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
+        assertThat(retryCalls).hasValue(2);
+        var calls =
+                jdbc.queryForObject(
+                        "select tool_calls::text from session_messages where turn_id=? and jsonb_array_length(tool_calls)>0",
+                        String.class,
+                        result.turnId());
+        assertThat(calls)
+                .contains("nested-history", "nested", "***")
+                .doesNotContain("NESTED_SECRET", "local-test-key", "QUERY_SECRET");
+        assertThat(model.requests().getLast())
+                .contains("nested-history", "nested")
+                .doesNotContain("NESTED_SECRET", "local-test-key", "QUERY_SECRET");
+        model.reset(LocalModelServer.textResponse("继续回答"));
+        var resumed = service.process(new ProcessRequest("test", user, "normal", "继续", "test"));
+        assertThat(resumed.status()).isEqualTo(TurnStatus.SUCCEEDED);
+        assertThat(model.requests().getFirst())
+                .contains("nested-history", "nested")
+                .doesNotContain("NESTED_SECRET", "local-test-key", "QUERY_SECRET");
+    }
+
+    @Test
     void retryAndNextIterationShareActualAttemptBudget() {
         model.reset(
                 response("retry", "/").replace("\"name\":\"http_get\"", "\"name\":\"retry_tool\""),
@@ -214,17 +255,32 @@ class ReActDeadlineIntegrationTest {
                         .get("message")
                         .get("tool_calls")
                         .get(0));
+        ((tools.jackson.databind.node.ObjectNode) calls.get(2).get("function"))
+                .put(
+                        "arguments",
+                        "{\"token\":\"SKIP_SECRET\",\"padding\":\"" + "x".repeat(12000) + "\"}");
         model.reset(
                 json.writeValueAsString(first),
                 response("four", "/"),
                 LocalModelServer.textResponse("完成"));
-        var result = process("normal");
+        var events = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        var result =
+                service.process(
+                        new ProcessRequest(
+                                "test", UUID.randomUUID().toString(), "normal", "执行", "test"),
+                        new com.agentos.core.turn.TurnSink() {
+                            public void onToolCall(String id, String name, String arguments) {
+                                if (id.equals("three")) {
+                                    events.add(arguments);
+                                }
+                            }
+                        });
         assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
         assertThat(model.calls()).isEqualTo(3);
         assertThat(httpCalls).hasValue(2);
         var rows =
                 jdbc.queryForList(
-                        "select tool_call_id,status,attempts from tool_invocations where turn_id=? order by iteration,id",
+                        "select tool_call_id,status,attempts,input_json::text as input from tool_invocations where turn_id=? order by iteration,id",
                         result.turnId());
         assertThat(rows).hasSize(4);
         assertThat(rows.subList(2, 4))
@@ -235,6 +291,62 @@ class ReActDeadlineIntegrationTest {
                         assertThat(r)
                                 .containsEntry("status", "limit_skipped")
                                 .containsEntry("attempts", 0));
+        Object input = json.readValue(rows.get(2).get("input").toString(), Object.class);
+        String summary = input instanceof String text ? text : json.writeValueAsString(input);
+        assertThat(summary)
+                .hasSizeLessThanOrEqualTo(10000)
+                .contains("摘要截断")
+                .doesNotContain("SKIP_SECRET");
+        assertThat(events)
+                .singleElement()
+                .satisfies(arguments ->
+                        assertThat(arguments)
+                                .hasSizeLessThanOrEqualTo(10000)
+                                .contains("摘要截断")
+                                .doesNotContain("SKIP_SECRET"));
+    }
+
+    @Test
+    void invalidJsonAnywhereRejectsBatchWithoutHttpAndLetsModelContinue() {
+        var json = tools.jackson.databind.json.JsonMapper.builder().build();
+        for (boolean invalidFirst : List.of(true, false)) {
+            httpCalls.set(0);
+            var first = json.readTree(response("good", "/"));
+            var calls =
+                    (tools.jackson.databind.node.ArrayNode)
+                            first.get("choices").get(0).get("message").get("tool_calls");
+            var bad =
+                    json.readTree(response("bad", "/"))
+                            .get("choices")
+                            .get(0)
+                            .get("message")
+                            .get("tool_calls")
+                            .get(0);
+            ((tools.jackson.databind.node.ObjectNode) bad.get("function"))
+                    .put("arguments", "{BROKEN_PRIVATE");
+            if (invalidFirst) {
+                calls.insert(0, bad);
+            } else {
+                calls.add(bad);
+            }
+            model.reset(
+                    json.writeValueAsString(first), LocalModelServer.textResponse("参数有误，未执行工具"));
+            var result = process("normal");
+            assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
+            assertThat(model.calls()).isEqualTo(2);
+            assertThat(httpCalls).hasValue(0);
+            var rows =
+                    jdbc.queryForList(
+                            "select tool_call_id,status,attempts from tool_invocations where turn_id=? order by id",
+                            result.turnId());
+            assertThat(rows)
+                    .hasSize(2)
+                    .allSatisfy(row ->
+                            assertThat(row)
+                                    .containsEntry("status", "failed")
+                                    .containsEntry("attempts", 0));
+            assertThat(model.requests().getLast()).contains("good", "bad", "未执行");
+        }
     }
 
     @Test
@@ -269,6 +381,115 @@ class ReActDeadlineIntegrationTest {
                 .containsEntry("status", "failed")
                 .containsEntry("attempts", 1)
                 .containsEntry("result_text", null);
+    }
+
+    @Test
+    void postResultLeaseOrDeadlineFailurePersistsBoundedOriginalAudit() {
+        var turns = application.getBean(com.agentos.core.session.TurnStore.class);
+        var budgets = application.getBean(TurnBudgetRegistry.class);
+        for (boolean deadline : List.of(false, true)) {
+            var budget = com.agentos.core.turn.TurnExecutionBudget.start(Duration.ofSeconds(10));
+            var turn =
+                    turns.startTurn(
+                            UUID.randomUUID(),
+                            new com.agentos.core.session.SessionKey(
+                                    "test", UUID.randomUUID().toString(), "normal"),
+                            "test",
+                            "执行",
+                            budget);
+            budgets.register(turn.turnId(), budget);
+            var returned = new java.util.concurrent.atomic.AtomicBoolean();
+            var executions = new AtomicInteger();
+            var originalId = new java.util.concurrent.atomic.AtomicLong();
+            String raw = "token=POST_RESULT_SECRET\n" + "x".repeat(12000);
+            ToolCallback delegate =
+                    new ToolCallback() {
+                        public ToolDefinition getToolDefinition() {
+                            return ToolDefinition.builder()
+                                    .name("test_tool")
+                                    .description("测试")
+                                    .inputSchema("{}")
+                                    .build();
+                        }
+
+                        public String call(String input) {
+                            executions.incrementAndGet();
+                            originalId.set(
+                                    jdbc.queryForObject(
+                                            "select id from tool_invocations where turn_id=? and status='in_progress'",
+                                            Long.class,
+                                            turn.turnId()));
+                            returned.set(true);
+                            return raw;
+                        }
+                    };
+            var ledger =
+                    new com.agentos.core.turn.ToolCallLedger(
+                            List.of(
+                                    new org.springframework.ai.chat.messages.AssistantMessage
+                                            .ToolCall(
+                                            "post-result", "function", "test_tool", "{}")),
+                            () -> {
+                                if (returned.get()) {
+                                    if (deadline) {
+                                        throw new com.agentos.core.turn
+                                                .TurnDeadlineExceededException();
+                                    }
+                                    throw new com.agentos.core.turn.LeaseLostException();
+                                }
+                            });
+            var agent =
+                    new com.agentos.core.agent.AgentLoader(workspace.resolve("agents"))
+                            .load("normal");
+            var toolContext =
+                    new org.springframework.ai.chat.model.ToolContext(
+                            java.util.Map.of(
+                                    com.agentos.core.turn.ToolContextKeys.TURN_CONTEXT,
+                                            new com.agentos.core.turn.TurnContext(
+                                                    turn.sessionId(),
+                                                    turn.turnId(),
+                                                    agent,
+                                                    "test",
+                                                    1,
+                                                    budget.deadline()),
+                                    com.agentos.core.turn.ToolContextKeys.TURN_BUDGET, budget,
+                                    com.agentos.core.turn.ToolContextKeys.TOOL_CALL_LEDGER,
+                                            ledger));
+            var governed =
+                    new GovernedToolCallback(
+                            delegate,
+                            new ToolPolicy(true, Duration.ofSeconds(2), 10000),
+                            application.getBean(ToolInvocationRecorder.class),
+                            application.getBean(Redactor.class));
+            try {
+                org.assertj.core.api.Assertions.assertThatThrownBy(
+                                () -> governed.call("{}", toolContext))
+                        .isInstanceOf(
+                                deadline
+                                        ? com.agentos.core.turn.TurnDeadlineExceededException.class
+                                        : com.agentos.core.turn.LeaseLostException.class);
+                var row =
+                        jdbc.queryForMap(
+                                "select id,status,attempts,result_text,result_chars,result_truncated from tool_invocations where turn_id=?",
+                                turn.turnId());
+                assertThat(row)
+                        .containsEntry("id", originalId.get())
+                        .containsEntry("status", deadline ? "timeout" : "interrupted")
+                        .containsEntry("attempts", 1)
+                        .containsEntry("result_chars", raw.length())
+                        .containsEntry("result_truncated", true);
+                assertThat(row.get("result_text").toString())
+                        .hasSizeLessThanOrEqualTo(10000)
+                        .contains("结果已截断")
+                        .doesNotContain("POST_RESULT_SECRET");
+                assertThat(executions).hasValue(1);
+                assertThat(model.calls()).isZero();
+                assertThat(httpCalls).hasValue(0);
+            } finally {
+                turns.finishAndRelease(turn, "INTERRUPTED", "测试结束", "测试结束");
+                budgets.remove(turn.turnId());
+            }
+        }
     }
 
     @Test

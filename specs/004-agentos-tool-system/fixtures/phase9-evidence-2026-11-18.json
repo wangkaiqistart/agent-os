@@ -1,0 +1,147 @@
+{
+  "feature": "004-agentos-tool-system",
+  "phase": 9,
+  "task": "T053",
+  "status": "PASS",
+  "scope": "test preparation and per-sample observation only; no production code or defaults changed",
+  "tdd": {
+    "red": "Original sampling with deterministic 750ms first preparation delay failed: expected TurnDeadlineExceededException, actual IllegalStateException: HTTP request timeout",
+    "green": {
+      "test_class": "HttpToolsDeadlineTest",
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "slow_body_p95_ms": 517
+    },
+    "early_log_retained": false
+  },
+  "full_verify": {
+    "command": "mvn -B -ntp verify",
+    "exit_code": 0,
+    "finished_at": "2026-11-18T19:15:14+08:00",
+    "log_path": "target/phase9-verify.log",
+    "log_sha256": "5a3856a0b1ac4ae695b3ba7ac81ce7f831801ea6d79b1a7d8c1e198c127d1df2",
+    "fresh_report_cutoff": "2026-11-18T19:12:31.604168+08:00",
+    "excluded_stale_reports": [
+      "AgentOS-boot/target/surefire-reports/TEST-com.agentos.boot.smoke.ReActWeatherSmokeTest.xml"
+    ],
+    "modules": {
+      "AgentOS-boot": {
+        "tests": 75,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "AgentOS-channel-cli": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "AgentOS-cli": {
+        "tests": 61,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "AgentOS-core": {
+        "tests": 72,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "AgentOS-provider": {
+        "tests": 220,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "AgentOS-storage": {
+        "tests": 65,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "AgentOS-tool": {
+        "tests": 43,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "AgentOS-web": {
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "total": {
+      "tests": 550,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "deadline_acceptance": [
+    {
+      "scenario": "slow_model",
+      "samples": 20,
+      "budget_ms": 50,
+      "p95_ms": 130,
+      "limit_ms": 1050,
+      "status": "PASS"
+    },
+    {
+      "scenario": "sustained_stream",
+      "samples": 20,
+      "budget_ms": 80,
+      "p95_ms": 87,
+      "limit_ms": 1080,
+      "status": "PASS"
+    },
+    {
+      "scenario": "slow_body",
+      "samples": 20,
+      "budget_ms": 500,
+      "p95_ms": 517,
+      "requests": 20,
+      "bodies_started": 20,
+      "cancelled_and_closed": 20,
+      "warmup_requests": 1,
+      "limit_ms": 1500,
+      "status": "PASS"
+    },
+    {
+      "scenario": "slow_tool",
+      "samples": 20,
+      "budget_ms": 80,
+      "p95_ms": 86,
+      "limit_ms": 1080,
+      "status": "PASS"
+    },
+    {
+      "scenario": "audit_wait",
+      "samples": 20,
+      "budget_ms": 80,
+      "p95_ms": 85,
+      "limit_ms": 1080,
+      "status": "PASS"
+    }
+  ],
+  "database_evidence": {
+    "command": "python3 scripts/check_db_test_reports.py --tools",
+    "status": "PASS",
+    "connectivity": "PASS",
+    "tool_test_classes": 2,
+    "critical_tool_cases": 7
+  },
+  "diff_check": "PASS",
+  "real_model": "NOT_RUN",
+  "cli_blackbox_this_phase": "NOT_RUN; historical 15 PASS retained separately",
+  "checklist": {
+    "total": 16,
+    "checked": 16,
+    "modified": false
+  }
+}

@@ -103,6 +103,10 @@ class ReActLoopStreamingTest {
     }
 
     private ProviderService provider(boolean tool) {
+        return provider(tool, "{}");
+    }
+
+    private ProviderService provider(boolean tool, String arguments) {
         var calls = new AtomicInteger();
         return new ProviderService() {
             public ProviderResult call(ProviderRequest r) {
@@ -127,7 +131,10 @@ class ReActLoopStreamingTest {
                                         action
                                                 ? List.of(
                                                         new AssistantMessage.ToolCall(
-                                                                "id1", "function", "weather", "{}"))
+                                                                "id1",
+                                                                "function",
+                                                                "weather",
+                                                                arguments))
                                                 : List.of())
                                 .build();
                 return new ProviderResult(
@@ -191,6 +198,42 @@ class ReActLoopStreamingTest {
                                             .getFirst()
                                             .responseData())
                             .isEqualTo("sunny");
+                });
+    }
+
+    @Test
+    void toolCallEventsOnlyExposeBoundedRedactedArguments() {
+        String input = "{\"token\":\"EVENT_SECRET\",\"padding\":\"" + "x".repeat(12000) + "\"}";
+        var observed = new CopyOnWriteArrayList<String>();
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(ToolCallingAutoConfiguration.class))
+                .run(ctx -> {
+                    var result =
+                            service(
+                                            provider(true, input),
+                                            ctx.getBean(ToolCallingManager.class),
+                                            "5s")
+                                    .process(
+                                            new ProcessRequest("cli", "events", "a", "hi", "cli"),
+                                            new TurnSink() {
+                                                public boolean streaming() {
+                                                    return true;
+                                                }
+
+                                                public void onToolCall(
+                                                        String id, String name, String arguments) {
+                                                    assertThat(id).isEqualTo("id1");
+                                                    observed.add(arguments);
+                                                }
+                                            });
+                    assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
+                    assertThat(observed)
+                            .singleElement()
+                            .satisfies(arguments ->
+                                    assertThat(arguments)
+                                            .hasSizeLessThanOrEqualTo(10000)
+                                            .contains("摘要截断")
+                                            .doesNotContain("EVENT_SECRET"));
                 });
     }
 

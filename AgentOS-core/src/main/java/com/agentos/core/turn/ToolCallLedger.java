@@ -10,12 +10,16 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.springframework.ai.chat.messages.AssistantMessage.ToolCall;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 每批响应独有的调用账本：官方 Manager 按顺序调用，同名工具从队首取模型提供的 ID。
  * 不按参数/输出猜 ID。checkpoint 闭包持有当前轮次快照，供治理层和 HTTP 每跳显式续租。
  */
 public final class ToolCallLedger {
+    private static final JsonMapper JSON =
+            JsonMapper.builder().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     private final List<ToolCall> calls;
     private final Map<String, ArrayDeque<ToolCall>> queues = new LinkedHashMap<>();
     private final Set<String> taken = new HashSet<>();
@@ -47,6 +51,20 @@ public final class ToolCallLedger {
 
     public void checkpoint() {
         checkpoint.run();
+    }
+
+    /** 先预检整批格式，任何一项损坏时本批所有工具都不得开始；不回显解析异常。 */
+    public boolean validArguments() {
+        for (ToolCall call : calls) {
+            try {
+                if (call.arguments() == null || !JSON.readTree(call.arguments()).isObject()) {
+                    return false;
+                }
+            } catch (RuntimeException invalid) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static void validate(List<ToolCall> calls) {

@@ -167,7 +167,6 @@ public final class GovernedToolCallback implements ToolCallback {
                     // 重试不领取新的模型调用 ID，不重复 begin；下一次使用同一绝对截止时间。
                 }
             }
-            ledger.checkpoint();
             result = result == null ? "" : result;
             original = result.length();
             truncated = original > policy.maxResultChars();
@@ -183,6 +182,8 @@ public final class GovernedToolCallback implements ToolCallback {
                                                 0, Math.min(result.length(), cap - marker.length()))
                                         + marker;
             }
+            // 先治理已取得的结果，再检查租约/预算；检查失败的完成审计也不能携带原始长正文。
+            ledger.checkpoint();
             status = "success";
         } catch (RuntimeException ex) {
             if (ex instanceof TurnDeadlineExceededException) {
@@ -247,8 +248,7 @@ public final class GovernedToolCallback implements ToolCallback {
     }
 
     private String summary(String raw, int cap) {
-        String safe = redactor.redact(raw);
-        return safe == null || safe.length() <= cap ? safe : safe.substring(0, cap - 6) + "[摘要截断]";
+        return redactor.summarize(raw, cap);
     }
 
     private String attempt(

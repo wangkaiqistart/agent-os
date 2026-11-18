@@ -76,6 +76,153 @@ class ToolExecutorTest {
     }
 
     @Test
+    void rawArgumentsAreOnlyUsedForExecutionAndHistoryPreservesSafeStructure() throws Exception {
+        AgentFixtures.agent(directory, "a");
+        var agent = AgentFixtures.loader(directory).load("a");
+        var budget = TurnExecutionBudget.start(Duration.ofSeconds(5));
+        var context =
+                new TurnContext(
+                        UUID.randomUUID(), UUID.randomUUID(), agent, "test", 1, budget.deadline());
+        String input =
+                "{\"nested\":{\"token\":\"NESTED_SECRET\",\"note\":\"KNOWN_SECRET\"},\"url\":\"https://example.com/?token=URL_SECRET\"}";
+        var seen = new ArrayList<String>();
+        ToolCallback callback =
+                new ToolCallback() {
+                    public ToolDefinition getToolDefinition() {
+                        return ToolDefinition.builder()
+                                .name("a")
+                                .description("test")
+                                .inputSchema("{}")
+                                .build();
+                    }
+
+                    public String call(String arguments) {
+                        throw new AssertionError("需要上下文");
+                    }
+
+                    public String call(String arguments, ToolContext toolContext) {
+                        ((ToolCallLedger)
+                                        toolContext
+                                                .getContext()
+                                                .get(ToolContextKeys.TOOL_CALL_LEDGER))
+                                .next("a");
+                        seen.add(arguments);
+                        return "ok";
+                    }
+                };
+        var assistant =
+                AssistantMessage.builder()
+                        .content("调用工具")
+                        .properties(java.util.Map.of("trace", "test"))
+                        .toolCalls(
+                                List.of(
+                                        new AssistantMessage.ToolCall(
+                                                "safe-id", "function", "a", input)))
+                        .build();
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(ToolCallingAutoConfiguration.class))
+                .run(ctx -> {
+                    var recorder =
+                            org.mockito.Mockito.mock(
+                                    com.agentos.core.audit.ToolInvocationRecorder.class);
+                    var executor =
+                            new ToolExecutor(
+                                    ctx.getBean(ToolCallingManager.class),
+                                    recorder,
+                                    new com.agentos.core.tool.Redactor(
+                                            () -> List.of("KNOWN_SECRET")));
+                    var result =
+                            executor.execute(
+                                    List.of(new UserMessage("hi")),
+                                    new ChatResponse(List.of(new Generation(assistant))),
+                                    List.of(callback),
+                                    context,
+                                    budget,
+                                    () -> {});
+                    assertThat(seen).containsExactly(input);
+                    var safe = (AssistantMessage) result.added().getFirst();
+                    assertThat(safe.getText()).isEqualTo(assistant.getText());
+                    assertThat(safe.getMetadata()).containsEntry("trace", "test");
+                    assertThat(safe.getToolCalls())
+                            .singleElement()
+                            .satisfies(call -> {
+                                assertThat(call.id()).isEqualTo("safe-id");
+                                assertThat(call.name()).isEqualTo("a");
+                                assertThat(call.arguments())
+                                        .contains("***")
+                                        .doesNotContain(
+                                                "NESTED_SECRET", "KNOWN_SECRET", "URL_SECRET");
+                            });
+                    assertThat(assistant.getToolCalls().getFirst().arguments()).isEqualTo(input);
+                });
+    }
+
+    @Test
+    void malformedJsonRejectsWholeBatchWithoutManagerAndReturnsSafeErrors() throws Exception {
+        AgentFixtures.agent(directory, "a");
+        var agent = AgentFixtures.loader(directory).load("a");
+        for (String invalid : List.of("{BROKEN_PRIVATE", "[]", "{} {}", "null")) {
+            for (boolean invalidFirst : List.of(true, false)) {
+                var manager = org.mockito.Mockito.mock(ToolCallingManager.class);
+                org.mockito.Mockito.when(
+                                manager.executeToolCalls(
+                                        org.mockito.ArgumentMatchers.any(),
+                                        org.mockito.ArgumentMatchers.any()))
+                        .thenThrow(new AssertionError("格式错误的批次不得进入 Manager"));
+                var recorder =
+                        org.mockito.Mockito.mock(
+                                com.agentos.core.audit.ToolInvocationRecorder.class);
+                var budget = TurnExecutionBudget.start(Duration.ofSeconds(5));
+                var context =
+                        new TurnContext(
+                                UUID.randomUUID(),
+                                UUID.randomUUID(),
+                                agent,
+                                "test",
+                                1,
+                                budget.deadline());
+                var bad = new AssistantMessage.ToolCall("bad", "function", "a", invalid);
+                var good = call("good", "a");
+                var calls = invalidFirst ? List.of(bad, good) : List.of(good, bad);
+                var result =
+                        new ToolExecutor(
+                                        manager,
+                                        recorder,
+                                        new com.agentos.core.tool.Redactor(List::of))
+                                .execute(
+                                        List.of(new UserMessage("hi")),
+                                        response(calls),
+                                        List.of(),
+                                        context,
+                                        budget,
+                                        () -> {});
+                org.mockito.Mockito.verifyNoInteractions(manager);
+                var records =
+                        org.mockito.ArgumentCaptor.forClass(
+                                com.agentos.core.audit.ToolInvocationRecord.class);
+                org.mockito.Mockito.verify(recorder, org.mockito.Mockito.times(2))
+                        .skipped(records.capture());
+                assertThat(records.getAllValues())
+                        .allSatisfy(r -> {
+                            assertThat(r.status()).isEqualTo("failed");
+                            assertThat(r.attempts()).isZero();
+                        });
+                var responses = ((ToolResponseMessage) result.added().getLast()).getResponses();
+                assertThat(responses)
+                        .extracting(ToolResponseMessage.ToolResponse::id)
+                        .containsExactlyElementsOf(
+                                calls.stream().map(AssistantMessage.ToolCall::id).toList());
+                assertThat(responses)
+                        .allSatisfy(r ->
+                                assertThat(r.responseData())
+                                        .contains("参数", "未执行")
+                                        .doesNotContain("BROKEN_PRIVATE"));
+                assertThat(result.returnDirect()).isFalse();
+            }
+        }
+    }
+
+    @Test
     void malformedIdsDoNotCallManager() throws Exception {
         AgentFixtures.agent(directory, "a");
         var agent = AgentFixtures.loader(directory).load("a");

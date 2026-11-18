@@ -101,6 +101,10 @@ class ToolCallLimitsTest {
                                 assertThat(record.toolCallId()).isEqualTo("two");
                                 assertThat(record.status()).isEqualTo("limit_skipped");
                                 assertThat(record.attempts()).isZero();
+                                assertThat(record.inputJson())
+                                        .hasSizeLessThanOrEqualTo(10000)
+                                        .contains("摘要截断")
+                                        .doesNotContain("SKIP_SECRET");
                             });
                     assertThat(result.added()).hasSize(2);
                     var next =
@@ -131,7 +135,13 @@ class ToolCallLimitsTest {
                                                                         id,
                                                                         "function",
                                                                         "weather",
-                                                                        "{}"))
+                                                                        id.equals("two")
+                                                                                ? "{\"token\":\"SKIP_SECRET\",\"padding\":\""
+                                                                                        + "x"
+                                                                                                .repeat(
+                                                                                                        12000)
+                                                                                        + "\"}"
+                                                                                : "{}"))
                                                         .toList())
                                         .build())));
     }

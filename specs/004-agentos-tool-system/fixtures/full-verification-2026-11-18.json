@@ -1,0 +1,4319 @@
+{
+  "feature": "004-agentos-tool-system",
+  "date": "2026-11-18",
+  "convergence": {
+    "requirements": 27,
+    "success_criteria": 9,
+    "acceptance_scenarios": 18,
+    "edge_cases": 11,
+    "plan_gates": 9,
+    "constitution_principles": 8,
+    "existing_tasks_checked": 52,
+    "findings": [
+      {
+        "id": "F1",
+        "type": "partial",
+        "severity": "MEDIUM",
+        "sources": [
+          "SC-005",
+          "T029",
+          "T037"
+        ],
+        "task": "T053",
+        "phase": 9,
+        "observation": "Initial full verify observed 19 HTTP requests while 20 slow-body samples were required; targeted rerun and second full verify passed."
+      }
+    ]
+  },
+  "first_verify": {
+    "exit_code": 1,
+    "log": "/tmp/agentos-004-full-verify-20261118.log",
+    "failure": "HttpToolsDeadlineTest.sustainedBodyP95RemainsBoundedAcrossTwentyRequestsWithoutRetry",
+    "expected_requests": 20,
+    "actual_requests": 19
+  },
+  "targeted_recheck": {
+    "exit_code": 0,
+    "log": "/tmp/agentos-004-deadline-recheck-20261118.log"
+  },
+  "full_verify": {
+    "command": "mvn -B -ntp verify",
+    "finished_at": "2026-11-18T18:02:47+08:00",
+    "summary": {
+      "tests": 550,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "modules": {
+      "AgentOS-boot": 75,
+      "AgentOS-channel-cli": 3,
+      "AgentOS-cli": 61,
+      "AgentOS-core": 72,
+      "AgentOS-provider": 220,
+      "AgentOS-storage": 65,
+      "AgentOS-tool": 43,
+      "AgentOS-web": 11
+    },
+    "deadlines": [
+      {
+        "scenario": "slow_model",
+        "samples": 20,
+        "budget_ms": 50,
+        "p95_ms": 131
+      },
+      {
+        "scenario": "sustained_stream",
+        "samples": 20,
+        "budget_ms": 80,
+        "p95_ms": 88
+      },
+      {
+        "scenario": "slow_body",
+        "samples": 20,
+        "budget_ms": 100,
+        "p95_ms": 105
+      },
+      {
+        "scenario": "slow_tool",
+        "samples": 20,
+        "budget_ms": 80,
+        "p95_ms": 86
+      },
+      {
+        "scenario": "audit_wait",
+        "samples": 20,
+        "budget_ms": 80,
+        "p95_ms": 85
+      }
+    ],
+    "suites": [
+      {
+        "module": "AgentOS-web",
+        "suite": "com.agentos.web.api.GlobalExceptionHandlerTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "validationError",
+            "seconds": 0.457,
+            "passed": true
+          },
+          {
+            "name": "everyErrorCodeMapped(ErrorCode)[1]",
+            "seconds": 0.115,
+            "passed": true
+          },
+          {
+            "name": "everyErrorCodeMapped(ErrorCode)[2]",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "everyErrorCodeMapped(ErrorCode)[3]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "everyErrorCodeMapped(ErrorCode)[4]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "everyErrorCodeMapped(ErrorCode)[5]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "businessError",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "methodNotAllowed",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "unexpectedError",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "malformedJson",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "okEnvelope",
+            "seconds": 0.005,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.DeadlineTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "givesUpWhenRemainingAfterWaitIsBelowMinimum",
+            "seconds": 0.012,
+            "passed": true
+          },
+          {
+            "name": "firstAttemptTimesOutAtDeadlineInsteadOfConnectionTimeout",
+            "seconds": 1.514,
+            "passed": true
+          },
+          {
+            "name": "retriesWithTimeoutShortenedToRemainingBudget",
+            "seconds": 3.032,
+            "passed": true
+          },
+          {
+            "name": "givesUpWhenRetryAfterExceedsRemainingBudget",
+            "seconds": 0.025,
+            "passed": true
+          },
+          {
+            "name": "expiredDeadlineSendsNothing",
+            "seconds": 0.009,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.embedding.EmbeddingServiceTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "failedCallIsLoggedWithSafeSummary",
+            "seconds": 0.072,
+            "passed": true
+          },
+          {
+            "name": "doesNotRetryAuthFailure",
+            "seconds": 0.013,
+            "passed": true
+          },
+          {
+            "name": "emptyListSendsNothing",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "dimensionDriftAfterValidationFailsAndMarksMisconfigured",
+            "seconds": 0.018,
+            "passed": true
+          },
+          {
+            "name": "logsCallWithoutTextVectorsOrKey",
+            "seconds": 0.009,
+            "passed": true
+          },
+          {
+            "name": "splitsIntoBatchesAndKeepsOrder",
+            "seconds": 0.016,
+            "passed": true
+          },
+          {
+            "name": "retriesTransientFailureOnce",
+            "seconds": 0.518,
+            "passed": true
+          },
+          {
+            "name": "embedsSingleTextWithExplicitDimensions",
+            "seconds": 0.013,
+            "passed": true
+          },
+          {
+            "name": "disabledCreatesNoModelAndFailsClearly(String)[1]",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "disabledCreatesNoModelAndFailsClearly(String)[2]",
+            "seconds": 0.006,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.LoggingLlmCallRecorderTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "failureRecordLogsNullsAndFailureSummary",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "successRecordLogsEveryFieldAndKeepsZero",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.StartupValidationTest",
+        "tests": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "startsWhenOnlyDefaultKeyIsProvided",
+            "seconds": 0.043,
+            "passed": true
+          },
+          {
+            "name": "failsOnInvalidRetryMinRemaining(String)[1]",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "failsOnInvalidRetryMinRemaining(String)[2]",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "failsOnInvalidRetryMinRemaining(String)[3]",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "failsWhenNamesDifferOnlyByCase",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "acceptsBoundaryRetrySettings",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "failsWhenTypeMissing",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "failsWhenNoConnectionConfigured",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "failsOnDefaultConnectionEvenWhenOptionalKeyAlsoEmpty",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "failsWhenDefaultConnectionDoesNotExist",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "failsOnNonPositiveTimeout(String)[1]",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "failsOnNonPositiveTimeout(String)[2]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "failsOnUnsupportedType(String)[1]",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "failsOnUnsupportedType(String)[2]",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "failsOnUnsupportedType(String)[3]",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "registersProviderServiceButNoModelBeans",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "failsOnEmptyBaseUrl",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "failsOnInvalidRetryMaxWait(String)[1]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "failsOnInvalidRetryMaxWait(String)[2]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "failsOnInvalidRetryMaxWait(String)[3]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "failsWhenDefaultConnectionKeyIsEmpty",
+            "seconds": 0.005,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.ConnectionTypeTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "nullLimitDoesNotClearExistingField",
+            "seconds": 0.0,
+            "passed": true
+          },
+          {
+            "name": "openaiWritesOnlyMaxCompletionTokens",
+            "seconds": 0.0,
+            "passed": true
+          },
+          {
+            "name": "deepseekWritesOnlyMaxTokens",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "nullLimitWritesNoField",
+            "seconds": 0.0,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.embedding.EmbeddingStartupTest",
+        "tests": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "syncUnreachableStillStarts",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "callDuringCheckingWaitsForValidation",
+            "seconds": 1.114,
+            "passed": true
+          },
+          {
+            "name": "recoversAfterUnreachable",
+            "seconds": 1.289,
+            "passed": true
+          },
+          {
+            "name": "probeTimeoutOverridesConnectionTimeout",
+            "seconds": 1.008,
+            "passed": true
+          },
+          {
+            "name": "syncMismatchRefusesToStart",
+            "seconds": 0.015,
+            "passed": true
+          },
+          {
+            "name": "doesNotRevalidateAfterAuthFailure",
+            "seconds": 1.126,
+            "passed": true
+          },
+          {
+            "name": "unreachableValidationIsClassified",
+            "seconds": 1.074,
+            "passed": true
+          },
+          {
+            "name": "invalidEmbeddingConfigurationFailsStartup(String)[1]",
+            "seconds": 0.019,
+            "passed": true
+          },
+          {
+            "name": "invalidEmbeddingConfigurationFailsStartup(String)[2]",
+            "seconds": 0.009,
+            "passed": true
+          },
+          {
+            "name": "invalidEmbeddingConfigurationFailsStartup(String)[3]",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "invalidEmbeddingConfigurationFailsStartup(String)[4]",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "invalidEmbeddingConfigurationFailsStartup(String)[5]",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "validationFailureIsClassifiedAndWarned(int, String, String)[1]",
+            "seconds": 0.431,
+            "passed": true
+          },
+          {
+            "name": "validationFailureIsClassifiedAndWarned(int, String, String)[2]",
+            "seconds": 0.343,
+            "passed": true
+          },
+          {
+            "name": "validationFailureIsClassifiedAndWarned(int, String, String)[3]",
+            "seconds": 0.37,
+            "passed": true
+          },
+          {
+            "name": "validationFailureIsClassifiedAndWarned(int, String, String)[4]",
+            "seconds": 0.434,
+            "passed": true
+          },
+          {
+            "name": "slowValidationDoesNotBlockStartup",
+            "seconds": 2.11,
+            "passed": true
+          },
+          {
+            "name": "dimensionMismatchMarksMisconfigured",
+            "seconds": 1.139,
+            "passed": true
+          },
+          {
+            "name": "recoversAfterArrears",
+            "seconds": 0.329,
+            "passed": true
+          },
+          {
+            "name": "callTimesOutWhileStillChecking",
+            "seconds": 1.018,
+            "passed": true
+          },
+          {
+            "name": "revalidationStopsWhenContextCloses",
+            "seconds": 1.258,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.ProviderRoutingTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "routesToSecondConnectionOnly",
+            "seconds": 0.012,
+            "passed": true
+          },
+          {
+            "name": "expiredDeadlineFailsWithoutRequestOrRecord",
+            "seconds": 0.009,
+            "passed": true
+          },
+          {
+            "name": "unavailableConnectionFailsBeforeAnyRequest",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "providerNameIsCaseInsensitive",
+            "seconds": 0.009,
+            "passed": true
+          },
+          {
+            "name": "routesToNamedConnectionOnly",
+            "seconds": 0.009,
+            "passed": true
+          },
+          {
+            "name": "unknownProviderFailsBeforeAnyRequest",
+            "seconds": 0.013,
+            "passed": true
+          },
+          {
+            "name": "blankModelFailsBeforeAnyRequest",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "recordCarriesResolvedConnectionName",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "usesDefaultProviderWhenProfileHasNone",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "preCallValidationFailureProducesNoRecord",
+            "seconds": 0.007,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.StreamingTest",
+        "tests": 14,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "interruptedThreadIsRecordedAsCancelledAndFlagRestored",
+            "seconds": 0.059,
+            "passed": true
+          },
+          {
+            "name": "streamRecordsExplicitZeroCachedTokens",
+            "seconds": 0.04,
+            "passed": true
+          },
+          {
+            "name": "streamWithoutUsageChunkRecordsNullTokens",
+            "seconds": 0.01,
+            "passed": true
+          },
+          {
+            "name": "streamResultMatchesCallResult",
+            "seconds": 0.011,
+            "passed": true
+          },
+          {
+            "name": "doesNotRetryAfterDeltaWasDelivered",
+            "seconds": 0.01,
+            "passed": true
+          },
+          {
+            "name": "textDeltasReachSinkInOrder",
+            "seconds": 0.01,
+            "passed": true
+          },
+          {
+            "name": "silentStreamIsCancelledAtDeadline",
+            "seconds": 1.522,
+            "passed": true
+          },
+          {
+            "name": "normalStreamProducesOneRecordWithoutDoubleCountingUsage",
+            "seconds": 0.028,
+            "passed": true
+          },
+          {
+            "name": "sinkFailureIsRecordedAsCancelled",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "streamRecordsCachedTokens",
+            "seconds": 0.013,
+            "passed": true
+          },
+          {
+            "name": "retriesBeforeAnyDeltaIsDelivered",
+            "seconds": 0.531,
+            "passed": true
+          },
+          {
+            "name": "splitToolCallArgumentsAreAssembled",
+            "seconds": 0.07,
+            "passed": true
+          },
+          {
+            "name": "slowStreamIsCancelledAtDeadline",
+            "seconds": 2.017,
+            "passed": true
+          },
+          {
+            "name": "streamCannotSeeRateLimitHeaders",
+            "seconds": 0.031,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.RetryPolicyTest",
+        "tests": 20,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "doesNotRetryWhenThreadIsInterrupted",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "fallsBackToDefaultWaitForUnusableRetryAfter(String)[1]",
+            "seconds": 0.522,
+            "passed": true
+          },
+          {
+            "name": "fallsBackToDefaultWaitForUnusableRetryAfter(String)[2]",
+            "seconds": 0.534,
+            "passed": true
+          },
+          {
+            "name": "fallsBackToDefaultWaitForUnusableRetryAfter(String)[3]",
+            "seconds": 0.535,
+            "passed": true
+          },
+          {
+            "name": "doesNotRetryPermanentErrors(int, FailureKind)[1]",
+            "seconds": 0.019,
+            "passed": true
+          },
+          {
+            "name": "doesNotRetryPermanentErrors(int, FailureKind)[2]",
+            "seconds": 0.009,
+            "passed": true
+          },
+          {
+            "name": "doesNotRetryPermanentErrors(int, FailureKind)[3]",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "doesNotRetryPermanentErrors(int, FailureKind)[4]",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "doesNotRetryPermanentErrors(int, FailureKind)[5]",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "doesNotRetryPermanentErrors(int, FailureKind)[6]",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "retriesRateLimitedAfterRetryAfter",
+            "seconds": 1.018,
+            "passed": true
+          },
+          {
+            "name": "givesUpWhenRetryAfterExceedsMaxWaitWithoutDeadline",
+            "seconds": 0.021,
+            "passed": true
+          },
+          {
+            "name": "retriesTransientServerErrors(int)[1]",
+            "seconds": 0.522,
+            "passed": true
+          },
+          {
+            "name": "retriesTransientServerErrors(int)[2]",
+            "seconds": 0.527,
+            "passed": true
+          },
+          {
+            "name": "retriesTransientServerErrors(int)[3]",
+            "seconds": 0.528,
+            "passed": true
+          },
+          {
+            "name": "retriesTransientServerErrors(int)[4]",
+            "seconds": 0.532,
+            "passed": true
+          },
+          {
+            "name": "interruptDuringRetryAfterWaitStopsImmediately",
+            "seconds": 0.023,
+            "passed": true
+          },
+          {
+            "name": "failsAfterTwoServerErrors",
+            "seconds": 0.543,
+            "passed": true
+          },
+          {
+            "name": "retriesConnectionRefusedOnce",
+            "seconds": 0.535,
+            "passed": true
+          },
+          {
+            "name": "retriesOnceWithoutDeadline",
+            "seconds": 0.52,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.support.StubModelServerTest",
+        "tests": 62,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "unscriptedRequestFailsExplicitly",
+            "seconds": 0.061,
+            "passed": true
+          },
+          {
+            "name": "hangUntilClose",
+            "seconds": 0.205,
+            "passed": true
+          },
+          {
+            "name": "sseChunkIntervalSpacesChunks",
+            "seconds": 0.209,
+            "passed": true
+          },
+          {
+            "name": "requestSnapshotsAreImmutable",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "sseThenDropCutsTheStreamAfterTheChunks",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "recordsRequestsInOrderAndReturnsScriptedJson",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "sseChunksAreFlushedOneByOne",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "delayedResponse",
+            "seconds": 0.309,
+            "passed": true
+          },
+          {
+            "name": "closeReleasesResourcesAndIsIdempotent",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "interruptedWaitRestoresInterruptFlag",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "responseHeadersAreImmutableSnapshots",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "closeReleasesPausedStream",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[1]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[2]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[3]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[4]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[5]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[6]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[7]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[8]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[9]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[10]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[11]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[12]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[13]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[14]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[15]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[16]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[17]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[18]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[19]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[20]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[21]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[22]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[23]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[24]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[25]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[26]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[27]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[28]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[29]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[30]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[31]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[32]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[33]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[34]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[35]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[36]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[37]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[38]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[39]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[40]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[41]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[42]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[43]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[44]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[45]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[46]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[47]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[48]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[49]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "closeWaitsForInFlightHandlersEvenWhenInterrupted()[50]",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.ChatModelFactoryTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "openaiRequestUsesProfileModelAndMaxCompletionTokensWithoutTemperature",
+            "seconds": 0.274,
+            "passed": true
+          },
+          {
+            "name": "connectionLevelOptionsCarryNoGenerationDefaults",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "retryableErrorIsSentOnlyOnce(int)[1]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "retryableErrorIsSentOnlyOnce(int)[2]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "retryableErrorIsSentOnlyOnce(int)[3]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "callIsObservedThroughInjectedRegistry",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "deepseekRequestUsesMaxTokens",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "toolDefinitionsAreSentButCallbackIsNotExecuted",
+            "seconds": 0.004,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.ImageInputTest",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "recordCountsImages",
+            "seconds": 0.037,
+            "passed": true
+          },
+          {
+            "name": "nonImageMediaFailsBeforeAnyRequest(String)[1]",
+            "seconds": 0.019,
+            "passed": true
+          },
+          {
+            "name": "nonImageMediaFailsBeforeAnyRequest(String)[2]",
+            "seconds": 0.013,
+            "passed": true
+          },
+          {
+            "name": "nonImageMediaFailsBeforeAnyRequest(String)[3]",
+            "seconds": 0.015,
+            "passed": true
+          },
+          {
+            "name": "nonImageMediaFailsBeforeAnyRequest(String)[4]",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "imageUrlIsPassedThroughWithoutDownloading",
+            "seconds": 0.024,
+            "passed": true
+          },
+          {
+            "name": "serviceRejectionIsNotRetriedAndKeepsImageCount",
+            "seconds": 0.016,
+            "passed": true
+          },
+          {
+            "name": "inlineImageIsSentWithTextInOrder(String)[1]",
+            "seconds": 0.015,
+            "passed": true
+          },
+          {
+            "name": "inlineImageIsSentWithTextInOrder(String)[2]",
+            "seconds": 0.015,
+            "passed": true
+          },
+          {
+            "name": "multipleImagesKeepTheirOrder",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "logsAndRecordsDoNotContainImageDataOrUrl",
+            "seconds": 0.537,
+            "passed": true
+          },
+          {
+            "name": "mediaOnNonUserMessageFailsBeforeAnyRequest",
+            "seconds": 0.024,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.RequestMappingTest",
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "successfulCallProducesOneRecord",
+            "seconds": 0.029,
+            "passed": true
+          },
+          {
+            "name": "sendsOnlyFieldsSetInProfile",
+            "seconds": 0.04,
+            "passed": true
+          },
+          {
+            "name": "mapsOutputCapByConnectionType",
+            "seconds": 0.016,
+            "passed": true
+          },
+          {
+            "name": "emptyChoicesFailsAsProtocolError",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "omitsEveryUnsetGenerationParameter",
+            "seconds": 0.011,
+            "passed": true
+          },
+          {
+            "name": "recorderFailurePropagatesWithoutResending",
+            "seconds": 0.017,
+            "passed": true
+          },
+          {
+            "name": "postsToChatCompletionsUnderBaseUrl",
+            "seconds": 0.017,
+            "passed": true
+          },
+          {
+            "name": "toolContextNeverReachesTheWire",
+            "seconds": 0.022,
+            "passed": true
+          },
+          {
+            "name": "returnsToolCallsVerbatimWithoutExecutingThem",
+            "seconds": 0.02,
+            "passed": true
+          },
+          {
+            "name": "omitsToolsWhenNoneProvided",
+            "seconds": 0.027,
+            "passed": true
+          },
+          {
+            "name": "sendsTemperatureWhenSet",
+            "seconds": 0.019,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.config.FoundationConfigurationTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "bindsConnectionsAndDefaultsRetryMaxWaitToTimeout",
+            "seconds": 0.016,
+            "passed": true
+          },
+          {
+            "name": "registersLoggingRecorderByDefault",
+            "seconds": 0.011,
+            "passed": true
+          },
+          {
+            "name": "doesNotComponentScanProviderPackage",
+            "seconds": 0.013,
+            "passed": true
+          },
+          {
+            "name": "userRecorderReplacesDefault",
+            "seconds": 0.015,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.RedactionTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "authErrorBodySecretDoesNotLeak",
+            "seconds": 0.897,
+            "passed": true
+          },
+          {
+            "name": "successfulCallWithToolsDoesNotLeak",
+            "seconds": 0.08,
+            "passed": true
+          },
+          {
+            "name": "connectionFailureDoesNotLeak",
+            "seconds": 0.538,
+            "passed": true
+          },
+          {
+            "name": "serverErrorBodySecretDoesNotLeak",
+            "seconds": 0.549,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-provider",
+        "suite": "com.agentos.provider.chat.CallRecordTest",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "retryProducesTwoRecords",
+            "seconds": 1.027,
+            "passed": true
+          },
+          {
+            "name": "partialRateLimitHeadersLeaveTheOtherNull",
+            "seconds": 0.022,
+            "passed": true
+          },
+          {
+            "name": "rateLimitHeadersAreRecorded",
+            "seconds": 0.01,
+            "passed": true
+          },
+          {
+            "name": "missingUsageIsNullNotZero",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "recorderFailureIsNotSwallowedAndDoesNotResend",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "outputCapHonoredIsComputedAndWarned",
+            "seconds": 0.01,
+            "passed": true
+          },
+          {
+            "name": "observationRegistryReceivesModelCall",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "successRecordHasAllBasicFields",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "correlationIsCarriedThrough",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "cachedTokensAreRecorded",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "explicitZeroCacheIsRecordedAsZero",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "missingCacheAndRateLimitAreNull",
+            "seconds": 0.006,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-cli",
+        "suite": "com.agentos.cli.InitModelResolverTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "missingModelNeverReadsEnvironmentOrDotEnv",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "providerDefaultsToPrimaryAndBlankProviderIsRejected",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "explicitModelDoesNotConsultLowerSources",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "invalidExplicitModelIsRejected(String)[1]",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "invalidExplicitModelIsRejected(String)[2]",
+            "seconds": 0.0,
+            "passed": true
+          },
+          {
+            "name": "invalidExplicitModelIsRejected(String)[3]",
+            "seconds": 0.0,
+            "passed": true
+          },
+          {
+            "name": "invalidExplicitModelIsRejected(String)[4]",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "invalidExplicitModelIsRejected(String)[5]",
+            "seconds": 0.0,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-cli",
+        "suite": "com.agentos.cli.ChatCommandTest",
+        "tests": 34,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "injectedIdentityIsUsedForSessionRequestAndNoUserOverrideOptionExists",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "normalizedWorkspaceReachesLauncherAndInteractiveInputClosesOnExitOrEof",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "busySingleMessageExitsThreeAndInteractiveBusyCanContinue",
+            "seconds": 0.009,
+            "passed": true
+          },
+          {
+            "name": "unknownToolShowsConfigurationLocationWithoutExposingCause",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "unrelatedArgumentErrorsKeepSafeOutputAndDoNotExposeCauses",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "newWithoutAnActiveSessionStartsNormally",
+            "seconds": 0.017,
+            "passed": true
+          },
+          {
+            "name": "oldSingleAgentStillWorksAndMultipleAgentsListCandidates",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "newRefusesToArchiveBusySessionAndDoesNotCallModel",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "invalidSelectionsNeverLaunchOrFallBack",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[1]",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[2]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[3]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[4]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[5]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[6]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[7]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[8]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[9]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[10]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[11]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[12]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[13]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[14]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[15]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[16]",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[17]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[18]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[19]",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "newArchivesOnlyTheSelectedAgentBeforeProcessing()[20]",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "duplicateToolsShowSafeConfigurationLocationWithoutLaunchingContext",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "startupAndProcessingFailuresHaveSafeCodesAndCloseContext",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "duplicateToolErrorNeverExposesCauseDuringProcessing",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "mainWinsAndExplicitProfileOverridesEvenWhenOtherAgentIsBroken",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "unsuccessfulOrUnconfirmedTurnIsNotReportedAsSuccessAndBlankMessageDoesNotLaunch",
+            "seconds": 0.004,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-cli",
+        "suite": "com.agentos.cli.AgentOSCliTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "helpVersionAndUnknownOptionDoNotStartLauncher",
+            "seconds": 0.01,
+            "passed": true
+          },
+          {
+            "name": "bootLauncherIsUsedForChatButInitDoesNotNeedIt",
+            "seconds": 0.006,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-cli",
+        "suite": "com.agentos.cli.ProviderNameProjectionLoaderTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "projectsOnlyProviderKeysAndSupportsExplicitPath",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "explicitFailureDoesNotFallBackToOtherCandidates",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "malformedOrMissingProvidersAreConfigurationErrors",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "defaultSearchOrderUsesExecutionThenConfigThenXdgThenHome",
+            "seconds": 0.004,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-cli",
+        "suite": "com.agentos.cli.LocalProviderNameCatalogTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "cachesNamesWithoutExposingConfigValues",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "unavailableCatalogFailsBeforeBusinessCommandCanUseIt",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-cli",
+        "suite": "com.agentos.cli.InitCommandBehaviorTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "sourceAndPathFailuresHaveSafeDistinctExitCodes",
+            "seconds": 0.035,
+            "passed": true
+          },
+          {
+            "name": "missingModelWritesNothingAndInitNeverLaunchesSpring",
+            "seconds": 0.01,
+            "passed": true
+          },
+          {
+            "name": "secretKeysAreNotProjectedIntoGeneratedMainOrOutputAndBadMainIsPreserved",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "configuredProviderIsAcceptedAndUnknownProviderFailsBeforeDirectoryCreation",
+            "seconds": 0.007,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-cli",
+        "suite": "com.agentos.cli.WorkspaceInitializerTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "corruptPartialMainAndInvalidRaceWinnerAreNeverOverwrittenOnRetry",
+            "seconds": 0.064,
+            "passed": true
+          },
+          {
+            "name": "providerAndModelAreSerializedAsStringsRatherThanYamlFragments",
+            "seconds": 0.015,
+            "passed": true
+          },
+          {
+            "name": "preflightRejectsWrongTypesLinksAndBrokenMainBeforeWritingTemplates",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "partialFailurePreservesCreatedFilesAndRetryOnlyFillsMissingItems",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "missingModelDoesNotWriteAnything",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "createNewCompetitionPreservesAndValidatesWinner",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "createsLoadableMainAndPreservesAllExistingFilesWithoutReadingNewOptions",
+            "seconds": 0.006,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-channel-cli",
+        "suite": "com.agentos.channel.cli.CliChannelTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "eofAlsoEndsInteraction",
+            "seconds": 0.024,
+            "passed": true
+          },
+          {
+            "name": "skipsBlankLinesAndStopsOnExitOrEof",
+            "seconds": 0.002,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-channel-cli",
+        "suite": "com.agentos.channel.cli.CliIdentityTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "buildsCliSessionKey",
+            "seconds": 0.002,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.session.JpaMessageStoreTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "selectsTwentyCompletedTurnsBeforeReadingMessages",
+            "seconds": 0.077,
+            "passed": true
+          },
+          {
+            "name": "restoresToolCallsAndResponsesWithoutIncludingRunningTurn",
+            "seconds": 0.002,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.session.TurnReaperTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "completedHistoryDoesNotIssueToolUpdates",
+            "seconds": 0.017,
+            "passed": true
+          },
+          {
+            "name": "takeoverRecoversOldRoundAndFinishCannotOverwriteOrClearNewOwner",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "reapsLostOwnerAndOrphanToolsButLeavesEffectiveOwnerAndTerminalStatus",
+            "seconds": 0.023,
+            "passed": true
+          },
+          {
+            "name": "slowRecoveryUsesIndependentSessionTransactionsBeyondOneSecond",
+            "seconds": 2.259,
+            "passed": true
+          },
+          {
+            "name": "laterSessionFailureDoesNotRollBackEarlierRecovery",
+            "seconds": 0.055,
+            "passed": true
+          },
+          {
+            "name": "ordinaryFinishAlsoClosesPendingToolsAtomically",
+            "seconds": 0.011,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.audit.JpaToolInvocationRecorderTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "failedCompletionMarksOriginalIntentUnconfirmedWithoutReplayingTool",
+            "seconds": 0.207,
+            "passed": true
+          },
+          {
+            "name": "invalidJsonIsStoredAsJsonStringAndSkippedHasNoIntentRewrite",
+            "seconds": 0.018,
+            "passed": true
+          },
+          {
+            "name": "beginThenCompleteUpdatesSameRowAndPreservesDefaultsAndJson",
+            "seconds": 0.056,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.audit.AuditLatencyTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "toolIntentCompletionAndSkippedAuditSurviveFiftyMillisecondRoundTrips",
+            "seconds": 1.125,
+            "passed": true
+          },
+          {
+            "name": "latencyBeyondAttemptBudgetStillFailsClosedWithoutInsertReplay",
+            "seconds": 4.632,
+            "passed": true
+          },
+          {
+            "name": "commitResponsePastWaitLimitIsConfirmedOnceUsingAnotherConnection",
+            "seconds": 2.39,
+            "passed": true
+          },
+          {
+            "name": "consecutiveAuditsSurviveSixtyMillisecondDatabaseRoundTrips",
+            "seconds": 0.682,
+            "passed": true
+          },
+          {
+            "name": "slowTimeoutConfigurationCannotStartBusinessWriteAfterAttemptExpiry",
+            "seconds": 0.219,
+            "passed": true
+          },
+          {
+            "name": "remoteRoundTripsAndCommitJitterDoNotBreakConsecutiveAudits",
+            "seconds": 1.867,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.session.JpaTurnStoreContractTest",
+        "tests": 14,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "expiredOwnerCannotFinishSuccessfullyWithoutAnyTakeover",
+            "seconds": 0.012,
+            "passed": true
+          },
+          {
+            "name": "archiveAndStartRacesNeverLeaveRunningTurnInArchivedSession",
+            "seconds": 0.225,
+            "passed": true
+          },
+          {
+            "name": "toolIntentAfterTakeoverIsKnownLeaseLossWithoutNewAuditOrSideEffect",
+            "seconds": 0.011,
+            "passed": true
+          },
+          {
+            "name": "dynamicLeaseCoversWholeTurnAndGraceRatherThanOneProviderAttempt",
+            "seconds": 0.009,
+            "passed": true
+          },
+          {
+            "name": "cannotRenewCompletedTurnOrDatabaseExpiredDeadlineEvenWithLiveLease",
+            "seconds": 0.012,
+            "passed": true
+          },
+          {
+            "name": "messageAppendChecksDatabaseDeadlineAfterWaitingForSessionLock",
+            "seconds": 0.52,
+            "passed": true
+          },
+          {
+            "name": "oldOwnerCannotAppendAfterTakeoverOrAfterParentHasEnded",
+            "seconds": 0.034,
+            "passed": true
+          },
+          {
+            "name": "archiveRecoversExpiredRunningTurnBeforeArchiving",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "archiveBetweenConflictInsertAndLockLookupStartsInFreshActiveSession",
+            "seconds": 0.065,
+            "passed": true
+          },
+          {
+            "name": "startsAndFinishesOneTurn",
+            "seconds": 0.013,
+            "passed": true
+          },
+          {
+            "name": "competingStartsHaveOneWinnerAndBusyRequestsLeaveOwnerUnchanged",
+            "seconds": 0.016,
+            "passed": true
+          },
+          {
+            "name": "expiredOwnerCannotRenewOrReleaseTheReplacementAndLateFinishUsesDatabaseStatus",
+            "seconds": 0.018,
+            "passed": true
+          },
+          {
+            "name": "busyArchiveIsRejectedAndCompletedHistoryCanBeArchived",
+            "seconds": 0.019,
+            "passed": true
+          },
+          {
+            "name": "missingSessionIsReadOnlyAndArchiveIsNoop",
+            "seconds": 0.004,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.session.JpaStorageContractTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "archiveStartsFreshSessionWithoutChangingOldMessages",
+            "seconds": 0.05,
+            "passed": true
+          },
+          {
+            "name": "databaseClockIsAvailableForDeadlineAssertions",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "rejectsAuditRecordsWithoutCorrelation",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "persistsTurnMessagesReadsSnapshotsAndDoesNotRewriteOldRows",
+            "seconds": 0.027,
+            "passed": true
+          },
+          {
+            "name": "mapsNullableZeroCacheAttemptImageCapFailureAndStatusFields",
+            "seconds": 0.012,
+            "passed": true
+          },
+          {
+            "name": "renewLeaseWaitsForSessionRowLockAndRejectsLeaseExpiredWhileBlocked",
+            "seconds": 0.268,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.session.TurnReaperStartupTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "chatStartupRecoversSeededTurnAndToolsBeforeAcceptingMessages",
+            "seconds": 0.015,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.audit.AuditTransactionTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "successfulAndRolledBackTransactionsRestoreConnectionSettings",
+            "seconds": 0.035,
+            "passed": true
+          },
+          {
+            "name": "committedResponseLossIsConfirmedWithoutSecondInsert",
+            "seconds": 0.055,
+            "passed": true
+          },
+          {
+            "name": "identicalSeparateRecordCallsAreSeparateActualRequests",
+            "seconds": 0.019,
+            "passed": true
+          },
+          {
+            "name": "backoffHoldsNoConnectionAndFreshAuditWorksWithSmallPool",
+            "seconds": 0.008,
+            "passed": true
+          },
+          {
+            "name": "poolExhaustionStopsWithinSharedBudgetWithoutLateWrite",
+            "seconds": 0.526,
+            "passed": true
+          },
+          {
+            "name": "unknownCommitWithDifferentPayloadIsNeverSilentlyConfirmed",
+            "seconds": 0.049,
+            "passed": true
+          },
+          {
+            "name": "retriesUseNewTransactionsAndStableWriteIdThenPersistOnce",
+            "seconds": 0.753,
+            "passed": true
+          },
+          {
+            "name": "realSqlAndLockWaitsAreBoundedAndReleaseConnections",
+            "seconds": 0.208,
+            "passed": true
+          },
+          {
+            "name": "finalAuditAfterDeadlineTriesOnceWithoutBackoffOrReplay",
+            "seconds": 0.018,
+            "passed": true
+          },
+          {
+            "name": "toolIntentRechecksDeadlineAfterWaitingForSessionLock",
+            "seconds": 0.432,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.session.TurnStorageBudgetTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "snapshotReadIsNotLimitedToAuditAttemptTimeout",
+            "seconds": 0.377,
+            "passed": true
+          },
+          {
+            "name": "startStillRollsBackAtomicallyWhenRemainingTurnBudgetIsTooSmall",
+            "seconds": 0.176,
+            "passed": true
+          },
+          {
+            "name": "connectionAcquisitionUsesStorageLimitWithoutLateLeaseRenewal",
+            "seconds": 2.135,
+            "passed": true
+          },
+          {
+            "name": "afterDeadlineFinishKeepsSharedOneSecondCleanupLimit",
+            "seconds": 1.32,
+            "passed": true
+          },
+          {
+            "name": "confirmationQueryStillUsesOriginalHardStop",
+            "seconds": 1.023,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.session.JsonbMappingTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "invalidJsonIsKeptAsStringValue",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.support.PostgresConnectivityTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "connectsUsingContainerProperties",
+            "seconds": 0.01,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.session.MigrationTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "migratesFiveTablesWithoutVectorExtension",
+            "seconds": 0.072,
+            "passed": true
+          },
+          {
+            "name": "upgradesOriginalV1WithoutRepairOrChangingHistory",
+            "seconds": 0.162,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-storage",
+        "suite": "com.agentos.storage.support.DatabaseTestEnvironmentTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "normalizesCiFlag",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "probesAvailabilityOnce",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "acceptsExplicitLocalMode",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "handlesProbeFailureWithoutLeakingDetails",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "skipsLocalTestsWithAnExplicitReason",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "enablesLocalTestsWhenDockerIsAvailable",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "enablesCiTestsWhenDockerIsAvailable",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "failsCiInsteadOfSkipping",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.ReActLoopStreamingTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "brokenProcessSinkStopsCallbacksAndDoesNotCallTerminalSinkAgain",
+            "seconds": 0.127,
+            "passed": true
+          },
+          {
+            "name": "terminalThrowAndBlockDoNotChangeConfirmedResultOrSendAnotherEvent",
+            "seconds": 1.098,
+            "passed": true
+          },
+          {
+            "name": "toolCallEventsOnlyExposeBoundedRedactedArguments",
+            "seconds": 0.081,
+            "passed": true
+          },
+          {
+            "name": "returnDirectStopsAfterOneModelCall",
+            "seconds": 0.045,
+            "passed": true
+          },
+          {
+            "name": "streamingToolRoundPreservesFiveEventTypesAndFullHistory",
+            "seconds": 0.136,
+            "passed": true
+          },
+          {
+            "name": "ordinaryFailureSendsExactlyOneErrorAndTerminalFailureCannotChangeIt",
+            "seconds": 1.112,
+            "passed": true
+          },
+          {
+            "name": "blockedProcessSinkNeverReentersSinkAndSkipsTerminalAfterHardStop",
+            "seconds": 1.209,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.LeaseLossTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "deadlineIsCheckedBeforeLeaseOrCancellation",
+            "seconds": 0.035,
+            "passed": true
+          },
+          {
+            "name": "lossAfterModelInterruptsWithoutAppendingOrCallingAgain",
+            "seconds": 0.11,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.ReActLoopTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "restoresPreviousCompleteTurnsBeforeCurrentUserMessage",
+            "seconds": 0.554,
+            "passed": true
+          },
+          {
+            "name": "plainTextUsesOneCallAndPersistsAssistantMessage",
+            "seconds": 0.043,
+            "passed": true
+          },
+          {
+            "name": "blankAssistantResponseFailsWithoutAppendingAssistantMessage",
+            "seconds": 0.055,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.ToolCallLimitsTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "managerLimitSkipsCallbacksAndAuditsEverySkippedId",
+            "seconds": 0.031,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.contract.InMemoryTurnStoreContractTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "startsAndFinishesOneTurn",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "competingStartsHaveOneWinnerAndBusyRequestsLeaveOwnerUnchanged",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "expiredOwnerCannotRenewOrReleaseTheReplacementAndLateFinishUsesDatabaseStatus",
+            "seconds": 0.0,
+            "passed": true
+          },
+          {
+            "name": "busyArchiveIsRejectedAndCompletedHistoryCanBeArchived",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.agent.AgentLoaderTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "rejectsMismatchedNameMalformedFrontmatterAndNonDirectory",
+            "seconds": 0.03,
+            "passed": true
+          },
+          {
+            "name": "rejectsUnresolvedModelsAndLinksWithoutChangingCustomAgentRules",
+            "seconds": 0.018,
+            "passed": true
+          },
+          {
+            "name": "rejectsTraversalAndMissingModel",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "loadsSafeFrontmatterAndDefaults",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.PromptBuilderTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "ordersInstructionsBootstrapSafetyDateAndUser",
+            "seconds": 0.035,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.AgentServiceFailureTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "auditUncertaintyCannotBecomeConfirmedThroughSuccessfulFinish",
+            "seconds": 0.026,
+            "passed": true
+          },
+          {
+            "name": "closingCancelsWaitAndReleasesOwnLeaseWithoutWaitingForModel",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "lateTimeoutUsesAlreadyRecoveredDatabaseState",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "recoveredTerminalStateWinsOverLateLocalSuccess",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "finishFailureIsUnconfirmedAndDoesNotRepeatLoop",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "unknownStartNeverReplaysAndNeverCallsModelWhenUnconfirmed(CapturedOutput)",
+            "seconds": 0.005,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.config.CorePropertiesTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "ordinaryStorageTimeoutBindsIndependentlyFromCleanupAndAudit",
+            "seconds": 0.165,
+            "passed": true
+          },
+          {
+            "name": "auditTimeoutSupportsRemoteDatabaseWithoutChangingCleanup",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "rejectsInvalidTurnAndAuditValues",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.AgentServiceConcurrencyTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "sameSessionIsBusyWhileOtherSessionProgressesAndFirstStillSucceeds",
+            "seconds": 0.048,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.ToolCallLedgerTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "invalidIdsRejectWholeBatchWithoutGuessingIdsOrCallingCheckpoint",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "takesSameNameInResponseOrderAndLeavesOtherNamesInOrder",
+            "seconds": 0.0,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.audit.RetryingAuditWriterTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "finalAuditUsesCleanupOnceAndNoOrdinaryWriteAfterDeadline",
+            "seconds": 0.011,
+            "passed": true
+          },
+          {
+            "name": "persistentFailureIsUnconfirmedAndValidationNeverRetries",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "retriesOnlyWritesThreeTimesWithBackoffOutsideOperation",
+            "seconds": 0.0,
+            "passed": true
+          },
+          {
+            "name": "inFlightFinalAuditCanCrossBusinessDeadlineWithinTheSameHardStop",
+            "seconds": 0.108,
+            "passed": true
+          },
+          {
+            "name": "missingBudgetIsFailClosedAndNoPauseCanOutliveDeadline",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "timeoutDoesNotInterruptDatabaseWorkerOrReplayUnknownWrite",
+            "seconds": 0.109,
+            "passed": true
+          },
+          {
+            "name": "knownLeaseLossBeforeAuditIsNotUncertaintyAndIsNeverRetried",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "committedButResponseLostIsConfirmedWithoutSecondWrite",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.ReActLoopLimitsTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "completedResponseAtLimitIsSuccessWithoutExtraSummaryCall",
+            "seconds": 0.233,
+            "passed": true
+          },
+          {
+            "name": "defaultLimitIsTenModelCalls",
+            "seconds": 0.082,
+            "passed": true
+          },
+          {
+            "name": "stopsAtConfiguredMaxIterationsWithoutEleventhModelCall",
+            "seconds": 0.046,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.ToolExecutorTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "fatalManagerAbortStopsTheRestOfTheBatchWithoutReturningPartialHistory",
+            "seconds": 0.023,
+            "passed": true
+          },
+          {
+            "name": "officialManagerExecutesOncePreservesIdsOrderAndFullHistory",
+            "seconds": 0.01,
+            "passed": true
+          },
+          {
+            "name": "rawArgumentsAreOnlyUsedForExecutionAndHistoryPreservesSafeStructure",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "malformedJsonRejectsWholeBatchWithoutManagerAndReturnsSafeErrors",
+            "seconds": 0.019,
+            "passed": true
+          },
+          {
+            "name": "malformedIdsDoNotCallManager",
+            "seconds": 0.002,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.contract.InMemoryMessageStoreContractTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "appendsMessagesInOrder",
+            "seconds": 0.007,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.contract.InMemorySessionManagerContractTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "missingSessionIsReadOnlyAndArchiveIsNoop",
+            "seconds": 0.021,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.contract.InMemoryContractsTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "appendsMessagesInOrder",
+            "seconds": 0.019,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.TurnDeadlineTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "slowProviderEndsAtSharedDeadlineAndStillConfirmsFinish",
+            "seconds": 2.631,
+            "passed": true
+          },
+          {
+            "name": "sustainedStreamingDoesNotRenewDeadlineForTwentyRuns",
+            "seconds": 1.786,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.tool.RedactorTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "redactsQueryHeadersKeyValueAndKnownValuesCaseInsensitively",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "preservesJsonStructureAndHandlesEscapedNestedKeysAndValues",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "handlesMalformedJsonExceptionsNullAndEmptyWithoutLeaking",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.agent.AgentSettingsTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "defaultsMatchContract",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "validatesBoundsAndTokenReserve",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.PromptHistoryTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "keepsTheNewestTwentyCompleteTurns",
+            "seconds": 0.042,
+            "passed": true
+          },
+          {
+            "name": "tokenLimitDropsOldestWholeTurnsAndKeepsEqualBoundary",
+            "seconds": 0.119,
+            "passed": true
+          },
+          {
+            "name": "failedTurnsOnlyExposeUserMessageAndSafeIncompleteNotice",
+            "seconds": 0.052,
+            "passed": true
+          },
+          {
+            "name": "oversizedTurnIsDroppedWithoutTruncatingMessagesOrCurrentUser",
+            "seconds": 0.032,
+            "passed": true
+          },
+          {
+            "name": "zeroHistoryLimitsAndNinetyPercentFloorNeverLeakHistory",
+            "seconds": 0.037,
+            "passed": true
+          },
+          {
+            "name": "refreshesBootstrapAndDateForEachPromptBuild",
+            "seconds": 0.031,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.agent.ContextLoaderTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "preservesBootstrapOrderAndReloadsChanges",
+            "seconds": 0.007,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-core",
+        "suite": "com.agentos.core.turn.AgentServiceTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "processOrchestratesOneTurnAndSendsOneTerminalEvent",
+            "seconds": 0.036,
+            "passed": true
+          },
+          {
+            "name": "blankMessageIsRejectedBeforeCreatingSession",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "unknownAgentToolFailsBeforeStartingTurnOrCallingModel",
+            "seconds": 0.041,
+            "passed": true
+          },
+          {
+            "name": "providerValidationHappensBeforeCreatingSession",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "terminalSinkFailureDoesNotChangeConfirmedResult",
+            "seconds": 0.136,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.SpringContextLauncherTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "selectedWorkspaceOverridesOrdinaryConfigurationAndContextCloses",
+            "seconds": 0.013,
+            "passed": true
+          },
+          {
+            "name": "nullOrNonNormalizedWorkspaceDoesNotStartContext",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "forwardsNormalizedConfigPathToSpringCommandLine",
+            "seconds": 0.011,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.SessionConcurrencyIntegrationTest",
+        "tests": 23,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "providerRetryRemainsCoveredByWholeTurnLease",
+            "seconds": 0.565,
+            "passed": true
+          },
+          {
+            "name": "takeoverDuringFirstToolStopsRemainingToolsAndNextModel",
+            "seconds": 0.077,
+            "passed": true
+          },
+          {
+            "name": "takeoverDuringModelPreventsLateMessagesAndPreservesNewLease",
+            "seconds": 0.027,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[1]",
+            "seconds": 0.047,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[2]",
+            "seconds": 0.04,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[3]",
+            "seconds": 0.033,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[4]",
+            "seconds": 0.031,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[5]",
+            "seconds": 0.032,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[6]",
+            "seconds": 0.033,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[7]",
+            "seconds": 0.033,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[8]",
+            "seconds": 0.029,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[9]",
+            "seconds": 0.03,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[10]",
+            "seconds": 0.037,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[11]",
+            "seconds": 0.036,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[12]",
+            "seconds": 0.032,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[13]",
+            "seconds": 0.035,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[14]",
+            "seconds": 0.032,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[15]",
+            "seconds": 0.033,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[16]",
+            "seconds": 0.039,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[17]",
+            "seconds": 0.036,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[18]",
+            "seconds": 0.027,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[19]",
+            "seconds": 0.025,
+            "passed": true
+          },
+          {
+            "name": "secondMessageAndNewAreReadOnlyWhileOtherSessionProgresses()[20]",
+            "seconds": 0.026,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.LlmCallJsonLogTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "recorderWritesEveryFieldAsEcsJson",
+            "seconds": 0.027,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.LoggingBaselineTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "fileLogIsStructuredJsonWithMdc",
+            "seconds": 0.511,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.ToolAuthorizationIntegrationTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "unknownConfiguredToolFailsBeforeTurnCreation",
+            "seconds": 0.276,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.ReActDeadlineIntegrationTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "retryAndNextIterationShareActualAttemptBudget",
+            "seconds": 0.135,
+            "passed": true
+          },
+          {
+            "name": "slowBodyStopsTurnWithoutNextModelOrHttpRetry",
+            "seconds": 1.026,
+            "passed": true
+          },
+          {
+            "name": "nestedCredentialsAreAbsentFromPersistedAndRestoredToolHistory",
+            "seconds": 0.086,
+            "passed": true
+          },
+          {
+            "name": "postResultLeaseOrDeadlineFailurePersistsBoundedOriginalAudit",
+            "seconds": 0.022,
+            "passed": true
+          },
+          {
+            "name": "invalidJsonAnywhereRejectsBatchWithoutHttpAndLetsModelContinue",
+            "seconds": 0.076,
+            "passed": true
+          },
+          {
+            "name": "sameResponseAndLaterIterationRespectOfficialPerToolLimit",
+            "seconds": 0.078,
+            "passed": true
+          },
+          {
+            "name": "oversizedBodyReturnsSafeToolErrorAndContinuesWithOneHttpRequest",
+            "seconds": 0.041,
+            "passed": true
+          },
+          {
+            "name": "completionFailurePersistsUnconfirmedAndNeverReplaysSideEffect",
+            "seconds": 0.027,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.ReActApplicationTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "slowTurnStorageStillReachesModelAndConfirmsResult(ApplicationContext)",
+            "seconds": 6.739,
+            "passed": true
+          },
+          {
+            "name": "toolRoundUsesTwoModelsOneHttpFourMessagesAndRedactedAudit(ApplicationContext, CapturedOutput)",
+            "seconds": 0.277,
+            "passed": true
+          },
+          {
+            "name": "plainTextChatPersistsSessionTurnMessagesAndOneModelCall(ApplicationContext)",
+            "seconds": 0.045,
+            "passed": true
+          },
+          {
+            "name": "realManagerAssemblyHonorsMaxIterationsWithoutSecondModelCall(ApplicationContext)",
+            "seconds": 0.057,
+            "passed": true
+          },
+          {
+            "name": "sandboxDenialIsAuditedAndExplainedToSecondModelWithoutHttp(ApplicationContext)",
+            "seconds": 0.055,
+            "passed": true
+          },
+          {
+            "name": "tenConsecutiveTurnsKeepHistoryAndConfirmEveryAudit(ApplicationContext)",
+            "seconds": 0.161,
+            "passed": true
+          },
+          {
+            "name": "realProviderToolLoopStopsWhenSlowBodyConsumesSharedDeadline(ApplicationContext)",
+            "seconds": 0.764,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.LlmAuditIntegrationTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "retry429PersistsFailureAndSuccessWithCorrelationAndNullableFields",
+            "seconds": 0.608,
+            "passed": true
+          },
+          {
+            "name": "recorderFailureNeverRetriesModelAndLogsUnconfirmedWithoutCause",
+            "seconds": 0.046,
+            "passed": true
+          },
+          {
+            "name": "modelNetworkWaitHoldsNoDatabaseConnectionAndOnlyOneRecorderExists",
+            "seconds": 0.045,
+            "passed": true
+          },
+          {
+            "name": "finalProviderFailureKeepsBothFailedAttempts",
+            "seconds": 0.545,
+            "passed": true
+          },
+          {
+            "name": "failedAuditDoesNotPoisonNextTurnInSameSession",
+            "seconds": 0.062,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.DefaultAgentCliIntegrationTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "initThenDefaultChatLoadsOnlyChosenWorkspaceAndPersistsConfirmedTurn",
+            "seconds": 6.829,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.CliAcceptanceIntegrationTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "identityAndAgentIsolationMatrixHasTwentyPairsWithoutHistoryLeaks",
+            "seconds": 2.463,
+            "passed": true
+          },
+          {
+            "name": "busyNewSessionMatrixUsesRealCliAndAddsNoRecords",
+            "seconds": 0.08,
+            "passed": true
+          },
+          {
+            "name": "unknownToolReportsAgentFileAndNameWithoutExternalCallsOrRecords",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "duplicateToolsReportAgentFileAndNameWithoutExternalCallsOrRecords",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "idleNewSessionMatrixUsesRealCliAndPreservesArchivedHistory",
+            "seconds": 0.32,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.ToolAuditRedactionTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "escapedJsonSecretsAreRedactedBeforeTheyReachToolAuditAndHistory",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "providerAndDatabaseSecretsAreSuppliedDynamicallyWithoutLoggingValues",
+            "seconds": 0.013,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.ProviderConfigurationYamlTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "primaryConnectionDefaultsToEmptyWhenEnvMissing",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "springAiAutoConfigurationStaysDisabled",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "primaryConnectionUsesEnvWhenPresent",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "embeddingDefaults",
+            "seconds": 0.003,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-boot",
+        "suite": "com.agentos.boot.ArchitectureRulesTest",
+        "tests": 14,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "noThreadLocalContext",
+            "seconds": 0.045,
+            "passed": true
+          },
+          {
+            "name": "externalCallsAreOutsideDeclarativeTransactions",
+            "seconds": 0.011,
+            "passed": true
+          },
+          {
+            "name": "importsEveryModule",
+            "seconds": 0.0,
+            "passed": true
+          },
+          {
+            "name": "transactionalExternalCallsAreRejectedIncludingLocalDelegates",
+            "seconds": 0.214,
+            "passed": true
+          },
+          {
+            "name": "noChatOrEmbeddingModelBeans",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "noSecurityManager",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "coreDependsOnNoImplementation",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "noToolCallingAdvisor",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "onlyProviderDependsOnSpringAiOpenAi",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "chatClientWithoutTools",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "generalCodingRules",
+            "seconds": 0.017,
+            "passed": true
+          },
+          {
+            "name": "onlyToolExecutorExecutesTools",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "noSelfBuiltToolCallingManager",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "restControllersOnlyInWeb",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.ToolAutoConfigurationTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "uniqueOfficialManagerAndSafeResolverNeverExecuteOutsideBean",
+            "seconds": 0.05,
+            "passed": true
+          },
+          {
+            "name": "officialLimitsStillApplyAndRequestCallbackWins",
+            "seconds": 0.015,
+            "passed": true
+          },
+          {
+            "name": "invalidOrNullAttemptLimitsFailWithSafeConfigurationError",
+            "seconds": 0.003,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.govern.GovernanceDeadlineAcceptanceTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "slowToolAndAuditWaitEachStayWithinBudgetForTwentyRuns",
+            "seconds": 3.444,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.govern.AgentOsToolExecutionExceptionProcessorTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "fatalErrorsPassThroughRealOfficialManagerWhileBusinessErrorIsSafe",
+            "seconds": 0.071,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.sandbox.WhitelistSandboxTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "malformedAllowlistEntriesAreConfigurationErrors",
+            "seconds": 0.02,
+            "passed": true
+          },
+          {
+            "name": "exactWildcardCaseAndIpAuthorizationAreExplicit",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "emptyListNonHttpActionsAndUnsafeUrisFailClosedWithoutUrlSecrets",
+            "seconds": 0.0,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.govern.GovernedToolCallbackTest",
+        "tests": 14,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "auditInputAndErrorSummariesAreBoundedAfterRedaction",
+            "seconds": 0.39,
+            "passed": true
+          },
+          {
+            "name": "truncationIncludesMarkerAndRedactsBeforeCuttingSecret",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "blockedFinalAuditCannotHideWholeTurnTimeoutOrExtendHardStop",
+            "seconds": 1.048,
+            "passed": true
+          },
+          {
+            "name": "invalidJsonBusinessAndSandboxFailuresAreAuditedAndSafe",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "onlyDefinitelyNotStartedIdempotentTransientFailureRetriesAtMostOnce",
+            "seconds": 0.015,
+            "passed": true
+          },
+          {
+            "name": "retryConsumesSameTurnAttemptLimitsAcrossCallsAndIterations",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "ownTimeoutIsRecoverableButWholeTurnTimeoutIsFatal",
+            "seconds": 0.113,
+            "passed": true
+          },
+          {
+            "name": "beginPrecedesExecutionOnIndependentVirtualThreadWithExplicitMdcAndRedactedResult",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "postResultFatalCheckpointStillAuditsOnlyGovernedResultWithoutRetry",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "exhaustedRetryBudgetKeepsAttemptedCallFailedAndDoesNotStartSecondAttempt",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "unconfirmedBeginAndFatalCheckpointNeverExecute",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "jsonMustBeOneObjectAndInvalidInputNeverStartsTool",
+            "seconds": 0.014,
+            "passed": true
+          },
+          {
+            "name": "officialMethodAdapterCannotHideSandboxOrFatalSignals",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "knownLeaseLossAtIntentBoundaryRemainsInterruptedWithoutAuditUncertainty",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.http.HttpToolsDeadlineTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "sustainedBodyP95RemainsBoundedAcrossTwentyRequestsWithoutRetry",
+            "seconds": 2.062,
+            "passed": true
+          },
+          {
+            "name": "expiredBudgetDoesNotSendHttpRequest",
+            "seconds": 0.003,
+            "passed": true
+          },
+          {
+            "name": "slowContinuousBodyIsCancelledAtSharedDeadline",
+            "seconds": 0.127,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.registry.ToolRegistryTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "agentToolNamesKeepDeclarationOrderAndRejectDuplicates",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "rejectsIncompleteDefinitionsBeforeRegistration",
+            "seconds": 0.03,
+            "passed": true
+          },
+          {
+            "name": "emptyAndSubsetListsOnlyExposeAuthorizedCallbacks",
+            "seconds": 0.002,
+            "passed": true
+          },
+          {
+            "name": "rejectsDuplicatesAndUnknownNamesWithAgentFileAndField",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.govern.UnknownToolResolverTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "resolvesOnlyGovernedSafeDenialWithoutLookingUpAnotherBean",
+            "seconds": 0.002,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.govern.AuditFailureTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "failedBeginNeverExecutesAndDoesNotExposeCause",
+            "seconds": 0.005,
+            "passed": true
+          },
+          {
+            "name": "failedCompleteExecutesExactlyOnceAndWarnsAboutPossibleSideEffect",
+            "seconds": 0.005,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.http.HttpToolsTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "explicitZeroRedirectPolicyNeverFollowsTheNextHop",
+            "seconds": 0.094,
+            "passed": true
+          },
+          {
+            "name": "rejectsFourthHopAndOutsideHostBeforeSendingRequest",
+            "seconds": 0.007,
+            "passed": true
+          },
+          {
+            "name": "schemaExposesOnlyUrlAndRejectedInitialUrlsSendZeroRequests",
+            "seconds": 0.121,
+            "passed": true
+          },
+          {
+            "name": "missingLocationNon2xxAndOversizedBodyHaveSafeErrors",
+            "seconds": 0.004,
+            "passed": true
+          },
+          {
+            "name": "bodyConsumptionSharesOneDeadlineInsteadOfResettingOnChunks",
+            "seconds": 0.124,
+            "passed": true
+          },
+          {
+            "name": "bodyOverOneMiBReturnsExplicitSafeSizeErrorWithNoRetryOrBody",
+            "seconds": 0.011,
+            "passed": true
+          },
+          {
+            "name": "getsBodyWithUserAgentAndFollowsExactlyThreeRelativeRedirects",
+            "seconds": 0.006,
+            "passed": true
+          },
+          {
+            "name": "cancelledBudgetNeverSendsRequestAndUnsafeRedirectNeverSendsNextHop",
+            "seconds": 0.003,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "module": "AgentOS-tool",
+        "suite": "com.agentos.tool.http.HttpToolPropertiesTest",
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "cases": [
+          {
+            "name": "bindingMissingRedirectLimitDefaultsToThree",
+            "seconds": 0.108,
+            "passed": true
+          },
+          {
+            "name": "defaultsAndBoundsAreApplied",
+            "seconds": 0.001,
+            "passed": true
+          },
+          {
+            "name": "normalizesDomainsAndRejectsAllInvalidBoundaries",
+            "seconds": 0.001,
+            "passed": true
+          }
+        ]
+      }
+    ]
+  },
+  "database_evidence_check": {
+    "command": "python3 scripts/check_db_test_reports.py --tools",
+    "result": "PASS",
+    "critical_tool_cases": 7
+  },
+  "python_checker_tests": {
+    "command": "python3 -m unittest discover -s scripts/tests",
+    "tests": 8,
+    "result": "PASS"
+  },
+  "real_model": {
+    "command": "mvn -B -ntp -Pllm -pl AgentOS-boot -am -Dtest=ReActWeatherSmokeTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "status": "NOT_RUN",
+    "skipped": 2,
+    "reason": "No AGENTOS_LLM_API_KEY in process environment; external-weather opt-in also absent. No .env read."
+  },
+  "cli_blackbox": {
+    "completed_at": "2026-11-18T18:04:19.261574+08:00",
+    "jar_sha256": "c8f19779fe204cce3936ce59b71f8b6b75e2fc1fccc8fa7a9e856944de8d133a",
+    "run_dir": "/var/folders/rl/xwfdz8nx743_tf4h3fbhbs840000gn/T/agentos-004-blackbox-ekn84p35",
+    "temporary_container_removed": true,
+    "cases": [
+      {
+        "case": "normal",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 1,
+        "process_ms": 9415,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "success",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "intent_first": true,
+          "response_id": true,
+          "schema_url_only": true
+        }
+      },
+      {
+        "case": "empty",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 1,
+        "http_requests": 0,
+        "process_ms": 4284,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 2,
+          "llm": 1,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "no_tools_field": true
+        }
+      },
+      {
+        "case": "unknown_config",
+        "result": "PASS",
+        "exit": 2,
+        "model_requests": 0,
+        "http_requests": 0,
+        "process_ms": 3758,
+        "database": {
+          "sessions": 0,
+          "turns": 0,
+          "messages": 0,
+          "llm": 0,
+          "turn_status": null,
+          "tool_rows": [],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "zero_records": true,
+          "diagnostic": true
+        }
+      },
+      {
+        "case": "duplicate_config",
+        "result": "PASS",
+        "exit": 2,
+        "model_requests": 0,
+        "http_requests": 0,
+        "process_ms": 296,
+        "database": {
+          "sessions": 0,
+          "turns": 0,
+          "messages": 0,
+          "llm": 0,
+          "turn_status": null,
+          "tool_rows": [],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "zero_records": true,
+          "diagnostic": true
+        }
+      },
+      {
+        "case": "runtime_unauthorized",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 0,
+        "process_ms": 4345,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "failed",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "no_tools_field": true
+        }
+      },
+      {
+        "case": "runtime_unknown",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 0,
+        "process_ms": 4286,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "failed",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true
+        }
+      },
+      {
+        "case": "sandbox_denied",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 0,
+        "process_ms": 4152,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "sandbox_denied",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true
+        }
+      },
+      {
+        "case": "redirect_denied",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 1,
+        "process_ms": 4102,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "sandbox_denied",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true
+        }
+      },
+      {
+        "case": "redirect_three",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 4,
+        "process_ms": 4172,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "success",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true
+        }
+      },
+      {
+        "case": "oversize",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 1,
+        "process_ms": 4475,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "failed",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true
+        }
+      },
+      {
+        "case": "http_status",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 1,
+        "process_ms": 4265,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "failed",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true
+        }
+      },
+      {
+        "case": "malformed_batch",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 0,
+        "process_ms": 4256,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "good",
+              "status": "failed",
+              "attempts": 0
+            },
+            {
+              "id": "bad",
+              "status": "failed",
+              "attempts": 0
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true,
+          "zero_attempts": true,
+          "response_ids": true
+        }
+      },
+      {
+        "case": "tool_limit",
+        "result": "PASS",
+        "exit": 0,
+        "model_requests": 2,
+        "http_requests": 2,
+        "process_ms": 4353,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 4,
+          "llm": 2,
+          "turn_status": "SUCCEEDED",
+          "tool_rows": [
+            {
+              "id": "one",
+              "status": "success",
+              "attempts": 1
+            },
+            {
+              "id": "two",
+              "status": "success",
+              "attempts": 1
+            },
+            {
+              "id": "three",
+              "status": "limit_skipped",
+              "attempts": 0
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true,
+          "response_ids": true,
+          "skip_zero_attempts": true
+        }
+      },
+      {
+        "case": "model_limit",
+        "result": "PASS",
+        "exit": 3,
+        "model_requests": 3,
+        "http_requests": 3,
+        "process_ms": 4237,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 8,
+          "llm": 3,
+          "turn_status": "MAX_ITERATIONS",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "success",
+              "attempts": 1
+            },
+            {
+              "id": "call-2",
+              "status": "success",
+              "attempts": 1
+            },
+            {
+              "id": "call-3",
+              "status": "success",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true
+        }
+      },
+      {
+        "case": "slow_body",
+        "result": "PASS",
+        "exit": 3,
+        "model_requests": 1,
+        "http_requests": 1,
+        "process_ms": 5512,
+        "database": {
+          "sessions": 1,
+          "turns": 1,
+          "messages": 1,
+          "llm": 1,
+          "turn_status": "TIMED_OUT",
+          "tool_rows": [
+            {
+              "id": "call-1",
+              "status": "timeout",
+              "attempts": 1
+            }
+          ],
+          "db_safe": true
+        },
+        "checks": {
+          "exit": true,
+          "model_count": true,
+          "http_count": true,
+          "statuses": true,
+          "history_safe": true,
+          "result_safe": true,
+          "db_safe": true,
+          "output_safe": true,
+          "log_safe": true,
+          "llm_rows": true,
+          "visible_subset": true,
+          "turn_status": true,
+          "schema_url_only": true
+        }
+      }
+    ]
+  },
+  "drivers": {
+    "cli": "specs/004-agentos-tool-system/fixtures/full_tool_acceptance.py",
+    "note": "Saved from executed temporary driver; replaced absolute root with relative discovery and added a guard to clean up only successfully created containers. Application and acceptance assertions unchanged."
+  },
+  "boundaries": [
+    "PostgreSQL 17 pgvector was isolated locally; no shared database.",
+    "Model and HTTP targets were loopback substitutes.",
+    "No production code changed, no commit or push."
+  ]
+}

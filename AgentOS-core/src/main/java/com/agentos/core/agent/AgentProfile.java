@@ -1,6 +1,7 @@
 package com.agentos.core.agent;
 
 import com.agentos.core.provider.Profile;
+import com.agentos.core.tool.DuplicateAgentToolException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -43,7 +44,7 @@ public record AgentProfile(
                     continue;
                 }
                 if (!seen.add(toolName)) {
-                    throw new IllegalArgumentException("Agent tools 存在重复工具：" + toolName);
+                    throw new DuplicateAgentToolException(name, toolName);
                 }
                 normalized.add(toolName);
             }

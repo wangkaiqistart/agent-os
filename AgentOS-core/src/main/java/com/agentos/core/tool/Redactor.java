@@ -56,6 +56,21 @@ public final class Redactor {
         }
     }
 
+    /** 审计和过程事件共用的安全摘要；先脱敏，截断标记也计入字符上限。 */
+    public String summarize(String text, int maxChars) {
+        if (maxChars < 0) {
+            throw new IllegalArgumentException("摘要长度不能为负数");
+        }
+        String safe = redact(text);
+        if (safe == null || safe.length() <= maxChars) {
+            return safe;
+        }
+        String marker = "[摘要截断]";
+        return maxChars <= marker.length()
+                ? marker.substring(0, maxChars)
+                : safe.substring(0, maxChars - marker.length()) + marker;
+    }
+
     private Object redactValue(Object value) {
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> safe = new LinkedHashMap<>();

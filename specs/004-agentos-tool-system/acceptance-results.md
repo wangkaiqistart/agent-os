@@ -104,3 +104,28 @@ SC-003 的文字已对齐逐跳授权契约：零请求约束适用于非法初�
 | 审计等待 | 20 | 80 | 85 | 1080 | PASS |
 
 可机读的安全统计见 [phase4-7-evidence-2026-11-18.json](./fixtures/phase4-7-evidence-2026-11-18.json)。其中的调用数和状态来自已通过测试的数据库读回与请求计数断言，不包含参数、正文、凭证或原始日志。
+
+## Phase 8 收敛修复补充
+
+后续代码核查发现，原有通过用例未覆盖请求参数历史脱敏、整批 JSON 预检、跳过审计/事件摘要长度、结果返回后检查点失败及重复配置诊断。T048–T052 已完成，原 Phase 4–7 的验证记录保留为历史结果；当前验证以本节和 quickstart.md 的 Phase 8 记录为准。
+
+| 缺口 | 新增或加强的验收证据 |
+|------|----------------------|
+| 请求历史泄漏凭证 | ToolExecutorTest.rawArgumentsAreOnlyUsedForExecutionAndHistoryPreservesSafeStructure；ReActApplicationTest.toolRoundUsesTwoModelsOneHttpFourMessagesAndRedactedAudit；ReActDeadlineIntegrationTest.nestedCredentialsAreAbsentFromPersistedAndRestoredToolHistory |
+| 损坏 JSON 导致半批执行 | ToolExecutorTest.malformedJsonRejectsWholeBatchWithoutManagerAndReturnsSafeErrors；ReActDeadlineIntegrationTest.invalidJsonAnywhereRejectsBatchWithoutHttpAndLetsModelContinue |
+| 审计/事件摘要未受限 | ToolCallLimitsTest.managerLimitSkipsCallbacksAndAuditsEverySkippedId；ReActLoopStreamingTest.toolCallEventsOnlyExposeBoundedRedactedArguments；ReActDeadlineIntegrationTest.sameResponseAndLaterIterationRespectOfficialPerToolLimit |
+| 后置检查失败绕过结果治理 | GovernedToolCallbackTest.postResultFatalCheckpointStillAuditsOnlyGovernedResultWithoutRetry；ReActDeadlineIntegrationTest.postResultLeaseOrDeadlineFailurePersistsBoundedOriginalAudit |
+| 重复工具诊断丢失名称 | ChatCommandTest 的重复配置/隐藏 cause 用例；CliAcceptanceIntegrationTest.duplicateToolsReportAgentFileAndNameWithoutExternalCallsOrRecords |
+
+**PASS**：2026-11-18 17:50:40（Asia/Shanghai），`mvn -B -ntp verify`，550 项测试，0 失败/错误/跳过；数据库报告检查 `python3 scripts/check_db_test_reports.py --tools` 通过。以上 Phase 8 用例的 Surefire 状态逐项核对通过。验证使用真实 PostgreSQL Testcontainers 和本地替身，真实模型验收未在本轮启用。
+
+
+## 完整功能验证与再次收敛（2026-11-18）
+
+第二次完整质量门 550 项测试全部通过，新增真实 JAR 的 15 项 CLI 黑盒验收全部通过，真实模型仍为 NOT_RUN。首次全量运行暴露慢正文 19/20 请求的偶发抽样失败，已追加 Phase 9 / T053，未修改代码或放宽断言。完整过程、边界和最新证据见 [完整功能验证报告](./full-verification-2026-11-18.md)。
+
+## Phase 9 测试稳定性修复（2026-11-18）
+
+T053 已完成。一次独立预热后，以 500ms 共享预算采样 20 个独立慢正文地址；逐样本确认响应头、持续正文、恰好一次请求、客户端取消和 exchange 关闭，计时包含取消收尾。750ms 首次初始化延迟由预热承担，未进入正文的超时不能计为有效样本。生产默认预算及 SC-005 的预算加 1 秒标准保持不变。
+
+最终 `mvn -B -ntp verify` 于 **2026-11-18 19:15:14（Asia/Shanghai）**通过：550 项测试，0 失败/错误/跳过；PostgreSQL 关键证据检查通过。本次五类各 20 次采样均通过，其中慢正文 p95=517ms，requests/bodies_started/cancelled_and_closed 均为 20，预热为额外 1 次。最新完整统计见 [Phase 9 验收报告](./phase9-results.md)和[安全证据](./fixtures/phase9-evidence-2026-11-18.json)。本轮未启用真实模型，前述 15 项 CLI 为历史验收记录。
