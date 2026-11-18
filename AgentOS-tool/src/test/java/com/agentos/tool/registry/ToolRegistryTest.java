@@ -48,4 +48,56 @@ class ToolRegistryTest {
                 .hasMessageContaining("agents/a/AGENT.md")
                 .hasMessageContaining("tools");
     }
+
+    @Test
+    void rejectsIncompleteDefinitionsBeforeRegistration() {
+        ToolCallback missingDescription =
+                new ToolCallback() {
+                    public ToolDefinition getToolDefinition() {
+                        return new ToolDefinition() {
+                            public String name() {
+                                return "missing_description";
+                            }
+
+                            public String description() {
+                                return " ";
+                            }
+
+                            public String inputSchema() {
+                                return "{}";
+                            }
+                        };
+                    }
+
+                    public String call(String input) {
+                        return "unused";
+                    }
+                };
+        ToolCallback invalidSchema =
+                new ToolCallback() {
+                    public ToolDefinition getToolDefinition() {
+                        return ToolDefinition.builder()
+                                .name("invalid_schema")
+                                .description("test")
+                                .inputSchema("not-json")
+                                .build();
+                    }
+
+                    public String call(String input) {
+                        return "unused";
+                    }
+                };
+
+        assertThatThrownBy(() -> new ToolRegistry(List.of(missingDescription)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ToolRegistry(List.of(invalidSchema)))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void agentToolNamesKeepDeclarationOrderAndRejectDuplicates() {
+        assertThatThrownBy(() -> profile(List.of("b", "b")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("重复");
+    }
 }

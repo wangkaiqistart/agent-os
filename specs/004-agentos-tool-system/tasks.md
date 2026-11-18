@@ -14,9 +14,9 @@ description: "Task list template for AgentOS tool registration and secure execut
 
 **Purpose**: 确认模块边界、测试替身和配置入口，为所有用户故事提供可运行骨架。
 
-- [ ] T001 检查并补齐 AgentOS-core、AgentOS-tool、AgentOS-storage、AgentOS-boot 的 Maven 依赖与自动配置导入，保持 Tool 只存在于 AgentOS-tool，文件：pom.xml、AgentOS-core/pom.xml、AgentOS-tool/pom.xml、AgentOS-storage/pom.xml、AgentOS-boot/pom.xml、AgentOS-tool/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
-- [ ] T002 [P] 统一工具默认配置与敏感值占位，写入模型迭代 10、单工具 10、本轮工具 30、整轮 30 秒、HTTP 重定向 3 次、响应上限 1 MiB 和普通结果上限 10000 字符，文件：AgentOS-boot/src/main/resources/application.yaml、AgentOS-core/src/main/java/com/agentos/core/config/TurnProperties.java、AgentOS-tool/src/main/java/com/agentos/tool/http/HttpToolProperties.java
-- [ ] T003 [P] 整理本地 HTTP 替身、模型替身和 PostgreSQL Testcontainers 的测试基座，确保默认测试不读取真实凭证、不访问共享库，文件：AgentOS-tool/src/test/java/com/agentos/tool/support/LocalHttpServer.java、AgentOS-boot/src/test/java/com/agentos/boot/support/LocalModelServer.java、AgentOS-storage/src/test/java/com/agentos/storage/support/DatabaseTestEnvironment.java、AgentOS-boot/src/test/java/com/agentos/boot/BootDatabaseTestEnvironment.java
+- [X] T001 检查并补齐 AgentOS-core、AgentOS-tool、AgentOS-storage、AgentOS-boot 的 Maven 依赖与自动配置导入，保持 Tool 只存在于 AgentOS-tool，文件：pom.xml、AgentOS-core/pom.xml、AgentOS-tool/pom.xml、AgentOS-storage/pom.xml、AgentOS-boot/pom.xml、AgentOS-tool/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
+- [X] T002 [P] 统一工具默认配置与敏感值占位，写入模型迭代 10、单工具 10、本轮工具 30、整轮 30 秒、HTTP 重定向 3 次、响应上限 1 MiB 和普通结果上限 10000 字符，文件：AgentOS-boot/src/main/resources/application.yaml、AgentOS-core/src/main/java/com/agentos/core/config/TurnProperties.java、AgentOS-tool/src/main/java/com/agentos/tool/http/HttpToolProperties.java
+- [X] T003 [P] 整理本地 HTTP 替身、模型替身和 PostgreSQL Testcontainers 的测试基座，确保默认测试不读取真实凭证、不访问共享库，文件：AgentOS-tool/src/test/java/com/agentos/tool/support/LocalHttpServer.java、AgentOS-boot/src/test/java/com/agentos/boot/support/LocalModelServer.java、AgentOS-storage/src/test/java/com/agentos/storage/support/DatabaseTestEnvironment.java、AgentOS-boot/src/test/java/com/agentos/boot/BootDatabaseTestEnvironment.java
 
 ---
 
@@ -24,11 +24,11 @@ description: "Task list template for AgentOS tool registration and secure execut
 
 **Purpose**: 固化跨用户故事共享的端口、状态、审计和安全输出边界；本阶段完成前不得开始故事实现。
 
-- [ ] T004 固化工具执行所需的 core 端口和显式上下文契约，确认 ToolCatalog、Sandbox、SandboxAction、ToolInvocationRecorder、ToolContextKeys 不依赖具体工具实现，文件：AgentOS-core/src/main/java/com/agentos/core/tool/ToolCatalog.java、AgentOS-core/src/main/java/com/agentos/core/tool/Sandbox.java、AgentOS-core/src/main/java/com/agentos/core/tool/SandboxAction.java、AgentOS-core/src/main/java/com/agentos/core/audit/ToolInvocationRecorder.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolContextKeys.java
-- [ ] T005 [P] 完成工具调用审计表、实体和唯一键的 PostgreSQL 迁移契约，要求 `(turn_id, iteration, tool_call_id)` 唯一、输入/结果/错误脱敏、状态包含 `in_progress`、`success`、`failed`、`timeout`、`sandbox_denied`、`interrupted`、`limit_skipped`、`unconfirmed`，文件：AgentOS-storage/src/main/resources/db/migration/V1__core_tables.sql、AgentOS-storage/src/main/java/com/agentos/storage/session/ToolInvocationEntity.java、AgentOS-storage/src/main/java/com/agentos/storage/session/ToolInvocationRepository.java
-- [ ] T006 [P] 完善共享轮次预算、取消和调用账本，使模型 10 次、单工具 10 次、总工具 30 次和整轮 30 秒共用同一截止时间；允许的幂等重试也必须消耗工具预算，文件：AgentOS-core/src/main/java/com/agentos/core/turn/TurnExecutionBudget.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolCallLedger.java、AgentOS-core/src/main/java/com/agentos/core/turn/TurnGuard.java
-- [ ] T007 [P] 固化脱敏和错误边界，确保日志、用户错误和审计摘要不输出 prompt、凭证、完整工具参数或未受限响应正文，文件：AgentOS-core/src/main/java/com/agentos/core/tool/Redactor.java、AgentOS-core/src/main/java/com/agentos/core/error/ErrorCode.java、AgentOS-boot/src/main/java/com/agentos/boot/ToolRedactionConfiguration.java
-- [ ] T008 建立模块级架构规则和质量门检查，禁止 ToolCallingAdvisor、ThreadLocal 业务上下文、自建 ToolCallingManager、H2/SQLite 和越过 core 端口的依赖，文件：AgentOS-boot/src/test/java/com/agentos/boot/ArchitectureRulesTest.java、pom.xml、scripts/check_db_test_reports.py
+- [X] T004 固化工具执行所需的 core 端口和显式上下文契约，确认 ToolCatalog、Sandbox、SandboxAction、ToolInvocationRecorder、ToolContextKeys 不依赖具体工具实现，文件：AgentOS-core/src/main/java/com/agentos/core/tool/ToolCatalog.java、AgentOS-core/src/main/java/com/agentos/core/tool/Sandbox.java、AgentOS-core/src/main/java/com/agentos/core/tool/SandboxAction.java、AgentOS-core/src/main/java/com/agentos/core/audit/ToolInvocationRecorder.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolContextKeys.java
+- [X] T005 [P] 完成工具调用审计表、实体和唯一键的 PostgreSQL 迁移契约，要求 `(turn_id, iteration, tool_call_id)` 唯一、输入/结果/错误脱敏、状态包含 `in_progress`、`success`、`failed`、`timeout`、`sandbox_denied`、`interrupted`、`limit_skipped`、`unconfirmed`，文件：AgentOS-storage/src/main/resources/db/migration/V1__core_tables.sql、AgentOS-storage/src/main/java/com/agentos/storage/session/ToolInvocationEntity.java、AgentOS-storage/src/main/java/com/agentos/storage/session/ToolInvocationRepository.java
+- [X] T006 [P] 完善共享轮次预算、取消和调用账本，使模型 10 次、单工具 10 次、总工具 30 次和整轮 30 秒共用同一截止时间；允许的幂等重试也必须消耗工具预算，文件：AgentOS-core/src/main/java/com/agentos/core/turn/TurnExecutionBudget.java、AgentOS-core/src/main/java/com/agentos/core/turn/ToolCallLedger.java、AgentOS-core/src/main/java/com/agentos/core/turn/TurnGuard.java
+- [X] T007 [P] 固化脱敏和错误边界，确保日志、用户错误和审计摘要不输出 prompt、凭证、完整工具参数或未受限响应正文，文件：AgentOS-core/src/main/java/com/agentos/core/tool/Redactor.java、AgentOS-core/src/main/java/com/agentos/core/error/ErrorCode.java、AgentOS-boot/src/main/java/com/agentos/boot/ToolRedactionConfiguration.java
+- [X] T008 建立模块级架构规则和质量门检查，禁止 ToolCallingAdvisor、ThreadLocal 业务上下文、自建 ToolCallingManager、H2/SQLite 和越过 core 端口的依赖，文件：AgentOS-boot/src/test/java/com/agentos/boot/ArchitectureRulesTest.java、pom.xml、scripts/check_db_test_reports.py
 
 **Checkpoint**: core 端口、PostgreSQL 审计表、共享预算、脱敏边界和架构门禁就绪；US1–US4 可开始独立开发。
 
@@ -42,17 +42,17 @@ description: "Task list template for AgentOS tool registration and secure execut
 
 ### Tests for User Story 1
 
-- [ ] T009 [P] [US1] 先编写并确认失败的工具目录契约测试，覆盖唯一名称、描述、可解析 inputSchema、returnDirect 元数据、重名拒绝、空集合和声明顺序，文件：AgentOS-tool/src/test/java/com/agentos/tool/registry/ToolRegistryTest.java
-- [ ] T010 [P] [US1] 先编写并确认失败的安全 resolver 与自动配置测试，覆盖请求级 callback 优先、未知名称不解析真实 Bean、拒绝结果可回传模型且底层执行次数为 0、只装配一个 Manager/resolver/processor，文件：AgentOS-tool/src/test/java/com/agentos/tool/ToolAutoConfigurationTest.java、AgentOS-tool/src/test/java/com/agentos/tool/govern/UnknownToolResolverTest.java
-- [ ] T011 [P] [US1] 先编写并确认失败的 Boot 授权集成测试，覆盖 Agent 配置未知工具在模型请求前失败、配置来源和工具名出现在安全错误中、空工具集合不发送 tools 定义，文件：AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ToolAuthorizationIntegrationTest.java
+- [X] T009 [P] [US1] 先编写并确认失败的工具目录契约测试，覆盖唯一名称、描述、可解析 inputSchema、returnDirect 元数据、重名拒绝、空集合和声明顺序，文件：AgentOS-tool/src/test/java/com/agentos/tool/registry/ToolRegistryTest.java
+- [X] T010 [P] [US1] 先编写并确认失败的安全 resolver 与自动配置测试，覆盖请求级 callback 优先、未知名称不解析真实 Bean、拒绝结果可回传模型且底层执行次数为 0、只装配一个 Manager/resolver/processor，文件：AgentOS-tool/src/test/java/com/agentos/tool/ToolAutoConfigurationTest.java、AgentOS-tool/src/test/java/com/agentos/tool/govern/UnknownToolResolverTest.java
+- [X] T011 [P] [US1] 先编写并确认失败的 Boot 授权集成测试，覆盖 Agent 配置未知工具在模型请求前失败、配置来源和工具名出现在安全错误中、空工具集合不发送 tools 定义，文件：AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java、AgentOS-boot/src/test/java/com/agentos/boot/ToolAuthorizationIntegrationTest.java
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] 实现 ToolRegistry 注册校验和按 Agent 声明顺序返回精确 callback 子集，调用官方重名校验并拒绝缺少 name/description/inputSchema 的定义，文件：AgentOS-tool/src/main/java/com/agentos/tool/registry/ToolRegistry.java、AgentOS-core/src/main/java/com/agentos/core/tool/ToolCatalog.java
-- [ ] T013 [US1] 实现 UnknownToolResolver 安全兜底，只返回治理后的拒绝 callback，禁止查询 ApplicationContext、Function 或其他同名 Bean，文件：AgentOS-tool/src/main/java/com/agentos/tool/govern/UnknownToolResolver.java、AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java
-- [ ] T014 [US1] 在 Agent 加载和轮次开始前接入工具名单校验，未知工具不得创建轮次、消息、模型调用或工具审计记录，文件：AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java、AgentOS-core/src/main/java/com/agentos/core/turn/DefaultAgentService.java、AgentOS-core/src/main/java/com/agentos/core/agent/AgentLoader.java
-- [ ] T015 [US1] 接通 ToolCallback 元数据到 Provider 请求，确保空集合不发送工具定义、合法集合只发送治理 callback、returnDirect 元数据不丢失，文件：AgentOS-core/src/main/java/com/agentos/core/provider/ProviderRequest.java、AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java、AgentOS-provider/src/main/java/com/agentos/provider/chat/ChatModelFactory.java
-- [ ] T016 [US1] 运行 US1 独立验证并记录模型可见工具、未知配置零外呼、未授权调用零执行证据，文件：specs/004-agentos-tool-system/quickstart.md、AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java
+- [X] T012 [US1] 实现 ToolRegistry 注册校验和按 Agent 声明顺序返回精确 callback 子集，调用官方重名校验并拒绝缺少 name/description/inputSchema 的定义，文件：AgentOS-tool/src/main/java/com/agentos/tool/registry/ToolRegistry.java、AgentOS-core/src/main/java/com/agentos/core/tool/ToolCatalog.java
+- [X] T013 [US1] 实现 UnknownToolResolver 安全兜底，只返回治理后的拒绝 callback，禁止查询 ApplicationContext、Function 或其他同名 Bean，文件：AgentOS-tool/src/main/java/com/agentos/tool/govern/UnknownToolResolver.java、AgentOS-tool/src/main/java/com/agentos/tool/ToolAutoConfiguration.java
+- [X] T014 [US1] 在 Agent 加载和轮次开始前接入工具名单校验，未知工具不得创建轮次、消息、模型调用或工具审计记录，文件：AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java、AgentOS-core/src/main/java/com/agentos/core/turn/DefaultAgentService.java、AgentOS-core/src/main/java/com/agentos/core/agent/AgentLoader.java
+- [X] T015 [US1] 接通 ToolCallback 元数据到 Provider 请求，确保空集合不发送工具定义、合法集合只发送治理 callback、returnDirect 元数据不丢失，文件：AgentOS-core/src/main/java/com/agentos/core/provider/ProviderRequest.java、AgentOS-core/src/main/java/com/agentos/core/turn/ReActLoop.java、AgentOS-provider/src/main/java/com/agentos/provider/chat/ChatModelFactory.java
+- [X] T016 [US1] 运行 US1 独立验证并记录模型可见工具、未知配置零外呼、未授权调用零执行证据，文件：specs/004-agentos-tool-system/quickstart.md、AgentOS-boot/src/test/java/com/agentos/boot/ReActApplicationTest.java
 
 **Checkpoint**: Agent 工具授权 MVP 可独立演示；可进入 US2 或并行开展 US3 的纯 HTTP 单元测试。
 

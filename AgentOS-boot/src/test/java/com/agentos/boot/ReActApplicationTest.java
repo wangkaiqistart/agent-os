@@ -134,6 +134,7 @@ class ReActApplicationTest {
         assertThat(result.text()).isEqualTo("local answer");
         assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
         assertThat(model.calls()).isOne();
+        assertThat(model.requests().getFirst()).doesNotContain("\"tools\"");
         assertThat(context.getBeansOfType(LlmCallRecorder.class)).hasSize(1);
         assertThat(context.getBeansOfType(org.springframework.ai.chat.model.ChatModel.class))
                 .isEmpty();

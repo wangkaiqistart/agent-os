@@ -8,6 +8,21 @@
 - Do not load production credentials or real business data into tests.
 - Default tests use local HTTP substitutes and do not call real external services.
 
+## 本次 Phase 1–3 验证记录（2026-11-18）
+
+已执行并通过：
+
+```text
+mvn -B -ntp -pl AgentOS-core,AgentOS-tool -am test   PASS
+mvn -B -ntp -pl AgentOS-boot -am test                PASS
+```
+
+新增证据包括：工具定义缺少 name/description/inputSchema 时拒绝、Agent 重复授权拒绝、未知工具只返回受治理的安全拒绝、请求级 callback 优先、单一官方 `ToolCallingManager`/resolver/processor 装配，以及未知 Agent 工具在创建轮次前失败。无工具 Agent 的模型请求不包含 `tools` 定义。
+
+Boot 测试中 PostgreSQL Testcontainers 相关场景因本机没有 Docker socket 而跳过，状态为 `NOT_RUN`；没有使用 H2、SQLite 或共享数据库替代。纯 core/tool 单元测试和不依赖数据库的 Boot 授权测试均通过。
+
+`mvn -B -ntp verify` 已通过质量检查；`python3 scripts/check_db_test_reports.py` 返回失败是预期的数据库门禁结果（数据库连通性测试未执行），待 Docker 可用后必须重新运行数据库测试和该检查脚本。
+
 ## 1. Static and unit validation
 
 From repository root:

@@ -1,8 +1,11 @@
 package com.agentos.core.agent;
 
 import com.agentos.core.provider.Profile;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 从 AGENT.md frontmatter 派生的不可变配置，不包含 Markdown 任务正文。
@@ -25,16 +28,27 @@ public record AgentProfile(
             throw new IllegalArgumentException("Agent name 不能为空");
         }
         providerProfile = Objects.requireNonNull(providerProfile, "providerProfile");
-        // 去空白、去重并形成不可修改列表，避免配置加载后被请求间共享修改。
-        tools =
-                tools == null
-                        ? List.of()
-                        : tools.stream()
-                                .filter(Objects::nonNull)
-                                .map(String::trim)
-                                .filter(s -> !s.isEmpty())
-                                .distinct()
-                                .toList();
+        // 去空白并形成不可修改列表；重复声明必须报错，不能静默改变授权配置。
+        if (tools == null) {
+            tools = List.of();
+        } else {
+            List<String> normalized = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            for (String tool : tools) {
+                if (tool == null) {
+                    continue;
+                }
+                String toolName = tool.trim();
+                if (toolName.isEmpty()) {
+                    continue;
+                }
+                if (!seen.add(toolName)) {
+                    throw new IllegalArgumentException("Agent tools 存在重复工具：" + toolName);
+                }
+                normalized.add(toolName);
+            }
+            tools = List.copyOf(normalized);
+        }
         settings = settings == null ? AgentSettings.defaults() : settings;
     }
 }
