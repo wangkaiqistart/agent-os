@@ -94,6 +94,10 @@ public final class ReActLoop {
         catalog.validate(profile);
     }
 
+    public com.agentos.core.tool.ToolCatalogSnapshot resolve(AgentProfile profile) {
+        return catalog.resolve(profile);
+    }
+
     public Result run(
             TurnSnapshot turn,
             LoadedAgent agent,
@@ -111,6 +115,38 @@ public final class ReActLoop {
             TurnExecutionBudget budget,
             TurnSink sink,
             String trigger) {
+        return run(turn, agent, userMessage, budget, sink, trigger, resolve(agent.profile()));
+    }
+
+    /** 服务在建轮次前捕获的同一个快照，整个循环只使用这些绑定。 */
+    public Result run(
+            TurnSnapshot turn,
+            LoadedAgent agent,
+            String userMessage,
+            TurnExecutionBudget budget,
+            TurnSink sink,
+            String trigger,
+            com.agentos.core.tool.ToolCatalogSnapshot snapshot) {
+        return run(
+                turn,
+                agent,
+                userMessage,
+                budget,
+                sink,
+                trigger,
+                snapshot,
+                com.agentos.core.interaction.TurnRuntimeCapabilities.NONE);
+    }
+
+    public Result run(
+            TurnSnapshot turn,
+            LoadedAgent agent,
+            String userMessage,
+            TurnExecutionBudget budget,
+            TurnSink sink,
+            String trigger,
+            com.agentos.core.tool.ToolCatalogSnapshot snapshot,
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
         // startTurn 已经把当前用户消息写入存储；读取历史时明确排除 RUNNING 轮次，避免当前消息重复。
         SessionSnapshot session =
                 new SessionSnapshot(
@@ -122,7 +158,7 @@ public final class ReActLoop {
                         : messages.recentTurns(
                                 session, agent.profile().settings().maxHistoryTurns());
         List<Message> history = promptBuilder.build(agent, previousTurns, userMessage);
-        var callbacks = catalog.callbacks(agent.profile());
+        var callbacks = snapshot.modelCallbacks();
         MDC.put("sessionId", turn.sessionId().toString());
         MDC.put("turnId", turn.turnId().toString());
         MDC.put("agent", agent.profile().name());
@@ -181,10 +217,11 @@ public final class ReActLoop {
                         executor.execute(
                                 history,
                                 response,
-                                callbacks,
+                                snapshot,
                                 context,
                                 budget,
-                                () -> guard.checkpoint(turn, budget));
+                                () -> guard.checkpoint(turn, budget),
+                                capabilities);
                 for (var added : executed.added()) {
                     if (added instanceof ToolResponseMessage toolMessage) {
                         for (var result : toolMessage.getResponses()) {

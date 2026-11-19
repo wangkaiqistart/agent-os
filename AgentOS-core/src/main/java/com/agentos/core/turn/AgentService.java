@@ -12,4 +12,12 @@ public interface AgentService {
 
     /** 使用 sink 接收增量及终态；是否启用模型流式由 sink.streaming 决定。 */
     TurnResult process(ProcessRequest request, TurnSink sink);
+
+    /** 显式入口能力，兼容旧实现的无人值守语义。 */
+    default TurnResult process(
+            ProcessRequest request,
+            TurnSink sink,
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
+        return process(request, sink);
+    }
 }

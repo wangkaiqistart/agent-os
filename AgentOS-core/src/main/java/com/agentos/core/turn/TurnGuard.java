@@ -57,10 +57,19 @@ public final class TurnGuard {
         } catch (InterruptedException interrupted) {
             future.cancel(true);
             Thread.currentThread().interrupt();
+            if (budget.expired() || budget.hardStopped()) {
+                throw new TurnDeadlineExceededException();
+            }
             throw new LeaseLostException();
         } catch (ExecutionException failure) {
-            if (failure.getCause() instanceof TurnDeadlineExceededException deadline) {
-                throw deadline;
+            // 数据库等待可能在截止边界以包装异常返回；与成功续租路径保持同一 deadline 优先级。
+            if (budget.expired() || budget.hardStopped()) {
+                throw new TurnDeadlineExceededException();
+            }
+            for (Throwable cause = failure.getCause(); cause != null; cause = cause.getCause()) {
+                if (cause instanceof TurnDeadlineExceededException deadline) {
+                    throw deadline;
+                }
             }
             throw new LeaseLostException();
         } finally {

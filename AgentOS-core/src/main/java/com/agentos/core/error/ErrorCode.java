@@ -11,6 +11,8 @@ package com.agentos.core.error;
 public enum ErrorCode {
     /** 参数错误（400）。 */
     INVALID_ARGUMENT,
+    /** 目录未认证（401）。 */
+    UNAUTHORIZED,
     /** 资源不存在（404）。 */
     NOT_FOUND,
     /** 会话正有轮次在执行（409）。 */

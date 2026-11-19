@@ -54,23 +54,80 @@ public final class ToolExecutor {
             TurnContext context,
             TurnExecutionBudget budget,
             Runnable checkpoint) {
+        return execute(
+                history,
+                response,
+                callbacks,
+                context,
+                budget,
+                checkpoint,
+                null,
+                com.agentos.core.interaction.TurnRuntimeCapabilities.NONE);
+    }
+
+    public Result execute(
+            List<Message> history,
+            ChatResponse response,
+            com.agentos.core.tool.ToolCatalogSnapshot snapshot,
+            TurnContext context,
+            TurnExecutionBudget budget,
+            Runnable checkpoint) {
+        return execute(
+                history,
+                response,
+                snapshot,
+                context,
+                budget,
+                checkpoint,
+                com.agentos.core.interaction.TurnRuntimeCapabilities.NONE);
+    }
+
+    public Result execute(
+            List<Message> history,
+            ChatResponse response,
+            com.agentos.core.tool.ToolCatalogSnapshot snapshot,
+            TurnContext context,
+            TurnExecutionBudget budget,
+            Runnable checkpoint,
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
+        return execute(
+                history,
+                response,
+                snapshot.executionCallbacks(),
+                context,
+                budget,
+                checkpoint,
+                snapshot,
+                capabilities);
+    }
+
+    private Result execute(
+            List<Message> history,
+            ChatResponse response,
+            List<ToolCallback> callbacks,
+            TurnContext context,
+            TurnExecutionBudget budget,
+            Runnable checkpoint,
+            com.agentos.core.tool.ToolCatalogSnapshot snapshot,
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
         var generation = Objects.requireNonNull(response.getResult(), "模型响应缺少候选结果");
         var ledger = new ToolCallLedger(generation.getOutput().getToolCalls(), checkpoint);
         ledger.checkpoint();
         if (!ledger.validArguments()) {
-            return rejectBatch(history, generation.getOutput(), ledger, context);
+            return rejectBatch(history, generation.getOutput(), ledger, context, snapshot);
+        }
+        var values = new java.util.HashMap<String, Object>();
+        values.put(ToolContextKeys.TURN_CONTEXT, context);
+        values.put(ToolContextKeys.RUNTIME_CAPABILITIES, capabilities);
+        values.put(ToolContextKeys.TOOL_CALL_LEDGER, ledger);
+        values.put(ToolContextKeys.TURN_BUDGET, budget);
+        if (snapshot != null) {
+            values.put(ToolContextKeys.TOOL_SNAPSHOT, snapshot);
         }
         var options =
                 ToolCallingChatOptions.builder()
                         .toolCallbacks(callbacks)
-                        .toolContext(
-                                Map.of(
-                                        ToolContextKeys.TURN_CONTEXT,
-                                        context,
-                                        ToolContextKeys.TOOL_CALL_LEDGER,
-                                        ledger,
-                                        ToolContextKeys.TURN_BUDGET,
-                                        budget))
+                        .toolContext(Map.copyOf(values))
                         .build();
         var result = manager.executeToolCalls(new Prompt(history, options), response);
         for (var call : ledger.pending()) {
@@ -82,7 +139,7 @@ public final class ToolExecutor {
                             context.iteration(),
                             call.id(),
                             call.name(),
-                            "builtin",
+                            snapshot == null ? "builtin" : snapshot.sourceOf(call.name()),
                             redactor.summarize(call.arguments(), 10000),
                             null,
                             null,
@@ -104,7 +161,8 @@ public final class ToolExecutor {
             List<Message> history,
             AssistantMessage assistant,
             ToolCallLedger ledger,
-            TurnContext context) {
+            TurnContext context,
+            com.agentos.core.tool.ToolCatalogSnapshot snapshot) {
         String error = "本批工具参数不是合法 JSON 对象，所有调用均未执行";
         var responses = new ArrayList<ToolResponseMessage.ToolResponse>();
         for (var call : assistant.getToolCalls()) {
@@ -116,7 +174,7 @@ public final class ToolExecutor {
                             context.iteration(),
                             call.id(),
                             call.name(),
-                            "builtin",
+                            snapshot == null ? "builtin" : snapshot.sourceOf(call.name()),
                             redactor.summarize(call.arguments(), 10000),
                             null,
                             null,

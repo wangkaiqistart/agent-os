@@ -22,6 +22,37 @@ public final class TurnExecutionBudget {
     private final java.util.concurrent.atomic.AtomicBoolean auditUnconfirmed =
             new java.util.concurrent.atomic.AtomicBoolean();
 
+    private final java.util.concurrent.atomic.AtomicInteger pendingSubmissions =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 在真实提交边界登记；每次提交独立确认，后续成功不能抹去较早的不确定提交。 */
+    public Submission beginSubmission() {
+        pendingSubmissions.incrementAndGet();
+        return new Submission();
+    }
+
+    public boolean submissionUnconfirmed() {
+        return pendingSubmissions.get() > 0;
+    }
+
+    /** 只追加固定安全提示，不从异常原文猜测动作状态，也不改变持久化确认。 */
+    public String submissionAwareText(String text) {
+        return submissionUnconfirmed() ? text + "；提交可能已生效" : text;
+    }
+
+    public final class Submission {
+        private final java.util.concurrent.atomic.AtomicBoolean confirmed =
+                new java.util.concurrent.atomic.AtomicBoolean();
+
+        private Submission() {}
+
+        public void confirm() {
+            if (confirmed.compareAndSet(false, true)) {
+                pendingSubmissions.decrementAndGet();
+            }
+        }
+    }
+
     private final java.util.Map<String, Integer> toolAttempts = new java.util.HashMap<>();
     private int totalToolAttempts;
     private final Object attemptLock = new Object();
@@ -93,6 +124,10 @@ public final class TurnExecutionBudget {
     /** 适合存储或跨组件传递的绝对时间；进程内是否耗尽以单调计时检查为准。 */
     public Instant deadline() {
         return deadline;
+    }
+
+    public long deadlineNanos() {
+        return deadlineNanos;
     }
 
     /** 业务预算是否用尽：到期后 checkpoint 拒绝继续调用模型或追加答案。 */

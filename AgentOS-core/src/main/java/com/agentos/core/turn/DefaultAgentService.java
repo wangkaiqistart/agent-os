@@ -11,6 +11,7 @@ import com.agentos.core.session.SessionKey;
 import com.agentos.core.session.SessionManager;
 import com.agentos.core.session.TurnSnapshot;
 import com.agentos.core.session.TurnStore;
+import com.agentos.core.tool.ToolCleanupUnconfirmedException;
 import java.util.Objects;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -114,6 +115,15 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
      */
     @Override
     public TurnResult process(ProcessRequest request, TurnSink sink) {
+        return process(request, sink, com.agentos.core.interaction.TurnRuntimeCapabilities.NONE);
+    }
+
+    @Override
+    public TurnResult process(
+            ProcessRequest request,
+            TurnSink sink,
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
+        Objects.requireNonNull(capabilities);
         TurnSink.require(sink);
         if (request.message() == null || request.message().isBlank()) {
             throw new AgentOSException(ErrorCode.INVALID_ARGUMENT, "消息不能为空");
@@ -122,7 +132,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
         // PromptBuilder 组装消息时还会读取一次 Bootstrap，所以缺文件时可能看到两组警告。
         LoadedAgent agent = contextLoader.load(loader.load(request.agentName()));
         providers.validate(agent.profile().providerProfile());
-        loop.validate(agent.profile());
+        var toolSnapshot = loop.resolve(agent.profile());
         UUID turnId = UUID.randomUUID();
         TurnExecutionBudget budget =
                 TurnExecutionBudget.start(
@@ -134,7 +144,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
             inFlight.put(turnId, new InFlight(Thread.currentThread(), budget));
         }
         try {
-            return execute(request, sink, agent, turnId, budget);
+            return execute(request, sink, agent, turnId, budget, toolSnapshot, capabilities);
         } finally {
             inFlight.remove(turnId);
         }
@@ -145,7 +155,9 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
             TurnSink sink,
             LoadedAgent agent,
             UUID turnId,
-            TurnExecutionBudget budget) {
+            TurnExecutionBudget budget,
+            com.agentos.core.tool.ToolCatalogSnapshot toolSnapshot,
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
         var managedSink = new ManagedTurnSink(sink, budget);
         // 2. 一个短事务内确保 session 存在、取得租约、写 turn 和 USER 消息。
         // channel + userId + Agent 名称区分活跃会话；同会话已有有效租约时这里会拒绝请求。
@@ -202,7 +214,15 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
             turn = found.get();
         }
         final TurnSnapshot startedTurn = turn;
-        return executeStarted(request, agent, turnId, budget, managedSink, startedTurn);
+        return executeStarted(
+                request,
+                agent,
+                turnId,
+                budget,
+                managedSink,
+                startedTurn,
+                toolSnapshot,
+                capabilities);
     }
 
     private TurnResult executeStarted(
@@ -211,7 +231,9 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
             UUID turnId,
             TurnExecutionBudget budget,
             ManagedTurnSink managedSink,
-            TurnSnapshot turn) {
+            TurnSnapshot turn,
+            com.agentos.core.tool.ToolCatalogSnapshot toolSnapshot,
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
         // 预算按 turnId 显式登记；MDC 只用于当前线程的日志关联，不作为业务上下文传递。
         budgets.register(turnId, budget);
         MDC.put("sessionId", turn.sessionId().toString());
@@ -232,8 +254,11 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                                     request.message(),
                                                     budget,
                                                     managedSink,
-                                                    request.trigger()),
+                                                    request.trigger(),
+                                                    toolSnapshot,
+                                                    capabilities),
                                     budget);
+            String outcomeText = budget.submissionAwareText(outcome.text());
             // 4. 先完成持久化收尾，再生成给用户的结果。业务状态和持久化确认分开表达。
             TurnStore.FinishResult finish =
                     finishWithinHardStop(
@@ -242,10 +267,10 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                     turns.finishAndRelease(
                                             turn,
                                             outcome.status().name(),
-                                            outcome.text(),
+                                            outcomeText,
                                             outcome.status() == TurnStatus.SUCCEEDED
                                                     ? null
-                                                    : outcome.text(),
+                                                    : outcomeText,
                                             outcome.iterations()));
             result =
                     new TurnResult(
@@ -253,7 +278,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             finish.persistenceConfirmed()
                                     ? TurnStatus.valueOf(finish.status())
                                     : outcome.status(),
-                            finish.persistenceConfirmed() ? finish.text() : outcome.text(),
+                            finish.persistenceConfirmed() ? finish.text() : outcomeText,
                             outcome.iterations(),
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
@@ -261,6 +286,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
         } catch (TurnDeadlineExceededException e) {
             boolean closing = budget.cancelled() && !budget.expired();
             TurnStatus interruptedStatus = closing ? TurnStatus.INTERRUPTED : TurnStatus.TIMED_OUT;
+            String timeoutText = budget.submissionAwareText("本轮处理超时");
             // 超时同样需要更新轮次、释放属于自己的租约，不能只取消线程就直接返回。
             TurnStore.FinishResult finish =
                     finishWithinHardStop(
@@ -269,7 +295,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                     turns.finishAndRelease(
                                             turn,
                                             interruptedStatus.name(),
-                                            "本轮处理超时",
+                                            timeoutText,
                                             e.getMessage()));
             result =
                     new TurnResult(
@@ -277,12 +303,13 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             finish.persistenceConfirmed()
                                     ? TurnStatus.valueOf(finish.status())
                                     : interruptedStatus,
-                            finish.persistenceConfirmed() ? finish.text() : "本轮处理超时",
+                            finish.persistenceConfirmed() ? finish.text() : timeoutText,
                             0,
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
         } catch (LeaseLostException e) {
+            String interruptedText = budget.submissionAwareText("本轮处理已中断");
             TurnStore.FinishResult finish =
                     finishWithinHardStop(
                             budget,
@@ -290,7 +317,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                     turns.finishAndRelease(
                                             turn,
                                             TurnStatus.INTERRUPTED.name(),
-                                            "本轮处理已中断",
+                                            interruptedText,
                                             "会话租约或输出端已失效"));
             result =
                     new TurnResult(
@@ -298,14 +325,40 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             finish.persistenceConfirmed()
                                     ? TurnStatus.valueOf(finish.status())
                                     : TurnStatus.INTERRUPTED,
-                            finish.persistenceConfirmed() ? finish.text() : "本轮处理已中断",
+                            finish.persistenceConfirmed() ? finish.text() : interruptedText,
+                            0,
+                            finish.persistenceConfirmed() && budget.auditsConfirmed()
+                                    ? PersistenceStatus.CONFIRMED
+                                    : PersistenceStatus.UNCONFIRMED);
+        } catch (ToolCleanupUnconfirmedException e) {
+            // 资源是否停止与持久化是否确认分别表达；不能把未知执行状态反馈模型后继续。
+            String cleanupMessage = budget.submissionAwareText(e.getMessage());
+            TurnStore.FinishResult finish =
+                    finishWithinHardStop(
+                            budget,
+                            () ->
+                                    turns.finishAndRelease(
+                                            turn,
+                                            TurnStatus.FAILED.name(),
+                                            cleanupMessage,
+                                            cleanupMessage));
+            result =
+                    new TurnResult(
+                            turnId,
+                            finish.persistenceConfirmed()
+                                    ? TurnStatus.valueOf(finish.status())
+                                    : TurnStatus.FAILED,
+                            finish.persistenceConfirmed() ? finish.text() : cleanupMessage,
                             0,
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
         } catch (com.agentos.core.audit.AuditWriteException e) {
             String auditMessage =
-                    e.executionMayHaveOccurred() ? "审计写入未确认，操作可能已经执行" : "工具执行前的审计未确认，未执行本次工具";
+                    budget.submissionAwareText(
+                            e.executionMayHaveOccurred()
+                                    ? "审计写入未确认，操作可能已经执行"
+                                    : "工具执行前的审计未确认，未执行本次工具");
             log.error("轮次 {} 审计写入未确认，persistenceStatus=UNCONFIRMED", turnId);
             // 不把审计异常当作普通工具失败，更不能宣称副作用未发生。
             try {
@@ -325,6 +378,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             0,
                             PersistenceStatus.UNCONFIRMED);
         } catch (RuntimeException e) {
+            String failedText = budget.submissionAwareText("处理失败");
             // 给用户固定失败文案；存储摘要做有限脱敏，不向输出端返回原始内部异常。
             TurnStore.FinishResult finish =
                     finishWithinHardStop(
@@ -333,7 +387,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                     turns.finishAndRelease(
                                             turn,
                                             TurnStatus.FAILED.name(),
-                                            "处理失败",
+                                            failedText,
                                             safeMessage(e)));
             result =
                     new TurnResult(
@@ -341,7 +395,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             finish.persistenceConfirmed()
                                     ? TurnStatus.valueOf(finish.status())
                                     : TurnStatus.FAILED,
-                            finish.persistenceConfirmed() ? finish.text() : "处理失败",
+                            finish.persistenceConfirmed() ? finish.text() : failedText,
                             0,
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED

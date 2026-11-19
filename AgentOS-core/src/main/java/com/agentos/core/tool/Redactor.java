@@ -43,6 +43,16 @@ public final class Redactor {
         this.secrets = Objects.requireNonNull(secrets, "secrets");
     }
 
+    private final java.util.Set<String> registeredSecrets =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    public void registerSecrets(Collection<String> values) {
+        values.stream()
+                .filter(Objects::nonNull)
+                .filter(s -> !s.isBlank())
+                .forEach(registeredSecrets::add);
+    }
+
     public String redact(String text) {
         if (text == null || text.isEmpty()) {
             return text;
@@ -99,6 +109,7 @@ public final class Redactor {
                     .filter(s -> !s.isBlank())
                     .forEach(values::add);
         }
+        values.addAll(registeredSecrets);
         // 长密钥先替换，避免短密钥先替换后留下长密钥的尾部。
         values.sort(Comparator.comparingInt(String::length).reversed());
         for (String secret : values) {

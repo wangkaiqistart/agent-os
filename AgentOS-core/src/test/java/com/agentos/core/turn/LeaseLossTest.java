@@ -89,4 +89,30 @@ class LeaseLossTest {
                 .isInstanceOf(TurnDeadlineExceededException.class);
         verifyNoInteractions(turns);
     }
+
+    @Test
+    void deadlineExpiringDuringFailedRenewalKeepsTimeoutInsteadOfLeaseLoss() {
+        var turns = mock(TurnStore.class);
+        var budget = mock(TurnExecutionBudget.class);
+        when(budget.expired()).thenReturn(false, true);
+        when(budget.remainingNanos()).thenReturn(Duration.ofSeconds(2).toNanos());
+        when(budget.remainingHardStopNanos()).thenReturn(Duration.ofSeconds(3).toNanos());
+        when(turns.renewLease(null, budget)).thenThrow(new IllegalStateException("存储等待到期"));
+        assertThatThrownBy(() -> new TurnGuard(turns).checkpoint(null, budget))
+                .isInstanceOf(TurnDeadlineExceededException.class);
+    }
+
+    @Test
+    void wrappedStorageDeadlineIsPreservedAndOtherEarlyFailuresRemainLeaseLoss() {
+        var turns = mock(TurnStore.class);
+        var budget = TurnExecutionBudget.start(Duration.ofSeconds(5));
+        when(turns.renewLease(null, budget))
+                .thenThrow(new IllegalStateException("存储包装异常", new TurnDeadlineExceededException()))
+                .thenThrow(new IllegalStateException("存储不可用"));
+        var guard = new TurnGuard(turns);
+        assertThatThrownBy(() -> guard.checkpoint(null, budget))
+                .isInstanceOf(TurnDeadlineExceededException.class);
+        assertThatThrownBy(() -> guard.checkpoint(null, budget))
+                .isInstanceOf(LeaseLostException.class);
+    }
 }

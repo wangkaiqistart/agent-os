@@ -22,6 +22,7 @@ public record AgentProfile(
         String description,
         Profile providerProfile,
         List<String> tools,
+        List<String> mcpServers,
         AgentSettings settings) {
 
     public AgentProfile {
@@ -50,6 +51,30 @@ public record AgentProfile(
             }
             tools = List.copyOf(normalized);
         }
+        var servers = new ArrayList<String>();
+        var seenServers = new HashSet<String>();
+        if (mcpServers != null) {
+            for (String server : mcpServers) {
+                if (server == null || server.isBlank()) {
+                    continue;
+                }
+                String normalized = server.trim();
+                if (!normalized.matches("[a-z0-9-]{1,20}") || !seenServers.add(normalized)) {
+                    throw new IllegalArgumentException("MCP服务声明无效或重复");
+                }
+                servers.add(normalized);
+            }
+        }
+        mcpServers = List.copyOf(servers);
         settings = settings == null ? AgentSettings.defaults() : settings;
+    }
+
+    public AgentProfile(
+            String name,
+            String description,
+            Profile providerProfile,
+            List<String> tools,
+            AgentSettings settings) {
+        this(name, description, providerProfile, tools, List.of(), settings);
     }
 }

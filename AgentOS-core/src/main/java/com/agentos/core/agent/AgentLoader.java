@@ -30,7 +30,7 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 public final class AgentLoader {
     private static final Logger log = LoggerFactory.getLogger(AgentLoader.class);
     private static final List<String> KNOWN_UNSUPPORTED =
-            List.of("identity", "mcp_servers", "channels", "schedules", "bootstrap");
+            List.of("identity", "channels", "schedules", "bootstrap");
     private final Path agentsRoot;
 
     public AgentLoader(Path agentsRoot) {
@@ -98,7 +98,13 @@ public final class AgentLoader {
                 }
             }
             return new LoadedAgent(
-                    new AgentProfile(name, text(root.get("description")), profile, tools, settings),
+                    new AgentProfile(
+                            name,
+                            text(root.get("description")),
+                            profile,
+                            tools,
+                            serverNames(root.get("mcp_servers")),
+                            settings),
                     parsed.body(),
                     Map.of());
         } catch (IOException | RuntimeException e) {
@@ -165,6 +171,17 @@ public final class AgentLoader {
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .toList();
+    }
+
+    private static List<String> serverNames(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        if (!(value instanceof List<?> values)
+                || values.stream().anyMatch(v -> !(v instanceof String))) {
+            throw new IllegalArgumentException("mcp_servers必须是服务名列表");
+        }
+        return values.stream().map(String.class::cast).toList();
     }
 
     private static String text(Object value) {

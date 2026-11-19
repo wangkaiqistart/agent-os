@@ -27,6 +27,7 @@ import com.agentos.core.session.TurnStore;
 import com.agentos.core.support.AgentFixtures;
 import com.agentos.core.support.InMemorySessionManager;
 import com.agentos.core.support.InMemoryTurnStore;
+import com.agentos.core.tool.ToolCleanupUnconfirmedException;
 import java.nio.file.Files;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -61,22 +62,137 @@ class AgentServiceFailureTest {
     }
 
     @Test
+    void cleanupUncertaintyTerminatesWithoutReplayAndSeparatesPersistenceConfirmation()
+            throws Exception {
+        for (boolean finishFailure : java.util.List.of(false, true)) {
+            var f = fixture();
+            when(f.loop.run(any(), any(), anyString(), any(), any(), anyString(), any(), any()))
+                    .thenThrow(new ToolCleanupUnconfirmedException());
+            if (finishFailure) {
+                doThrow(new IllegalStateException("测试收尾未确认"))
+                        .when(f.turns)
+                        .finishAndRelease(any(), anyString(), anyString(), nullable(String.class));
+            }
+            var result = f.service.process(request());
+            assertThat(result.status()).isEqualTo(TurnStatus.FAILED);
+            assertThat(result.text()).contains("清理未确认", "本轮已停止", "禁止重放");
+            assertThat(result.persistenceStatus())
+                    .isEqualTo(
+                            finishFailure
+                                    ? PersistenceStatus.UNCONFIRMED
+                                    : PersistenceStatus.CONFIRMED);
+            verify(f.loop).run(any(), any(), anyString(), any(), any(), anyString(), any(), any());
+            verify(f.turns)
+                    .finishAndRelease(any(), eq("FAILED"), eq(result.text()), eq(result.text()));
+        }
+    }
+
+    @Test
+    void pendingSubmissionSurvivesFatalSignalsAndIndependentPersistenceFailure() throws Exception {
+        for (String signal : java.util.List.of("deadline", "cancel", "lease", "audit", "cleanup")) {
+            for (boolean finishFailure : java.util.List.of(false, true)) {
+                var f = fixture();
+                when(f.loop.run(any(), any(), anyString(), any(), any(), anyString(), any(), any()))
+                        .thenAnswer(call -> {
+                            var budget = call.getArgument(3, TurnExecutionBudget.class);
+                            budget.beginSubmission();
+                            switch (signal) {
+                                case "cancel" -> {
+                                    budget.cancel();
+                                    throw new TurnDeadlineExceededException();
+                                }
+                                case "deadline" -> throw new TurnDeadlineExceededException();
+                                case "lease" -> throw new LeaseLostException();
+                                case "audit" -> {
+                                    budget.auditUnconfirmed();
+                                    throw new com.agentos.core.audit.AuditWriteException(
+                                            "测试审计未确认", true);
+                                }
+                                default -> throw new ToolCleanupUnconfirmedException();
+                            }
+                        });
+                if (finishFailure) {
+                    doThrow(new IllegalStateException("测试收尾失败"))
+                            .when(f.turns)
+                            .finishAndRelease(
+                                    any(), anyString(), anyString(), nullable(String.class));
+                }
+                var error = new java.util.concurrent.atomic.AtomicReference<TurnResult>();
+                var result =
+                        f.service.process(
+                                request(),
+                                new TurnSink() {
+                                    public void onError(TurnResult value) {
+                                        error.set(value);
+                                    }
+                                });
+                assertThat(result.text()).as(signal).contains("提交可能已生效");
+                assertThat(result.status())
+                        .isEqualTo(
+                                switch (signal) {
+                                    case "deadline" -> TurnStatus.TIMED_OUT;
+                                    case "cancel", "lease" -> TurnStatus.INTERRUPTED;
+                                    default -> TurnStatus.FAILED;
+                                });
+                assertThat(error.get()).isEqualTo(result);
+                assertThat(result.persistenceStatus())
+                        .isEqualTo(
+                                finishFailure || signal.equals("audit")
+                                        ? PersistenceStatus.UNCONFIRMED
+                                        : PersistenceStatus.CONFIRMED);
+                verify(f.loop)
+                        .run(any(), any(), anyString(), any(), any(), anyString(), any(), any());
+                verify(f.turns)
+                        .finishAndRelease(
+                                any(), anyString(), eq(result.text()), nullable(String.class));
+            }
+        }
+    }
+
+    @Test
+    void laterConfirmedSubmissionCannotEraseAnEarlierPendingSubmission() throws Exception {
+        for (boolean confirmFirst : java.util.List.of(false, true)) {
+            var f = fixture();
+            when(f.loop.run(any(), any(), anyString(), any(), any(), anyString(), any(), any()))
+                    .thenAnswer(call -> {
+                        var budget = call.getArgument(3, TurnExecutionBudget.class);
+                        var earlier = budget.beginSubmission();
+                        var later = budget.beginSubmission();
+                        later.confirm();
+                        later.confirm();
+                        if (confirmFirst) {
+                            earlier.confirm();
+                        }
+                        return new ReActLoop.Result(TurnStatus.SUCCEEDED, "完成", 2);
+                    });
+            var result = f.service.process(request());
+            if (confirmFirst) {
+                assertThat(result.text()).isEqualTo("完成");
+            } else {
+                assertThat(result.text()).contains("提交可能已生效");
+            }
+            assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.CONFIRMED);
+        }
+    }
+
+    @Test
     void auditUncertaintyCannotBecomeConfirmedThroughSuccessfulFinish() throws Exception {
         var f = fixture();
-        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString()))
+        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString(), any(), any()))
                 .thenAnswer(call -> {
                     call.getArgument(3, TurnExecutionBudget.class).auditUnconfirmed();
                     return new ReActLoop.Result(TurnStatus.SUCCEEDED, "answer", 1);
                 });
         var result = f.service.process(request());
         assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.UNCONFIRMED);
-        verify(f.loop, times(1)).run(any(), any(), anyString(), any(), any(), anyString());
+        verify(f.loop, times(1))
+                .run(any(), any(), anyString(), any(), any(), anyString(), any(), any());
     }
 
     @Test
     void recoveredTerminalStateWinsOverLateLocalSuccess() throws Exception {
         var f = fixture();
-        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString()))
+        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString(), any(), any()))
                 .thenReturn(new ReActLoop.Result(TurnStatus.SUCCEEDED, "late", 1));
         doReturn(new TurnStore.FinishResult("INTERRUPTED", true, "本轮已中断", "owner lost"))
                 .when(f.turns)
@@ -98,7 +214,8 @@ class AgentServiceFailureTest {
         assertThat(result.status()).isEqualTo(TurnStatus.FAILED);
         assertThat(result.persistenceStatus()).isEqualTo(PersistenceStatus.UNCONFIRMED);
         verify(f.turns, times(1)).startTurn(any(), any(), anyString(), anyString(), any());
-        verify(f.loop, never()).run(any(), any(), anyString(), any(), any(), anyString());
+        verify(f.loop, never())
+                .run(any(), any(), anyString(), any(), any(), anyString(), any(), any());
         assertThat(output.getAll())
                 .contains(
                         result.turnId().toString(),
@@ -112,18 +229,23 @@ class AgentServiceFailureTest {
     @Test
     void lateTimeoutUsesAlreadyRecoveredDatabaseState() throws Exception {
         var f = fixture();
-        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString()))
-                .thenThrow(new TurnDeadlineExceededException());
+        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString(), any(), any()))
+                .thenAnswer(call -> {
+                    call.getArgument(3, TurnExecutionBudget.class).beginSubmission();
+                    throw new TurnDeadlineExceededException();
+                });
         doReturn(new TurnStore.FinishResult("INTERRUPTED", true, "本轮已中断", "recovered"))
                 .when(f.turns)
                 .finishAndRelease(any(), anyString(), anyString(), nullable(String.class));
-        assertThat(f.service.process(request()).status()).isEqualTo(TurnStatus.INTERRUPTED);
+        var result = f.service.process(request());
+        assertThat(result.status()).isEqualTo(TurnStatus.INTERRUPTED);
+        assertThat(result.text()).isEqualTo("本轮已中断");
     }
 
     @Test
     void finishFailureIsUnconfirmedAndDoesNotRepeatLoop() throws Exception {
         var f = fixture();
-        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString()))
+        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString(), any(), any()))
                 .thenReturn(new ReActLoop.Result(TurnStatus.SUCCEEDED, "answer", 1));
         doThrow(new IllegalStateException("synthetic database failure"))
                 .when(f.turns)
@@ -131,7 +253,8 @@ class AgentServiceFailureTest {
                         any(), anyString(), anyString(), nullable(String.class), anyInt());
         assertThat(f.service.process(request()).persistenceStatus())
                 .isEqualTo(PersistenceStatus.UNCONFIRMED);
-        verify(f.loop, times(1)).run(any(), any(), anyString(), any(), any(), anyString());
+        verify(f.loop, times(1))
+                .run(any(), any(), anyString(), any(), any(), anyString(), any(), any());
     }
 
     @Test
@@ -139,7 +262,7 @@ class AgentServiceFailureTest {
         var f = fixture();
         var entered = new CountDownLatch(1);
         var stopped = new CountDownLatch(1);
-        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString()))
+        when(f.loop.run(any(), any(), anyString(), any(), any(), anyString(), any(), any()))
                 .thenAnswer(call -> {
                     entered.countDown();
                     try {

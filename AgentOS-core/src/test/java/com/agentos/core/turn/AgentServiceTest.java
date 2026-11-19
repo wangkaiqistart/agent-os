@@ -167,7 +167,7 @@ class AgentServiceTest {
         var catalog = mock(com.agentos.core.tool.ToolCatalog.class);
         doThrow(new IllegalArgumentException("agents/assistant/AGENT.md 的 tools 包含未注册工具"))
                 .when(catalog)
-                .validate(org.mockito.ArgumentMatchers.any());
+                .resolve(org.mockito.ArgumentMatchers.any());
         var loop =
                 new ReActLoop(
                         provider,
