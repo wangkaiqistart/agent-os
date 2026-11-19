@@ -56,6 +56,19 @@ public class TerminalInputBroker implements InteractionPort, AutoCloseable {
         }
     }
 
+    /**
+     * 提问超时或取消后，旧请求仍持有 reader 直到这一行结束（迟到输入按规格丢弃）。聊天读取等它释放再接管，
+     * 不把这种状态当作 BUSY 结束对话；仍有未结束的提问时才返回 BUSY。
+     */
+    private Pending acquireChat() throws InterruptedException {
+        synchronized (lock) {
+            while (!closed && !eof && owner != null && owner.result.isDone()) {
+                lock.wait();
+            }
+            return acquire(MAX_CHARS);
+        }
+    }
+
     private Pending ownerBusy() {
         var busy = new Pending(-1, MAX_CHARS);
         busy.result.complete(InteractionResult.of(InteractionResult.Status.BUSY));
@@ -104,7 +117,13 @@ public class TerminalInputBroker implements InteractionPort, AutoCloseable {
     }
 
     public String readChatLine() throws IOException {
-        Pending pending = acquire(MAX_CHARS);
+        Pending pending;
+        try {
+            pending = acquireChat();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("CANCELLED");
+        }
         if (pending == null) {
             return null;
         }
@@ -165,6 +184,12 @@ public class TerminalInputBroker implements InteractionPort, AutoCloseable {
                     }
                     lock.notifyAll();
                 }
+                var finished = pending.result.getNow(null);
+                if (finished != null && finished.status() == InteractionResult.Status.CANCELLED) {
+                    // 这一行属于已超时或取消的提问，不会交给任何人；提示用户重新输入。
+                    output.println("（上一个提问已结束，这行输入已丢弃，请重新输入）");
+                    output.flush();
+                }
                 if (!pending.result.isDone()) {
                     String line = text.toString();
                     if (line.endsWith("\r")) {
@@ -187,6 +212,7 @@ public class TerminalInputBroker implements InteractionPort, AutoCloseable {
                     owner.result.complete(InteractionResult.of(InteractionResult.Status.EOF));
                 }
                 owner = null;
+                lock.notifyAll();
             }
         }
     }

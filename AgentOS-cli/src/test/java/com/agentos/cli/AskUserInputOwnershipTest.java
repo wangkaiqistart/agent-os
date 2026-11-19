@@ -139,4 +139,40 @@ class AskUserInputOwnershipTest {
             }
         }
     }
+
+    @Test
+    void chatAfterTimedOutQuestionWaitsForLateLineInsteadOfFailingBusy() throws Exception {
+        var input = new PipedReader();
+        var writer = new PipedWriter(input);
+        var output = new StringWriter();
+        try (var broker = new CliInputBroker(input, new PrintWriter(output, true));
+                var s =
+                        new ToolExecutionScope(
+                                null,
+                                "short",
+                                TurnExecutionBudget.start(
+                                        Duration.ofSeconds(3), Duration.ofSeconds(1)),
+                                Duration.ofMillis(100),
+                                () -> {})) {
+            var executor = Executors.newVirtualThreadPerTaskExecutor();
+            try {
+                // 提问自身超时，本轮继续；随后马上回到聊天读取，旧请求仍占着 reader。
+                try {
+                    assertThat(broker.ask(request(s), s).status())
+                            .isEqualTo(InteractionResult.Status.TIMED_OUT);
+                } catch (ToolExecutionScope.ToolTimeoutException expected) {
+                    // 工具预算先到期时以超时异常结束，两种结束方式都让旧请求保持占用。
+                }
+                assertThat(broker.activeReaders()).isEqualTo(1);
+                var chat = executor.submit(broker::readChatLine);
+                writer.write("late\nreal\n");
+                writer.flush();
+                assertThat(chat.get(1, TimeUnit.SECONDS)).isEqualTo("real");
+                assertThat(output.toString()).contains("这行输入已丢弃");
+            } finally {
+                writer.close();
+                executor.shutdownNow();
+            }
+        }
+    }
 }
