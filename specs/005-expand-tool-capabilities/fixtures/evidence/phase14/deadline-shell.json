@@ -1,0 +1,43 @@
+{
+  "status": "PASS",
+  "executed": true,
+  "recordedAt": "2026-11-19T11:24:42.576380+08:00",
+  "timezone": "Asia/Shanghai",
+  "command": "mvn -B -ntp verify",
+  "counts": {
+    "actions": 20,
+    "auditBegin": 20,
+    "auditComplete": 20,
+    "cleanupConfirmed": 20
+  },
+  "timing": {
+    "samplesMs": [
+      803.974833,
+      803.482,
+      803.702541,
+      803.509459,
+      806.799209,
+      803.07375,
+      807.292667,
+      804.879375,
+      803.135,
+      803.766708,
+      804.360625,
+      803.128417,
+      804.802834,
+      804.648,
+      806.920458,
+      804.846417,
+      803.044042,
+      820.569708,
+      803.609875,
+      807.3635
+    ],
+    "p95Ms": 807.3635,
+    "budgetMs": 800,
+    "cleanupWindowMs": 1000
+  },
+  "evidence": [
+    "deadline-samples-final.json"
+  ]
+}

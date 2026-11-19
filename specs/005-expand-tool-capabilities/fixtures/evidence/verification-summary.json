@@ -1,0 +1,14 @@
+{
+  "recordedAt": "2026-11-19T02:45:59.717558+08:00",
+  "classes": 134,
+  "tests": 666,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "reactor": "10/10 SUCCESS",
+  "elapsed": "05:56",
+  "finishedAt": "2026-11-19T02:41:29+08:00",
+  "database": "004:2 classes/7 methods; 005:13 classes, refreshed Plugin/MCP reports",
+  "readOnlyAnalysis": "no unresolved CRITICAL/HIGH; 62/62 requirements mapped",
+  "external": "NOT_RUN"
+}

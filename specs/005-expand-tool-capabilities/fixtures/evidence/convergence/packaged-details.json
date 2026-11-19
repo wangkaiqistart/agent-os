@@ -1,0 +1,68 @@
+{
+  "allowed": {
+    "readinessProbes": 2,
+    "modelCalls": 2,
+    "definitions": [
+      "ask_user",
+      "edit_file",
+      "glob",
+      "grep",
+      "http_get",
+      "http_post",
+      "list_dir",
+      "mcp_fixture__echo",
+      "read_file",
+      "shell",
+      "web_search",
+      "write_file"
+    ],
+    "feedbackIds": [
+      "call-ask_user",
+      "call-edit_file",
+      "call-glob",
+      "call-grep",
+      "call-http_get",
+      "call-http_post",
+      "call-list_dir",
+      "call-mcp_fixture__echo",
+      "call-read_file",
+      "call-shell",
+      "call-web_search",
+      "call-write_file"
+    ],
+    "networkActions": 3
+  },
+  "denied": {
+    "readinessProbes": 0,
+    "modelCalls": 2,
+    "definitions": [],
+    "feedbackIds": [
+      "call-ask_user",
+      "call-edit_file",
+      "call-glob",
+      "call-grep",
+      "call-http_get",
+      "call-http_post",
+      "call-list_dir",
+      "call-mcp_fixture__echo",
+      "call-read_file",
+      "call-shell",
+      "call-web_search",
+      "call-write_file"
+    ],
+    "networkActions": 0
+  },
+  "audits": {
+    "rows": 24,
+    "complete": 24,
+    "success": 12,
+    "denied": 12
+  },
+  "environmentIsolation": {
+    "hostCredentialInjected": true,
+    "shellDeniedRead": true,
+    "stdioDeniedRead": true,
+    "explicitBusinessRead": true,
+    "safeFeedbackAuditLogCatalog": true
+  }
+}

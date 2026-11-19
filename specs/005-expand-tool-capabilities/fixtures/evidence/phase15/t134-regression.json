@@ -1,0 +1,73 @@
+{
+  "recordedAt": "2026-11-19T12:23:47.532088+08:00",
+  "timezone": "Asia/Shanghai",
+  "status": "PASS",
+  "task": "T134",
+  "evidenceClass": "JUnit and actual PostgreSQL application regression; local model protocol fixture",
+  "verifiedAssertions": [
+    "first call executes once with original callId/source/attempts",
+    "second call actions zero after false or in-flight cleanup",
+    "ordinary business failure also terminates on unconfirmed cleanup",
+    "no next model iteration or replay; no partial tool history; session lease released",
+    "ordinary errors can continue and audit/lease/turn timeout terminal reasons retain priority",
+    "cleanup uncertainty and persistence confirmation are reported separately"
+  ],
+  "cases": [
+    {
+      "class": "AgentServiceFailureTest",
+      "method": "cleanupUncertaintyTerminatesWithoutReplayAndSeparatesPersistenceConfirmation",
+      "status": "PASS",
+      "seconds": 0.008,
+      "report": "AgentOS-core/target/surefire-reports/TEST-com.agentos.core.turn.AgentServiceFailureTest.xml"
+    },
+    {
+      "class": "GovernedScopeContractTest",
+      "method": "unconfirmedCleanupStopsOfficialBatchEvenAfterBusinessFailure(boolean)[1]",
+      "status": "PASS",
+      "seconds": 0.046,
+      "report": "AgentOS-tool/target/surefire-reports/TEST-com.agentos.tool.govern.GovernedScopeContractTest.xml"
+    },
+    {
+      "class": "GovernedScopeContractTest",
+      "method": "unconfirmedCleanupStopsOfficialBatchEvenAfterBusinessFailure(boolean)[2]",
+      "status": "PASS",
+      "seconds": 0.018,
+      "report": "AgentOS-tool/target/surefire-reports/TEST-com.agentos.tool.govern.GovernedScopeContractTest.xml"
+    },
+    {
+      "class": "GovernedScopeContractTest",
+      "method": "toolInitiatedCloseCannotHideInFlightCleanupFromGovernance",
+      "status": "PASS",
+      "seconds": 0.02,
+      "report": "AgentOS-tool/target/surefire-reports/TEST-com.agentos.tool.govern.GovernedScopeContractTest.xml"
+    },
+    {
+      "class": "GovernedScopeContractTest",
+      "method": "cleanupUncertaintyPreservesExistingFatalReasons",
+      "status": "PASS",
+      "seconds": 0.011,
+      "report": "AgentOS-tool/target/surefire-reports/TEST-com.agentos.tool.govern.GovernedScopeContractTest.xml"
+    },
+    {
+      "class": "AgentOsToolExecutionExceptionProcessorTest",
+      "method": "fatalErrorsPassThroughRealOfficialManagerWhileBusinessErrorIsSafe",
+      "status": "PASS",
+      "seconds": 0.21,
+      "report": "AgentOS-tool/target/surefire-reports/TEST-com.agentos.tool.govern.AgentOsToolExecutionExceptionProcessorTest.xml"
+    },
+    {
+      "class": "GovernedToolCallbackTest",
+      "method": "officialMethodAdapterCannotHideSandboxOrFatalSignals",
+      "status": "PASS",
+      "seconds": 0.026,
+      "report": "AgentOS-tool/target/surefire-reports/TEST-com.agentos.tool.govern.GovernedToolCallbackTest.xml"
+    },
+    {
+      "class": "ToolCapabilityMatrixIntegrationTest",
+      "method": "cleanupUncertaintyStopsBatchAndModelWithConfirmedPostgresAudit(ApplicationContext)",
+      "status": "PASS",
+      "seconds": 0.091,
+      "report": "AgentOS-boot/target/surefire-reports/TEST-com.agentos.boot.ToolCapabilityMatrixIntegrationTest.xml"
+    }
+  ]
+}

@@ -13,14 +13,16 @@
 [![Spring AI](https://img.shields.io/badge/Spring%20AI-2.0.x-6DB33F)](https://docs.spring.io/spring-ai/reference/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%2B%20%2B%20pgvector-336791)](https://github.com/pgvector/pgvector)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Status](https://img.shields.io/badge/status-design-lightgrey)](#路线图)
+[![Status](https://img.shields.io/badge/status-development-blue)](#路线图)
 
 [简介](#简介) · [特性](#特性) · [架构](#架构) · [快速开始](#快速开始) · [定义一个 Agent](#定义一个-agent) · [REST API](#rest-api) · [路线图](#路线图) · [文档](#文档) · [参与贡献](#参与贡献)
 
 </div>
 
 > [!NOTE]
-> 项目目前处于**设计阶段**：仓库里只有设计文档，代码尚未提交。本文的命令和接口描述的是 1.0 的目标形态。
+> 当前代码已包含Provider、ReAct、CLI及005工具扩展。005交付11个内置工具、Java插件、三种MCP客户端和只读目录查询。
+> 隔离验证、外部兼容和真实模型评估分别记录在[005验收材料](specs/005-expand-tool-capabilities/quickstart.md)；未运行不计通过。
+> 下文长期记忆、通知、定时调度及完整REST端点仍描述目标形态。当前生产查询入口仅为工具目录，调试API不代表完整服务。
 
 ## 简介
 
@@ -35,10 +37,10 @@ AgentOS 只做运行时，不做可视化编排。需要复杂 workflow 时，�
 - **对接 LLM**：基于 Spring AI 2.0 的 `ChatModel` 抽象，支持 OpenAI、Anthropic、DeepSeek、Ollama，以及通义千问、Kimi、智谱等提供 OpenAI 兼容接口的模型。每个 Agent 按名称选择 Provider，切换模型不改业务。
 - **ReAct 循环，组件全部来自 Spring AI 2.0**：Reason → Act → Observe，直到没有工具调用或达到最大轮数。循环由 AgentOS 驱动，工具执行用 Spring AI 的 `ToolCallingManager`（调用次数限制、异常反馈、观测随之生效），上下文用 `ToolContext`，同步与流式两种调用方式共用一套循环。每次工具调用都经过沙箱检查并写入审计表，单次模型调用、单个工具、整轮处理各有超时。
 - **三层记忆**：会话消息逐条写入 PostgreSQL，按轮次截断后进入 prompt，跨重启恢复；长期记忆分核心区和归档区，后端可选 Markdown 文件、PostgreSQL 或自托管 Mem0，配置 Embedding 后通过 pgvector 做语义检索；情景记忆在扩展阶段补齐。
-- **三档工具扩展**：零代码（写 `AGENT.md` 并复用现成 MCP server）、轻代码（任意语言写 MCP server）、重代码（Java `@Tool` Bean）。内置文件、Shell、HTTP、记忆、通知九个工具；工具多时按需暴露，减少工具定义占用的 token。
+- **三档工具扩展**：零代码（写 `AGENT.md` 并复用现成 MCP server）、轻代码（任意语言写 MCP server）、重代码（Java `@Tool` Bean）。当前内置文件读写/编辑/搜索、Shell、HTTP GET/POST、ask_user、Brave web_search共11个工具；按Agent精确声明授权。Memory、Notify和工具渐进暴露延期。
 - **REST API**：10 个核心端点覆盖会话、Agent 调用、配置、记忆、工具和系统状态，业务系统用 HTTP 即可集成。
 - **定时触发**：在 `AGENT.md` 里声明 cron，`AgentScheduler` 到点自动运行 Agent，与 CLI、REST 走同一条处理链路；多实例部署时用 ShedLock 保证同一任务只跑一份。
-- **安全与审计**：沙箱用接口先行的设计，核心阶段是应用层白名单（路径、可执行文件、域名）；`tool_invocations` 和 `llm_calls` 从第一个版本开始落库，记录到每一轮的每一次迭代（含 token 用量、缓存命中、限流余量）；只有声明为幂等的工具才自动重试；密钥通过 `${ENV_VAR}` 注入，不写进配置文件。
+- **安全与审计**：沙箱用接口先行的设计，核心阶段是应用层白名单（路径、可执行文件、域名）；`tool_invocations` 和 `llm_calls` 从第一个版本开始落库，记录到每一轮的每一次迭代（含 token 用量、缓存命中、限流余量）；仅明确未开始的幂等瞬时故障最多重试一次，副作用和结果未知不重放；密钥通过 `${ENV_VAR}` 注入，不写进配置文件。
 - **可评估**：三个验收 Demo 用 Spring AI 的 `FactCheckingEvaluator`、`RelevancyEvaluator` 做回归测试，切换模型时有据可查。
 - **部署简单**：一个可执行 JAR 加一个 PostgreSQL（带 pgvector 扩展）即可运行，后续提供 GraalVM Native Image。
 
@@ -90,8 +92,8 @@ AGENTOS_DB_URL=jdbc:postgresql://db-host:5432/agentos
 AGENTOS_DB_USERNAME=agentos
 AGENTOS_DB_PASSWORD=******
 
-# 主链路模型（OpenAI 兼容接口），base-url 不带 /v1
-AGENTOS_LLM_BASE_URL=https://llm-host
+# 主链路模型（OpenAI 兼容接口），base-url 写到 /v1
+AGENTOS_LLM_BASE_URL=https://llm-host/v1
 AGENTOS_LLM_API_KEY=sk-******
 AGENTOS_LLM_MODEL=gpt-5.6-luna
 
@@ -147,6 +149,20 @@ curl -X POST http://localhost:8080/api/v1/agents/weather/invoke \
   -H 'Content-Type: application/json' \
   -d '{"message": "北京今天适合穿什么？"}'
 ```
+
+### 查询工具（005）
+
+```bash
+java -jar AgentOS-boot/target/AgentOS.jar tool list --workspace .AgentOS --json
+java -jar AgentOS-boot/target/AgentOS.jar --config /path/catalog.yaml tool serve --workspace .AgentOS
+```
+
+list无需数据库/模型；serve需显式开启`agentos.tools.query.enabled`并把`access-token`设置为`${AGENTOS_TOOL_QUERY_TOKEN}`，
+令牌长度16–4096 UTF-8字节。默认回环`127.0.0.1:8080`；HTTP只读路由`GET /api/v1/tools`使用Bearer头，禁止URL令牌。
+远程监听由部署者提供TLS。不要把真实令牌放命令参数或日志。
+文件读写根和Shell程序/cwd默认拒绝；统一30s预算、10000字符结果。协作文件写入要求外部写方遵守同一sidecar锁协议。
+Shell/MCP宿主授权限制直接目标，获准程序内部行为需要部署者控制。Brave缺凭证时UNCONFIGURED。
+配置、接入及可重放证据见[005 quickstart](specs/005-expand-tool-capabilities/quickstart.md)。
 
 ## 定义一个 Agent
 

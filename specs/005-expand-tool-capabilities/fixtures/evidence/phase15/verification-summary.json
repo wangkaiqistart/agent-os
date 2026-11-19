@@ -1,0 +1,116 @@
+{
+  "recordedAt": "2026-11-19T12:27:34.762134+08:00",
+  "timezone": "Asia/Shanghai",
+  "status": "PASS",
+  "feature": "005-expand-tool-capabilities",
+  "phase": 15,
+  "verify": {
+    "command": "mvn -B -ntp verify",
+    "startedAt": "2026-11-19T11:44:30.480257+08:00",
+    "finishedAt": "2026-11-19T11:51:04+08:00",
+    "duration": "06:32 min",
+    "classes": 133,
+    "tests": 689,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "modulesPassed": 10,
+    "log": "/tmp/agentos-005-phase15-verify.log"
+  },
+  "packaged": {
+    "status": "PASS",
+    "allowed": 12,
+    "denied": 12,
+    "auditComplete": 24,
+    "jarSha256": "1c770456e4cee3004b8d3d1eedcbaed3a54f3c3a1b1f6cd1ea84ad02182a9904",
+    "evidence": "packaged-evidence.json",
+    "firstAttempt": {
+      "status": "FAIL",
+      "failureClass": "TimeoutExpired",
+      "failureLine": 188,
+      "evidence": "attempt1/packaged-details.json"
+    },
+    "replay": "Same JAR and original acceptance limits; standalone replay passed; initial timeout cause not established"
+  },
+  "postVerifyToolReplay": {
+    "status": "PASS",
+    "tests": 16,
+    "classes": [
+      "ManagedProcessTest",
+      "ShellToolsContractTest",
+      "McpFailureBoundaryTest"
+    ],
+    "reason": "Later reports contained startup/wait timing failures after the successful verify; isolated replay passed; no source or limit changes",
+    "log": "/tmp/agentos-005-phase15-final-tool-replay.log"
+  },
+  "deadline": {
+    "samplesPerType": 20,
+    "p95Ms": {
+      "http_get": 818.48225,
+      "mcp_fixture__echo": 926.107959,
+      "shell": 806.155291,
+      "ask_user": 826.455333,
+      "web_search": 827.51325
+    },
+    "evidence": "deadline-samples-final.json"
+  },
+  "processCleanup": {
+    "samples": 40,
+    "status": "PASS",
+    "evidence": "process-cleanup-final.json",
+    "command": "mvn -B -ntp verify"
+  },
+  "database": {
+    "status": "PASS",
+    "image": "pgvector/pgvector:pg17",
+    "capabilityClasses": 13,
+    "priorClasses": 2,
+    "priorKeyMethods": 7,
+    "refreshedClasses": [
+      "PluginToolAcceptanceIntegrationTest",
+      "McpToolAcceptanceIntegrationTest"
+    ],
+    "checkerOfflineTests": 9
+  },
+  "regression": {
+    "task": "T134",
+    "status": "PASS",
+    "cases": 8,
+    "evidence": "t134-regression.json"
+  },
+  "protectedHashes": {
+    ".specify/memory/constitution.md": "94b4e557a6a756f632268c9594786429ae0c8654d717afa0ce7b32be48416b8b",
+    "specs/005-expand-tool-capabilities/checklists/requirements.md": "45b3b35503623f2389f18f488428f7181017d1616df30f4e4add59433d283131"
+  },
+  "checklistUnchanged": true,
+  "hooksPresent": false,
+  "syntheticSecretLogHits": 0,
+  "evidenceSchema": {
+    "validated": 6,
+    "draft": "2020-12",
+    "formatChecker": true
+  },
+  "analysis": {
+    "status": "PASS",
+    "requirements": 62,
+    "covered": 62,
+    "tasks": 134,
+    "newIssues": 0
+  },
+  "externalValidation": {
+    "models": "NOT_RUN",
+    "officialEvaluators": "NOT_RUN",
+    "Brave": "NOT_RUN",
+    "externalMcp": "NOT_RUN"
+  },
+  "delivery": {
+    "committed": false,
+    "pushed": false,
+    "merged": false,
+    "published": false
+  },
+  "tasks": {
+    "total": 134,
+    "completed": 134
+  }
+}

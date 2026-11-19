@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "executed": true,
+  "recordedAt": "2026-11-19T10:49:20.792686+08:00",
+  "timezone": "Asia/Shanghai",
+  "command": "python3 fixtures/full_tool_acceptance.py --jar AgentOS.jar --output evidence",
+  "counts": {
+    "actions": 12,
+    "auditBegin": 24,
+    "auditComplete": 24,
+    "cleanupConfirmed": 1
+  },
+  "evidence": [
+    "packaged-details.json"
+  ]
+}

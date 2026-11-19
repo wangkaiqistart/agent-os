@@ -1,0 +1,130 @@
+openapi: 3.1.0
+info:
+  title: AgentOS Tool Catalog Query
+  version: 0.1.0
+  description: 005 目标契约；只读目录查询，不执行模型、工具或创建会话/轮次。
+servers:
+  - url: http://127.0.0.1:8080
+paths:
+  /api/v1/tools:
+    get:
+      operationId: listTools
+      summary: 查询工具及来源的同一版本快照
+      security:
+        - catalogBearer: []
+      parameters:
+        - name: agent
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+          description: 工作区 Agent 目录名；只在认证通过后解析。省略为全局视图。
+      responses:
+        '200':
+          description: 查询成功；不可用来源仍是正常内容
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CatalogResponse'}
+        '400':
+          description: 认证通过后的非法参数或 Agent 工具配置
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '401':
+          description: 缺失或错误令牌；先于任何目录或 Agent 读取，固定未认证响应
+          headers:
+            WWW-Authenticate:
+              schema: {type: string, const: Bearer}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UnauthorizedResponse'}
+        '404':
+          description: 认证通过后 Agent 不存在；入口未配置或关闭时亦不装配该路径
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: 固定安全内部错误，不附配置/SDK 异常
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+components:
+  securitySchemes:
+    catalogBearer:
+      type: http
+      scheme: bearer
+      description: 仅接受 Authorization 头；回环也需认证。未配置有效令牌时入口不存在。
+  schemas:
+    ToolItem:
+      type: object
+      additionalProperties: false
+      required: [name, description, source, status, authorized, visible]
+      properties:
+        name: {type: string, pattern: '^[A-Za-z0-9_-]{1,64}$'}
+        description: {type: string, maxLength: 4000}
+        source: {type: string}
+        status: {type: string, enum: [AVAILABLE, UNAVAILABLE, UNCONFIGURED]}
+        authorized:
+          type: [boolean, 'null']
+          description: 全局视图为 null，Agent 视图表示显式授权
+        visible:
+          type: [boolean, 'null']
+          description: 全局视图为 null，Agent 视图与该快照模型可见集合一致
+    SourceItem:
+      type: object
+      additionalProperties: false
+      required: [source, status, reason]
+      properties:
+        source: {type: string}
+        status:
+          type: string
+          enum: [CONFIGURED, CONNECTING, AVAILABLE, UNAVAILABLE, UNCONFIGURED, CLOSING, CLOSED]
+        reason:
+          type: [string, 'null']
+          description: 安全固定分类，不是异常文本或连接地址
+    Catalog:
+      type: object
+      additionalProperties: false
+      required: [version, capturedAt, agent, tools, sources]
+      properties:
+        version: {type: string}
+        capturedAt: {type: string, format: date-time}
+        agent: {type: [string, 'null']}
+        tools:
+          type: array
+          items: {$ref: '#/components/schemas/ToolItem'}
+        sources:
+          type: array
+          items: {$ref: '#/components/schemas/SourceItem'}
+    CatalogResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data, timestamp]
+      properties:
+        code: {type: string, const: OK}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/Catalog'}
+        timestamp: {type: string, format: date-time}
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data, timestamp]
+      properties:
+        code: {type: string, enum: [INVALID_ARGUMENT, NOT_FOUND, INTERNAL_ERROR]}
+        message: {type: string}
+        data: {type: 'null'}
+        timestamp: {type: string, format: date-time}
+    UnauthorizedResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, data, timestamp]
+      properties:
+        code: {type: string, const: UNAUTHORIZED}
+        message: {type: string, const: 未认证}
+        data: {type: 'null'}
+        timestamp: {type: string, format: date-time}

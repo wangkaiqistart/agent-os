@@ -1,0 +1,16 @@
+{
+  "status": "FAIL",
+  "executed": true,
+  "recordedAt": "2026-11-19T11:54:06.199332+08:00",
+  "timezone": "Asia/Shanghai",
+  "command": "python3 fixtures/full_tool_acceptance.py --jar AgentOS.jar --output evidence",
+  "counts": {
+    "actions": 0,
+    "auditBegin": 0,
+    "auditComplete": 0,
+    "cleanupConfirmed": 1
+  },
+  "evidence": [
+    "packaged-details.json"
+  ]
+}

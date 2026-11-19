@@ -1,0 +1,187 @@
+{
+  "task": "T135",
+  "status": "PASS",
+  "red": {
+    "command": "mvn -B -ntp -pl AgentOS-boot -am -Dtest=HttpPostAcceptanceIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "log": "/tmp/agentos-005-phase16-red.log",
+    "observed": "deadline after body arrival returned timeout text without submission warning"
+  },
+  "greenCases": [
+    {
+      "class": "com.agentos.core.tool.ToolExecutionScopeTest",
+      "test": "lesserDeadlineIsFixedAndChecksCancellationAndLease",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.tool.ToolExecutionScopeTest",
+      "test": "interruptedCleanupWaitIsStickyUnconfirmedAndDoesNotExtendDeadline",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.tool.ToolExecutionScopeTest",
+      "test": "recursiveCloseAndCancelledInterruptedCallerDoNotWaitForThemselves",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.tool.ToolExecutionScopeTest",
+      "test": "concurrentCloseNeverConfirmsInFlightCleanupAndSharesTerminalResult",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.tool.ToolExecutionScopeTest",
+      "test": "cancellationStopsQueuedCheckpointBeforeTheOriginalDeadline",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.tool.ToolExecutionScopeTest",
+      "test": "resourcesShareOneCleanupDeadlineAndUnregisterDoesNotCancel",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.tool.ToolExecutionScopeTest",
+      "test": "queuedCheckpointExpiresWithoutStartingAnotherLeaseRenewal",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.tool.ToolExecutionScopeTest",
+      "test": "concurrentIoCheckpointsDoNotCompeteForTheSameLease",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "auditUncertaintyCannotBecomeConfirmedThroughSuccessfulFinish",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "laterConfirmedSubmissionCannotEraseAnEarlierPendingSubmission",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "closingCancelsWaitAndReleasesOwnLeaseWithoutWaitingForModel",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "pendingSubmissionSurvivesFatalSignalsAndIndependentPersistenceFailure",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "lateTimeoutUsesAlreadyRecoveredDatabaseState",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "recoveredTerminalStateWinsOverLateLocalSuccess",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "finishFailureIsUnconfirmedAndDoesNotRepeatLoop",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "cleanupUncertaintyTerminatesWithoutReplayAndSeparatesPersistenceConfirmation",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.core.turn.AgentServiceFailureTest",
+      "test": "unknownStartNeverReplaysAndNeverCallsModelWhenUnconfirmed(CapturedOutput)",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.http.HttpPostDeadlineTest",
+      "test": "receivedThenDisconnectedOrSlowResponseIsNeverResent",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.http.HttpPostDeadlineTest",
+      "test": "cancellationAndLeaseLossStopWaitingAndCauseZeroFurtherSubmissions",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.http.HttpPostDeadlineTest",
+      "test": "leaseLossAfterBodyArrivalKeepsExplicitSubmissionPending",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "cleanupUncertaintyPreservesExistingFatalReasons",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "workerClosePreservesFatalReasonWithoutCancellingOrWaitingForItself",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "unconfirmedCleanupStopsOfficialBatchEvenAfterBusinessFailure(boolean)[1]",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "unconfirmedCleanupStopsOfficialBatchEvenAfterBusinessFailure(boolean)[2]",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "beginFailureIsZeroActionsAndCompletionUncertaintyNeverReplays",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "toolInitiatedCloseCannotHideInFlightCleanupFromGovernance",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "selfClosedWorkerCannotConfirmCleanupWhileStillRunning",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "governorWaitsForWorkerInitiatedCleanupWithinTheExistingWindow",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "structuredResultRemainsValidJsonAndCarriesTruncation",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "nonCooperativeDelegateCannotBeReportedAsStoppedOrReplayed",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.tool.govern.GovernedScopeContractTest",
+      "test": "schemaRefusalIsAuditedWithOriginalSourceBeforeAnyAction",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.boot.HttpPostAcceptanceIntegrationTest",
+      "test": "receivedPostRetainsSubmissionWarningAcrossFatalTermination(ApplicationContext)",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.boot.HttpPostAcceptanceIntegrationTest",
+      "test": "postUsesOriginalCallAndOneSubmissionDespiteUnknownCompletion(ApplicationContext)",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.boot.ToolCapabilityMatrixIntegrationTest",
+      "test": "cleanupUncertaintyStopsBatchAndModelWithConfirmedPostgresAudit(ApplicationContext)",
+      "status": "PASS"
+    },
+    {
+      "class": "com.agentos.boot.ToolCapabilityMatrixIntegrationTest",
+      "test": "everyToolHonorsVisibilityArgumentsAuditAndCancellation(ApplicationContext)",
+      "status": "PASS"
+    }
+  ],
+  "terminalEvidence": "post-terminal-samples.json"
+}

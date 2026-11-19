@@ -549,7 +549,7 @@ AgentOS 的所有工具都是 Spring AI 的 `ToolCallback`：`getToolDefinition(
 6. 更新原 tool_invocations 终态（含实际尝试数、结果状态、原始长度）；完成写入无法确认时，在原 hard stop 内尽力将原 in_progress 标为 unconfirmed，报告操作可能已发生并停止本轮。数据库持续不可用时不伪称标记成功；崩溃遗留的 in_progress 由恢复清理改 interrupted
 7. 失败时抛 `ToolExecutionException`，交给异常处理器（见下文）
 
-Sandbox 检查不放在装饰器里，而在内置工具内部：只有工具自己知道要访问的路径、命令或 URL（见 6.7）。MCP 工具在独立进程里执行，不经过 AgentOS 的 Sandbox，靠 MCP server 自身配置和 `McpToolFilter` 约束暴露范围。
+Sandbox 检查不放在装饰器里，而在内置工具内部：只有工具自己知道要访问的路径、命令或 URL（见 6.7）。MCP 连接程序、cwd 和实际连接 URL 受本机 Sandbox 授权；远端服务内部动作由服务自身配置控制，AgentOS 不提供进程内部隔离。暴露范围由 `McpToolFilter` 约束，执行还必须同时满足 Agent 对精确工具名与 `mcp_servers` 的声明授权。
 
 **超时要真正停掉底层操作。** 装饰器的超时只是不再等结果：被中断的虚拟线程不一定会停，子进程会继续跑，阻塞的网络读也不一定响应中断。所以每类工具都要在自己的 I/O 层设超时，装饰器的超时略大于这些值，只作外层兜底：
 
@@ -576,7 +576,7 @@ HTTP 客户端的异常信息经常带完整 URL，所以 `error_message` 也要
 | `timeout` | 单次执行超时 | 30s |
 | `max_result_chars` | 返回给模型的结果最多多少字符；需要全文时由工具自己提供分页参数（如 `read_file` 的 `offset`） | 10000 |
 
-策略来源：内置工具写死（`read_file`、`list_dir`、`http_get`、`recall_memory` 为幂等；`write_file`、`shell`、`http_post`、`save_memory`、`notify` 不幂等，`shell` 超时 60s，`read_file` 结果上限 20000 字符）；`@Tool` Bean 在方法上加 AgentOS 的 `@ToolPolicy(idempotent = true, timeout = "10s")`；MCP 工具默认不幂等，可在 `mcp_servers.yaml` 里按工具名覆盖。
+策略来源：005内置读取/列表/搜索工具为幂等，`write_file`、`edit_file`、`shell`、`http_post`、`ask_user`不自动重试；当前工具默认30s、结果上限10000字符。Memory/Notify仍为后续设计；`@Tool` Bean 在方法上加 AgentOS 的 `@ToolPolicy(idempotent = true, timeout = "10s")`；MCP 工具默认不幂等，可在 `mcp_servers.yaml` 里按工具名覆盖。
 
 **为什么只重试幂等工具。** `notify`、`http_post`、`write_file` 有副作用，失败可能发生在副作用之后（比如消息已经发出、响应超时），自动重试会重复推送或重复写入。非幂等工具失败时，错误信息里注明"操作可能已部分执行"，由模型决定下一步。
 
@@ -584,6 +584,15 @@ HTTP 客户端的异常信息经常带完整 URL，所以 `error_message` 也要
 
 - Sandbox 拒绝、工具超时、业务错误：转成错误消息作为工具结果返回模型，模型可以换工具或向用户解释。消息里写明工具名、失败原因、是否值得重试。
 - TurnDeadlineExceededException、LeaseLostException、AuditWriteException放进重抛名单，直接结束本轮；租约丢失和审计失败不能当普通工具错误继续。
+- POST 在实际发送边界通过显式 scope/budget 登记本次提交，仅成功响应、治理、清理与完成审计均确认后解除。
+  未确认时，即使整轮超时、取消或租约丢失，最终文本、终结错误回调及新确认的轮次 final_text 都追加“提交可能已生效”。
+  不改变原终止状态、持久化确认或共享 hard stop；前置拒绝不登记，后续提交成功不清除此前的不确定性。
+  同一scope的并发I/O检查点串行续租，锁等待扣原预算，获取锁及续租返回后再检查截止时间；不因本轮线程互相争抢会话行锁而提前误判租约失效。
+  仍 RUNNING 的失效租约轮次只保存固定安全警告；已有数据库终态始终优先，不覆盖接管结果或清理新 owner 租约。
+- 资源清理未确认时抛 `ToolCleanupUnconfirmedException` 终止本轮，即使委托同时发生普通业务错误，也不执行同批后续工具、不进入下一次模型迭代或重放。先有界完成原调用审计，再报告清理不确定；轮次持久化确认单独表达，原截止时间及资源清理/审计共用的1秒窗口不变。已有审计失败、租约丢失和整轮超时保留原终止原因。
+  治理工作线程在启动前登记所有权；自身关闭 scope 只清理其他资源，实际退出前整体清理仍未确认。
+  外部关闭仍取消并确认委托实际退出，避免自我取消/等待遮盖原致命原因；Future 取消本身不等于退出确认。
+  工作线程清理已在途时，治理方在原共享窗口内等待其退出，再判定清理并完成审计，不提前发布终结结果。
 - `spring.ai.tools.throw-exception-on-error` 保持默认的 `false`。
 
 tool_invocations由GovernedToolCallback先记后做、结束更新。只对审计瞬时写故障作有限重试，稳定写入ID/唯一键保证提交结果未知时不双记；不重发模型或重复执行工具。持续数据库故障停止轮次、写安全ERROR并报告持久化未确认，不能保证缺失模型用量自动补齐；数据库恢复后按失效租约和终态孤儿工具记录回收，不把日志视为落库成功。
@@ -596,19 +605,26 @@ tool_invocations由GovernedToolCallback先记后做、结束更新。只对审�
 
 ![Tool 调用流程：LLM 决定调用 → AgentOS 执行 → 外部世界 → 结果回填](../website/public/images/docs-tool-flow.svg)
 
-### 6.2 内置 Tool（九个）
+### 6.2 内置 Tool（005：十一个）
 
-> **004 首期实现边界（2026-11-18）**：当前仅注册 `http_get`，已接入统一授权、治理、审计和预算；本节其余工具及 6.3–6.5 的完整三档扩展仍为目标设计。没有自动扫描任意 `@Tool` Bean，MCP、文件/Shell、Memory/Notify 工具、交互/搜索及 `tool list` 尚未实现。004 Phase 4–7 不等于完整 Tool 体系交付。
+005交付既有`http_get`和10个新增工具；代码与隔离验收见`specs/005-expand-tool-capabilities/`。
+真实Brave/外部MCP兼容性与真实模型评估按独立证据记录，不能由本地协议替身推断。
 
-核心阶段提供九个内置 Tool，分五组：
+| 实现 | 工具 | 默认边界 |
+|---|---|---|
+| FileTools | read_file/write_file/list_dir/edit_file/grep/glob | 严格UTF-8；单文件1MiB；结果200项、扫描1000项；独立读写授权 |
+| ShellTools | shell | 精确真实程序+独立argv；输出64KiB；环境清空后显式构造 |
+| HttpTools | http_get/http_post | 域名白名单；请求/响应1MiB；POST无跳转/重试 |
+| AskUserTools | ask_user | 显式入口能力；问题/回答4000字符；无人值守立即UNSUPPORTED |
+| WebSearchTools | web_search | Brave协议；查询1000字符、10条、响应1MiB；未配置隐藏并安全拒绝 |
 
-- **`FileTools`**：`read_file`、`write_file`、`list_dir`，执行前调用 `Sandbox.enforce(...)` 做路径白名单检查
-- **`ShellTools`**：`shell` Tool 直接执行白名单内的可执行文件与参数数组，带超时；不经 Shell 解释
-- **`HttpTools`**：`http_get`、`http_post`，带域名白名单
-- **`MemoryTools`**：`save_memory`、`recall_memory`（归 Memory 模块，但作为内置 Tool 注册）
-- **`NotifyTools`**：`notify`（把消息推送到全局注册表中按名引用的通知渠道，详见 6.8）
+默认工具/整轮预算30s、结果10000字符；共享1s清理窗口。只有明确未开始的幂等瞬时失败才可重试一次。
+`save_memory`、`recall_memory`、`notify`、完整策略引擎和工具渐进搜索未在005实现。
 
-这九个覆盖"让 Agent 能读写文件、跑命令、调外部 API、记事、往外推通知"的最短链路。
+文件根默认空，工作根不自动授权。写入使用规范目标的进程锁和稳定sidecar FileLock，默认创建以硬链接禁止覆盖，
+显式覆盖/编辑以同目录临时文件+force+复核+ATOMIC_MOVE提交。不支持时拒绝。所有外部写方必须遵守相同锁协议，
+管理员保持目录结构稳定；不能抵御任意非协作进程的最后检查竞态。仅写权限不能读取旧正文，编辑需读写双授权。
+Shell和本地MCP授权只控制直接程序/cwd，不隔离获准程序内部的文件/网络行为；子进程树仅在可识别范围内确认清理。
 
 ![Plugin Tool 三档：零代码 AGENT.md 目录+MCP、轻代码自写 MCP server、重代码 @Tool Java Bean，门槛从低到高](../website/public/images/docs-plugin-tool-tiers.svg)
 
@@ -635,11 +651,11 @@ MCP Client 基于 Spring AI 的 `spring-ai-starter-mcp-client`（底层是官方
 - **请求超时。** 每个 server 的 `requestTimeout` 取 `mcp_servers.yaml` 里的 `timeout`（默认 30 秒），与工具策略一致（见 6.1）。
 - **关闭。** 应用关闭时逐个关闭客户端，STDIO 启动的 server 进程随之退出。
 
-**不把 `TurnContext` 发给 MCP server。** 知识库写明，默认的 `ToolContextToMcpMetaConverter.defaultConverter()` 会把 `ToolContext` 里除 exchange 键和空值以外的条目作为 MCP 调用元数据发给服务端。`TurnContext` 含会话 ID、Agent 配置和截止时间，不能外泄，这个 Java 对象也可能序列化失败。两道防线：声明 `ToolContextToMcpMetaConverter` Bean，默认用 `noOp()`，确有需要时只放行白名单字段；`GovernedToolCallback` 调用 MCP 来源的工具前，把 AgentOS 内部的键从传下去的 `ToolContext` 里去掉。
+**不把 `TurnContext` 发给 MCP server。** 知识库写明，默认的 `ToolContextToMcpMetaConverter.defaultConverter()` 会把 `ToolContext` 里除 exchange 键和空值以外的条目作为 MCP 调用元数据发给服务端。`TurnContext` 含会话 ID、Agent 配置和截止时间，不能外泄，这个 Java 对象也可能序列化失败。两道防线：在官方callback provider显式设置`ToolContextToMcpMetaConverter.noOp()`；治理后的MCP调用guard向委托传空ToolContext，因此新增交互能力键也不会泄漏。
 
 几个必须注意的点：
 
-- 关闭自动配置后，Spring AI 不再提供 `SyncMcpToolCallbackProvider` Bean，AgentOS 用自建的客户端列表构造它（构造 API 支持时传入上面的转换器；不支持也有 `GovernedToolCallback` 去键这道防线），再取出 `getToolCallbacks()` 自己包装。它本来也不会自动注册到任何 `ChatClient`。
+- 关闭自动配置后，Spring AI 不再提供 `SyncMcpToolCallbackProvider` Bean，AgentOS 用自建的客户端列表构造它（显式传入noOp转换器），再取出 `getToolCallbacks()` 自己包装。它本来也不会自动注册到任何 `ChatClient`。
 - 多个 server 同名工具靠 `McpToolNamePrefixGenerator` 加前缀消歧；Profile 的 `mcp_servers` 字段决定该 Agent 能看到哪些 server 的工具（`McpToolFilter` 全局只能有一个 Bean，按 Agent 过滤放在 `ToolRegistry` 层做）。
 - MCP 协议会话不是用户或租户隔离边界：自动配置的客户端是应用级单例，所有 Agent 共享。多租户场景要按租户单独建客户端，放扩展阶段。
 
@@ -668,7 +684,7 @@ class CrmTools {
 
 ### 6.6 ToolRegistry
 
-统一管理所有 Tool。启动时扫描 Spring 容器里含 `@Tool` 方法的 Bean（内置 Tool 和方式三的 Plugin Tool）并经 `ToolCallbacks.from(...)` 转换，加上容器里显式声明的 `ToolCallback` Bean 和 MCP Client 发现的工具（方式二），读取各自的工具策略，全部套上 `GovernedToolCallback` 保存。`forProfile(profile)` 按 `AGENT.md` 的 `tools` 和 `mcp_servers` 字段过滤出该 Agent 可用的子集。
+统一管理所有 Tool。启动时扫描 Spring 容器里含 `@Tool` 方法的 Bean（内置 Tool 和方式三的 Plugin Tool）并经 `ToolCallbacks.from(...)` 转换，加上容器里显式声明的 `ToolCallback` Bean 和 MCP Client 发现的工具（方式二），读取各自的工具策略，全部套上 `GovernedToolCallback` 保存。`resolve(profile)`在建轮次前只读一次不可变目录，按`tools`精确声明顺序和`mcp_servers`双授权固定本轮定义、执行回调及来源generation。恢复仅供新轮次，旧绑定不切换客户端。
 
 **重名校验必须自己做。** `ChatClient` 会在合并后的工具列表上检查重名，但直接调用 `ChatModel` 或自建 `ToolCallingChatOptions` 时**不会校验**：工具按名称匹配，列表里第一个同名回调会被执行，不报错也不记日志，远程 MCP 工具可能顶替同名本地工具。因此 `ToolRegistry` 在为每个 Profile 生成工具列表时调用 `ToolCallingChatOptions.validateToolCallbacks(...)`，重名则该 Agent 加载失败并记录错误。`McpToolNamePrefixGenerator` 只处理 MCP server 之间的重名，不知道本地 `@Tool` 方法。
 
@@ -849,6 +865,13 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 ## 8. 支撑模块
 
 五大核心能力之外，AgentOS 还有几个支撑模块让整个系统跑起来。这些不是运行时内核的核心能力，但缺一不可。
+
+005已增加`AgentOS [--config PATH] tool list [--workspace PATH] [--agent NAME] [--json]`与`tool serve`。
+list的JSON与HTTP data同形；目录模式不加载DataSource、Provider、AgentService、Manager或审计器，MCP只后台维护。
+serve只提供`GET /api/v1/tools`，要求`agentos.tools.query.enabled=true`与环境引用令牌（16–4096 UTF-8字节），
+默认bind-address=127.0.0.1、port=8080。先认证再加载Agent/目录；缺错重复/非法Bearer和URL令牌均固定401，
+no-store、无通配CORS。未配置入口不装配，serve安全非零退出。显式远程监听由部署者提供TLS/加密反向代理。
+查询不执行工具或同步发现；不需要数据库/模型，不用假审计器复用执行装配。
 
 ### 8.1 工作区初始化
 
@@ -1356,6 +1379,15 @@ ResponseEntity<ChatResponse, AgentDraft> result = chatClientBuilder.build()
 ## 12. 关键流程
 
 早期按"一个 Demo 验证一个能力"拆过五个流程，现改成三个每日自动运行的端到端流程：天气 = 光杆 `AGENT.md`、科技日报 = `AGENT.md` + 公共 Skill 软连接、GitHub 日报 = `AGENT.md` + `scripts/`。
+
+005验收路径：`fixtures/full_tool_acceptance.py --jar ... --output ...`运行打包隔离验收，
+`fixtures/demo_summaries.py --output ...`重放天气、Skill+搜索科技资讯、业务Java仓库三个离线Demo。
+它们只返回当前入口，不使用Memory/Notify/调度。下文含通知/定时的原始Demo属于后续目标。
+`llm/DemoEvaluationIntegrationTest`通过真实模型、真实Manager和PostgreSQL获取实际工具资料；天气/仓库用
+FactCheckingEvaluator，科技用RelevancyEvaluator，各3次且至少2次isPass。优先显式可用deepseek，否则记录primary自评。
+仅显式`-Pllm`且有测试环境凭证运行。Brave/三transport外部MCP另用`-Pexternal-tools`、总开关与各服务变量。
+默认verify不调用外部模型或工具；未运行/缺依赖为NOT_RUN。见`external-results.md`与`demo-results.md`。
+数据库检查需本轮时间戳：verify前写`target/verify-started-at`，之后运行`python3 scripts/check_db_test_reports.py --tools`。
 
 ### 12.1 Demo 一：每日天气（光杆 AGENT.md）
 

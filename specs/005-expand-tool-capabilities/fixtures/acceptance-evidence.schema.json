@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentOS 005 acceptance evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "executed",
+    "recordedAt",
+    "timezone",
+    "command",
+    "counts",
+    "evidence"
+  ],
+  "properties": {
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "NOT_RUN"
+      ]
+    },
+    "executed": {
+      "type": "boolean"
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "\\+08:00$"
+    },
+    "timezone": {
+      "const": "Asia/Shanghai"
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actions",
+        "auditBegin",
+        "auditComplete",
+        "cleanupConfirmed"
+      ],
+      "properties": {
+        "actions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "auditBegin": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "auditComplete": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cleanupConfirmed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "samplesMs",
+        "p95Ms",
+        "budgetMs",
+        "cleanupWindowMs"
+      ],
+      "properties": {
+        "samplesMs": {
+          "type": "array",
+          "minItems": 20,
+          "maxItems": 20,
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "p95Ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "budgetMs": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "cleanupWindowMs": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "仓库内脱敏证据路径；不得含凭证或外部带鉴权URL"
+      }
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 4000
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "executed": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "executed": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "NOT_RUN"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "NOT_RUN"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "executed": {
+            "const": false
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      }
+    }
+  ]
+}

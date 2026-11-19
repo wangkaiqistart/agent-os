@@ -1,0 +1,190 @@
+{
+  "recordedAt": "2026-11-19T13:59:27.539422+08:00",
+  "timezone": "Asia/Shanghai",
+  "status": "PASS",
+  "feature": "005-expand-tool-capabilities",
+  "phase": 16,
+  "verify": {
+    "command": "mvn -B -ntp verify",
+    "startedAt": "2026-11-19T13:51:06.866906+08:00",
+    "finishedAt": "2026-11-19T13:57:24+08:00",
+    "duration": " 06:17 min",
+    "classes": 134,
+    "tests": 699,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "modulesPassed": 10,
+    "log": "/tmp/agentos-005-phase16-verify.log"
+  },
+  "packaged": {
+    "status": "PASS",
+    "counts": {
+      "actions": 12,
+      "auditBegin": 24,
+      "auditComplete": 24,
+      "cleanupConfirmed": 1
+    },
+    "jarSha256": "2b4c0bc2e53d6f877c7cbd1040c401af0d90eaaea215e3b04e9340b3999fba08",
+    "evidence": "packaged-evidence.json"
+  },
+  "database": {
+    "status": "PASS",
+    "image": "pgvector/pgvector:pg17",
+    "checkerOfflineTests": 9,
+    "log": "/tmp/agentos-005-phase16-db-final.log",
+    "since": 1795067466.8669062,
+    "firstCheckLog": "/tmp/agentos-005-phase16-db-first.log",
+    "supplementalReplay": {
+      "classes": [
+        "PluginToolAcceptanceIntegrationTest",
+        "McpToolAcceptanceIntegrationTest"
+      ],
+      "log": "/tmp/agentos-005-phase16-db-replay.log",
+      "reason": "Fresh full-gate XML contained PostgreSQL version but omitted container startup markers; unchanged class replay refreshed required evidence",
+      "sourceOrRuleChanges": false
+    }
+  },
+  "regression": {
+    "task": "T135",
+    "cases": 35,
+    "terminalSignals": 3,
+    "evidence": "t135-regression.json"
+  },
+  "deadline": {
+    "samplesPerType": 20,
+    "p95Ms": {
+      "http_get": 822.8855,
+      "mcp_fixture__echo": 931.166209,
+      "shell": 809.741625,
+      "ask_user": 825.759375,
+      "web_search": 822.133291
+    },
+    "evidence": "deadline-samples-final.json"
+  },
+  "processCleanup": {
+    "samples": 40,
+    "status": "PASS",
+    "evidence": "process-cleanup-final.json"
+  },
+  "protectedHashes": {
+    "specs/005-expand-tool-capabilities/spec.md": "e43e7e88472ee0eb2bef51c787aa30c6b36646ede7a4c5f23a14f4da94887462",
+    "specs/005-expand-tool-capabilities/plan.md": "40467857736836975295b12dcca43a088e9c64b1e5a7fe7b3d46482930198018",
+    ".specify/memory/constitution.md": "94b4e557a6a756f632268c9594786429ae0c8654d717afa0ce7b32be48416b8b",
+    "specs/005-expand-tool-capabilities/checklists/requirements.md": "45b3b35503623f2389f18f488428f7181017d1616df30f4e4add59433d283131"
+  },
+  "hooksPresent": false,
+  "syntheticSecretLogHits": 0,
+  "evidenceSchema": {
+    "validated": 6,
+    "draft": "2020-12",
+    "formatChecker": true
+  },
+  "analysis": {
+    "requirements": 62,
+    "covered": 62,
+    "tasks": 135,
+    "unresolvedIssues": 0
+  },
+  "externalValidation": {
+    "models": "NOT_RUN",
+    "officialEvaluators": "NOT_RUN",
+    "Brave": "NOT_RUN",
+    "externalMcp": "NOT_RUN"
+  },
+  "delivery": {
+    "committed": false,
+    "pushed": false,
+    "merged": false,
+    "published": false
+  },
+  "validationHistory": {
+    "firstVerify": {
+      "status": "FAIL",
+      "log": "/tmp/agentos-005-phase16-verify-first.log",
+      "test": "ToolCapabilitiesDeadlineIntegrationTest",
+      "sample": "http_get7",
+      "expected": "TIMED_OUT",
+      "actual": "INTERRUPTED",
+      "observed": "session row lock timeout",
+      "causeConfirmed": false
+    },
+    "secondVerify": {
+      "status": "FAIL",
+      "log": "/tmp/agentos-005-phase16-verify-second.log",
+      "test": "ToolCapabilitiesDeadlineIntegrationTest",
+      "sample": "shell12",
+      "expected": "TIMED_OUT",
+      "actual": "FAILED"
+    },
+    "thirdVerify": {
+      "status": "FAIL",
+      "log": "/tmp/agentos-005-phase16-verify-third.log",
+      "test": "AskUserInputOwnershipTest",
+      "expected": "next",
+      "actual": null
+    },
+    "fourthVerify": {
+      "status": "FAIL",
+      "log": "/tmp/agentos-005-phase16-verify-fourth.log",
+      "test": "ToolCapabilitiesDeadlineIntegrationTest",
+      "sample": "shell6",
+      "expected": "TIMED_OUT",
+      "actual": "FAILED",
+      "cause": "Worker-initiated scope close cancelled and awaited its own future, masking the original fatal signal"
+    },
+    "fifthVerify": {
+      "status": "FAIL",
+      "log": "/tmp/agentos-005-phase16-verify-fifth.log",
+      "test": "ToolCapabilitiesDeadlineIntegrationTest",
+      "observed": "Shell root process still alive immediately after terminal turn result"
+    },
+    "cleanupHandoffCorrection": {
+      "tests": 1,
+      "firstTargetedLog": "/tmp/agentos-005-phase16-cleanup-handoff-first.log",
+      "firstTargetedFailure": "Governor cancellation interrupted already running worker cleanup; cancellation now coordinates atomically with cleanup ownership",
+      "redLog": "/tmp/agentos-005-phase16-cleanup-handoff-red.log",
+      "greenLog": "/tmp/agentos-005-phase16-cleanup-handoff-green.log",
+      "change": "Governance awaits worker-initiated cleanup already in progress within the original remaining shared cleanup window"
+    },
+    "workerCloseCorrection": {
+      "tests": 2,
+      "redLog": "/tmp/agentos-005-phase16-self-close-red.log",
+      "firstTargetedLog": "/tmp/agentos-005-phase16-self-close-first.log",
+      "greenLog": "/tmp/agentos-005-phase16-self-close-green.log",
+      "change": "Register worker ownership before start; self close defers worker exit confirmation; external close still cancels and awaits actual exit",
+      "firstTargetedFailure": "Active worker registration was not released after externally confirmed exit; corrected without changing assertions"
+    },
+    "cliFixtureCorrection": {
+      "tests": 3,
+      "proofLog": "/tmp/agentos-005-phase16-pipe-probe.log",
+      "greenLog": "/tmp/agentos-005-phase16-cli-fixture-green.log",
+      "change": "One live pipe writer and latch-controlled remainder; product assertions unchanged"
+    },
+    "checkpointCorrection": {
+      "tests": 3,
+      "cancellationRedLog": "/tmp/agentos-005-phase16-checkpoint-cancel-red.log",
+      "cancellationGreenLog": "/tmp/agentos-005-phase16-checkpoint-cancel-green.log",
+      "redLog": "/tmp/agentos-005-phase16-checkpoints-red.log",
+      "greenLog": "/tmp/agentos-005-phase16-checkpoints-green.log",
+      "change": "Serialize scope lease checkpoints within original budget; recheck before and after renewal"
+    },
+    "deadlineReplay": {
+      "status": "PASS",
+      "samples": 100,
+      "sourceOrLimitChanges": false,
+      "log": "/tmp/agentos-005-phase16-deadline-replay.log"
+    }
+  },
+  "finalChecks": {
+    "tasksCompleted": 135,
+    "requirementsCovered": 62,
+    "evidenceSchemaValidated": 6,
+    "diffCheck": "PASS",
+    "checklistChecked": 16,
+    "checklistTotal": 16,
+    "hooksPresent": false,
+    "checkerFinalLog": "/tmp/agentos-005-phase16-checker-tests-final.log",
+    "codeChangedAfterSuccessfulGate": false
+  }
+}

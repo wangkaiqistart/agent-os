@@ -1,0 +1,91 @@
+{
+  "recordedAt": "2026-11-19T11:25:52.942768+08:00",
+  "timezone": "Asia/Shanghai",
+  "status": "PASS",
+  "feature": "005-expand-tool-capabilities",
+  "phase": 14,
+  "verify": {
+    "command": "mvn -B -ntp verify",
+    "startedAt": "2026-11-19T11:17:16.561330+08:00",
+    "finishedAt": "2026-11-19T11:23:41+08:00",
+    "classes": 133,
+    "tests": 684,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "modulesPassed": 10,
+    "duration": "06:24 min",
+    "log": "/tmp/agentos-005-phase14-verify.log"
+  },
+  "packaged": {
+    "status": "PASS",
+    "allowed": 12,
+    "denied": 12,
+    "auditComplete": 24,
+    "jarSha256": "2d2e1349262ea164f5784cacc7a21571b27d5b62889057b66b1ae71648e10f89",
+    "evidence": "packaged-evidence.json"
+  },
+  "deadline": {
+    "samplesPerType": 20,
+    "p95Ms": {
+      "http_get": 814.88525,
+      "mcp_fixture__echo": 924.440875,
+      "shell": 807.3635,
+      "ask_user": 823.027208,
+      "web_search": 812.62325
+    },
+    "evidence": "deadline-samples-final.json"
+  },
+  "processCleanup": {
+    "samples": 40,
+    "status": "PASS",
+    "evidence": "process-cleanup-final.json"
+  },
+  "protectedHashes": {
+    ".specify/memory/constitution.md": "94b4e557a6a756f632268c9594786429ae0c8654d717afa0ce7b32be48416b8b",
+    "specs/005-expand-tool-capabilities/checklists/requirements.md": "45b3b35503623f2389f18f488428f7181017d1616df30f4e4add59433d283131"
+  },
+  "checklistUnchanged": true,
+  "hooksPresent": false,
+  "syntheticSecretLogHits": 0,
+  "evidenceSchema": {
+    "validated": 6,
+    "draft": "2020-12",
+    "formatChecker": true
+  },
+  "externalValidation": {
+    "models": "NOT_RUN",
+    "officialEvaluators": "NOT_RUN",
+    "Brave": "NOT_RUN",
+    "externalMcp": "NOT_RUN"
+  },
+  "delivery": {
+    "committed": false,
+    "pushed": false,
+    "merged": false,
+    "published": false
+  },
+  "tasks": {
+    "total": 133,
+    "completed": 133
+  },
+  "database": {
+    "status": "PASS",
+    "image": "pgvector/pgvector:pg17",
+    "capabilityClasses": 13,
+    "priorClasses": 2,
+    "priorKeyMethods": 7,
+    "refreshedClasses": [
+      "PluginToolAcceptanceIntegrationTest",
+      "McpToolAcceptanceIntegrationTest"
+    ],
+    "checkerTests": 9,
+    "log": "/tmp/agentos-005-phase14-db-final.log"
+  },
+  "targetedRegressions": {
+    "mcpPrivacyConfigCatalog": 13,
+    "scopeGovernanceProcess": 15,
+    "newTests": 8,
+    "testFirst": true
+  }
+}
