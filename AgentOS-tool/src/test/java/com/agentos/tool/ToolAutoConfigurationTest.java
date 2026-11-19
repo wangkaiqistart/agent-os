@@ -135,7 +135,7 @@ class ToolAutoConfigurationTest {
                                     return ToolDefinition.builder()
                                             .name("outside")
                                             .description("request scoped")
-                                            .inputSchema("{}")
+                                            .inputSchema("{\"type\":\"object\"}")
                                             .build();
                                 }
 
@@ -185,6 +185,22 @@ class ToolAutoConfigurationTest {
                                             .getFirst()
                                             .responseData())
                             .isEqualTo("request-scoped");
+                });
+    }
+
+    @Test
+    void queryUsesRegisteredDirectoryWhenExecutionCatalogIsCustomized() {
+        runner().withBean(
+                        "customCatalog",
+                        ToolCatalog.class,
+                        () -> mock(ToolCatalog.class),
+                        definition -> definition.setPrimary(true))
+                .run(ctx -> {
+                    assertThat(ctx).hasNotFailed();
+                    var query = ctx.getBean(com.agentos.core.tool.ToolCatalogQuery.class);
+                    assertThat(query.snapshot(null).tools())
+                            .extracting(com.agentos.core.tool.ToolCatalogView.Item::name)
+                            .contains("http_get", "shell", "read_file");
                 });
     }
 

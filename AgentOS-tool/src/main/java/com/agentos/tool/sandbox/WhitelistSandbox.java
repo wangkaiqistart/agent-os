@@ -11,8 +11,23 @@ import java.util.Locale;
 /** 默认拒绝的 HTTP 白名单；只比较 URI 中的主机，不根据 DNS 或内网地址隐式授权。 */
 public final class WhitelistSandbox implements Sandbox {
     private final List<String> domains;
+    private final com.agentos.tool.file.FileAccessPolicy files;
+    private final com.agentos.tool.process.ShellToolProperties shell;
 
     public WhitelistSandbox(List<String> domains) {
+        this(domains, null);
+    }
+
+    public WhitelistSandbox(List<String> domains, com.agentos.tool.file.FileAccessPolicy files) {
+        this(domains, files, null);
+    }
+
+    public WhitelistSandbox(
+            List<String> domains,
+            com.agentos.tool.file.FileAccessPolicy files,
+            com.agentos.tool.process.ShellToolProperties shell) {
+        this.files = files;
+        this.shell = shell;
         this.domains = domains.stream().map(s -> s.toLowerCase(Locale.ROOT)).toList();
         for (String entry : this.domains) {
             String host = entry.startsWith("*.") ? entry.substring(2) : entry;
@@ -38,6 +53,21 @@ public final class WhitelistSandbox implements Sandbox {
 
     @Override
     public void enforce(SandboxAction action) {
+        if (action.type() == ActionType.FILE_READ || action.type() == ActionType.FILE_WRITE) {
+            if (files == null) {
+                throw new SandboxViolationException("DENIED：文件未授权");
+            }
+            new com.agentos.tool.file.FileTargetResolver(files)
+                    .resolve(action.target(), action.type() == ActionType.FILE_WRITE);
+            return;
+        }
+        if (action.type() == ActionType.SHELL) {
+            if (shell == null) {
+                throw new SandboxViolationException("DENIED：程序未授权");
+            }
+            shell.authorizeExecutable(action.target());
+            return;
+        }
         if (action.type() != ActionType.HTTP) {
             throw new SandboxViolationException("沙箱拒绝非 HTTP 动作");
         }

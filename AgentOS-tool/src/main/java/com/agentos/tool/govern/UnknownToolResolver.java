@@ -51,10 +51,11 @@ public final class UnknownToolResolver implements ToolCallbackResolver {
                 };
         return new GovernedToolCallback(
                 denied,
-                new ToolPolicy(true, Duration.ofSeconds(30), 10000),
+                new ToolPolicy(false, Duration.ofSeconds(30), 10000),
                 recorder,
                 redactor,
                 perToolLimit.applyAsInt(name),
-                totalLimit);
+                totalLimit,
+                "unknown");
     }
 }

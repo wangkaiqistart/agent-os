@@ -363,6 +363,7 @@ class GovernedToolCallbackTest {
                 List.of(
                         new SandboxViolationException("denied"),
                         new AuditWriteException("audit"),
+                        new com.agentos.core.tool.ToolCleanupUnconfirmedException(),
                         new LeaseLostException(),
                         new TurnDeadlineExceededException())) {
             var recorder = mock(ToolInvocationRecorder.class);

@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.agentos.core.audit.AuditWriteException;
+import com.agentos.core.tool.ToolCleanupUnconfirmedException;
 import com.agentos.core.turn.LeaseLostException;
 import com.agentos.core.turn.TurnDeadlineExceededException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -37,7 +39,24 @@ class AgentOsToolExecutionExceptionProcessorTest {
                                     new AuditWriteException("internal token=secret"),
                                     new LeaseLostException(),
                                     new TurnDeadlineExceededException(),
+                                    new ToolCleanupUnconfirmedException(),
                                     new IllegalStateException("password=secret"))) {
+                        var followups = new AtomicInteger();
+                        ToolCallback followup =
+                                new ToolCallback() {
+                                    public ToolDefinition getToolDefinition() {
+                                        return ToolDefinition.builder()
+                                                .name("followup")
+                                                .description("后续动作")
+                                                .inputSchema("{\"type\":\"object\"}")
+                                                .build();
+                                    }
+
+                                    public String call(String input) {
+                                        followups.incrementAndGet();
+                                        return "完成";
+                                    }
+                                };
                         ToolCallback callback =
                                 new ToolCallback() {
                                     public ToolDefinition getToolDefinition() {
@@ -53,7 +72,7 @@ class AgentOsToolExecutionExceptionProcessorTest {
                                 new Prompt(
                                         List.of(new UserMessage("hi")),
                                         ToolCallingChatOptions.builder()
-                                                .toolCallbacks(callback)
+                                                .toolCallbacks(callback, followup)
                                                 .build());
                         var response =
                                 new ChatResponse(
@@ -68,6 +87,12 @@ class AgentOsToolExecutionExceptionProcessorTest {
                                                                                         "id",
                                                                                         "function",
                                                                                         "http_get",
+                                                                                        "{}"),
+                                                                                new AssistantMessage
+                                                                                        .ToolCall(
+                                                                                        "next",
+                                                                                        "function",
+                                                                                        "followup",
                                                                                         "{}")))
                                                                 .build())));
                         if (error instanceof IllegalStateException) {
@@ -78,11 +103,13 @@ class AgentOsToolExecutionExceptionProcessorTest {
                                                     .getLast()
                                                     .getText())
                                     .doesNotContain("secret");
+                            assertThat(followups).hasValue(1);
                         } else {
                             assertThatThrownBy(() ->
                                             ctx.getBean(ToolCallingManager.class)
                                                     .executeToolCalls(prompt, response))
                                     .isSameAs(error);
+                            assertThat(followups).hasValue(0);
                         }
                     }
                 });

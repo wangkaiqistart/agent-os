@@ -5,6 +5,7 @@ import com.agentos.core.audit.ToolInvocationRecord;
 import com.agentos.core.audit.ToolInvocationRecorder;
 import com.agentos.core.tool.Redactor;
 import com.agentos.core.tool.SandboxViolationException;
+import com.agentos.core.tool.ToolCleanupUnconfirmedException;
 import com.agentos.core.tool.ToolPolicy;
 import com.agentos.core.tool.TransientToolException;
 import com.agentos.core.turn.LeaseLostException;
@@ -25,23 +26,40 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 import org.springframework.ai.tool.execution.ToolExecutionException;
 import org.springframework.ai.tool.metadata.ToolMetadata;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 每个注册工具都经过此装饰器：检查租约、领取模型调用 ID、确认审计意图，再执行副作用。
  * 不负责选择工具或循环调用；这些工作仍由唯一注入的官方 Manager 完成。
  */
 public final class GovernedToolCallback implements ToolCallback {
+    private com.agentos.core.tool.ToolDescriptor registration;
+    private String source = "builtin";
+    private final com.agentos.tool.registry.ToolDefinitionValidator validator =
+            new com.agentos.tool.registry.ToolDefinitionValidator();
+
+    public GovernedToolCallback(
+            com.agentos.core.tool.ToolDescriptor descriptor,
+            ToolInvocationRecorder recorder,
+            Redactor redactor,
+            int perToolLimit,
+            int totalLimit) {
+        this(
+                descriptor.callback(),
+                descriptor.policy(),
+                recorder,
+                redactor,
+                perToolLimit,
+                totalLimit);
+        this.registration = descriptor;
+        this.source = descriptor.source();
+    }
+
     private final ToolCallback delegate;
     private final int perToolLimit;
     private final int totalLimit;
     private final ToolPolicy policy;
     private final ToolInvocationRecorder recorder;
     private final Redactor redactor;
-    private final JsonMapper json =
-            JsonMapper.builder()
-                    .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-                    .build();
 
     public GovernedToolCallback(
             ToolCallback delegate,
@@ -69,9 +87,45 @@ public final class GovernedToolCallback implements ToolCallback {
         this.redactor = redactor;
     }
 
+    public GovernedToolCallback(
+            ToolCallback delegate,
+            ToolPolicy policy,
+            ToolInvocationRecorder recorder,
+            Redactor redactor,
+            int perToolLimit,
+            int totalLimit,
+            String source) {
+        this(delegate, policy, recorder, redactor, perToolLimit, totalLimit);
+        com.agentos.core.tool.ToolDescriptor.requireSource(source);
+        this.source = source;
+    }
+
+    public com.agentos.core.tool.ToolDescriptor descriptor() {
+        var definition = getToolDefinition();
+        return new com.agentos.core.tool.ToolDescriptor(
+                definition.name(),
+                definition.description(),
+                definition.inputSchema(),
+                source,
+                registration == null ? null : registration.originalName(),
+                policy,
+                getToolMetadata(),
+                this,
+                registration == null ? delegate : registration.registrationIdentity(),
+                registration == null
+                        ? com.agentos.core.tool.ToolDescriptor.Availability.AVAILABLE
+                        : registration.availability(),
+                registration == null ? 0 : registration.generation());
+    }
+
     @Override
     public ToolDefinition getToolDefinition() {
-        return delegate.getToolDefinition();
+        var definition = delegate.getToolDefinition();
+        return ToolDefinition.builder()
+                .name(definition.name())
+                .description(redactor.summarize(definition.description(), 4000))
+                .inputSchema(definition.inputSchema())
+                .build();
     }
 
     @Override
@@ -95,6 +149,10 @@ public final class GovernedToolCallback implements ToolCallback {
         ledger.checkpoint();
         var call = ledger.next(getToolDefinition().name());
         String safeInput = summary(input, 10000);
+        var snapshot =
+                (com.agentos.core.tool.ToolCatalogSnapshot)
+                        context.getContext().get(ToolContextKeys.TOOL_SNAPSHOT);
+        String actualSource = snapshot == null ? source : snapshot.sourceOf(call.name());
         // begin 的正常返回是执行许可；失败时不会创建任务，更不会调用真实工具。
         var beginRecord =
                 new ToolInvocationRecord(
@@ -103,7 +161,7 @@ public final class GovernedToolCallback implements ToolCallback {
                         turn.iteration(),
                         call.id(),
                         call.name(),
-                        "builtin",
+                        actualSource,
                         safeInput,
                         null,
                         null,
@@ -124,6 +182,12 @@ public final class GovernedToolCallback implements ToolCallback {
             budget.auditUnconfirmed();
             throw new AuditWriteException("工具执行前的审计未确认，未执行本次工具", false);
         }
+        var scope =
+                new com.agentos.core.tool.ToolExecutionScope(
+                        turn, call.id(), budget, policy.timeout(), ledger::checkpoint);
+        var values = new java.util.HashMap<String, Object>(context.getContext());
+        values.put(ToolContextKeys.TOOL_SCOPE, scope);
+        var scopedContext = new ToolContext(java.util.Map.copyOf(values));
         long started = System.nanoTime();
         int attempts = 0;
         String status = "failed";
@@ -134,18 +198,22 @@ public final class GovernedToolCallback implements ToolCallback {
         RuntimeException failure = null;
         try {
             ledger.checkpoint();
-            try {
-                if (input == null || !json.readTree(input).isObject()) {
-                    throw new IllegalArgumentException();
-                }
-            } catch (RuntimeException invalid) {
-                throw new IllegalArgumentException("参数不是合法 JSON");
+            validator.validateInput(getToolDefinition().inputSchema(), input);
+            if (snapshot != null && !snapshot.declaredTools().contains(call.name())) {
+                throw new IllegalArgumentException("本 Agent 未授权该工具");
             }
-            long toolDeadline =
-                    System.nanoTime()
-                            + Math.min(budget.remainingNanos(), policy.timeout().toNanos());
+            if (registration != null
+                    && registration.availability()
+                            != com.agentos.core.tool.ToolDescriptor.Availability.AVAILABLE) {
+                throw new IllegalStateException(
+                        registration.availability()
+                                        == com.agentos.core.tool.ToolDescriptor.Availability
+                                                .UNCONFIGURED
+                                ? "UNCONFIGURED：工具未配置"
+                                : "UNAVAILABLE：工具来源不可用");
+            }
             for (; ; ) {
-                ledger.checkpoint();
+                scope.checkpoint();
                 if (budget.cancelled() || budget.expired()) {
                     throw new TurnDeadlineExceededException();
                 }
@@ -156,7 +224,7 @@ public final class GovernedToolCallback implements ToolCallback {
                 }
                 attempts++;
                 try {
-                    result = attempt(input, context, turn, ledger, budget, toolDeadline);
+                    result = attempt(input, scopedContext, turn, ledger, budget, scope);
                     break;
                 } catch (TransientToolException transientFailure) {
                     if (!policy.idempotent()
@@ -173,30 +241,47 @@ public final class GovernedToolCallback implements ToolCallback {
             result = redactor.redact(result);
             if (truncated || result.length() > policy.maxResultChars()) {
                 truncated = true;
-                String marker = "\n[结果已截断，原长 " + original + " 字符]";
-                int cap = policy.maxResultChars();
-                result =
-                        marker.length() >= cap
-                                ? marker.substring(0, cap)
-                                : result.substring(
-                                                0, Math.min(result.length(), cap - marker.length()))
-                                        + marker;
+                result = StructuredToolResult.limit(result, policy.maxResultChars(), original);
             }
             // 先治理已取得的结果，再检查租约/预算；检查失败的完成审计也不能携带原始长正文。
-            ledger.checkpoint();
+            scope.checkpoint();
+            scope.completed();
             status = "success";
         } catch (RuntimeException ex) {
             if (ex instanceof TurnDeadlineExceededException) {
                 status = "timeout";
             } else if (ex instanceof LeaseLostException || ex instanceof AuditWriteException) {
                 status = "interrupted";
-            } else if (ex instanceof ToolTimeoutException) {
+            } else if (ex
+                    instanceof com.agentos.core.tool.ToolExecutionScope.ToolTimeoutException) {
                 status = "timeout";
             } else if (ex instanceof SandboxViolationException) {
                 status = "sandbox_denied";
+            } else if (ex instanceof ToolCleanupUnconfirmedException) {
+                status = "unconfirmed";
             }
             error = summary(ex.getMessage() == null ? "工具内部错误" : ex.getMessage(), 1000);
             failure = ex;
+        }
+        scope.close();
+        scope.awaitWorkerCleanup();
+        if (!scope.cleanupConfirmed()) {
+            var cleanupFailure = new ToolCleanupUnconfirmedException();
+            error = cleanupFailure.getMessage();
+            // 清理未确认使普通业务失败也升级为终止信号；既有致命原因保持优先级。
+            if (!(failure instanceof AuditWriteException)
+                    && !(failure instanceof LeaseLostException)
+                    && !(failure instanceof TurnDeadlineExceededException)) {
+                failure = cleanupFailure;
+            }
+            if (status.equals("success")) {
+                status = "unconfirmed";
+            }
+        } else if (failure != null
+                && scope.executionState()
+                        == com.agentos.core.tool.ToolExecutionScope.ExecutionState
+                                .POSSIBLY_STARTED) {
+            error = summary(error + "；操作可能已经执行", 1000);
         }
         var end =
                 new ToolInvocationRecord(
@@ -223,7 +308,8 @@ public final class GovernedToolCallback implements ToolCallback {
                         return null;
                     },
                     budget,
-                    true);
+                    true,
+                    scope.remainingCleanupNanos());
         } catch (RuntimeException completionFailure) {
             budget.auditUnconfirmed();
             // 超时/租约丢失是原始终止原因，不能被最后一次审计等待遮盖。
@@ -235,7 +321,8 @@ public final class GovernedToolCallback implements ToolCallback {
         }
         if (failure instanceof AuditWriteException
                 || failure instanceof LeaseLostException
-                || failure instanceof TurnDeadlineExceededException) {
+                || failure instanceof TurnDeadlineExceededException
+                || failure instanceof ToolCleanupUnconfirmedException) {
             throw failure;
         }
         if (failure != null) {
@@ -244,6 +331,7 @@ public final class GovernedToolCallback implements ToolCallback {
                     new IllegalStateException(
                             redactor.redact("工具 " + call.name() + " 执行失败：" + error + "；本轮不自动重试")));
         }
+        scope.confirmSubmission();
         return result;
     }
 
@@ -257,35 +345,47 @@ public final class GovernedToolCallback implements ToolCallback {
             TurnContext turn,
             ToolCallLedger ledger,
             TurnExecutionBudget budget,
-            long toolDeadline) {
-        long wait = Math.min(budget.remainingNanos(), toolDeadline - System.nanoTime());
+            com.agentos.core.tool.ToolExecutionScope scope) {
+        long wait = Math.min(budget.remainingNanos(), scope.remainingNanos());
         if (wait <= 0) {
             if (budget.expired()) {
                 throw new TurnDeadlineExceededException();
             }
-            throw new ToolTimeoutException();
+            throw new com.agentos.core.tool.ToolExecutionScope.ToolTimeoutException();
         }
-        var executor = Executors.newVirtualThreadPerTaskExecutor();
-        Future<String> future =
-                executor.submit(() -> {
+        var finished = new java.util.concurrent.CountDownLatch(1);
+        var future =
+                new java.util.concurrent.FutureTask<String>(() -> {
                     MDC.put("sessionId", turn.sessionId().toString());
                     MDC.put("turnId", turn.turnId().toString());
                     MDC.put("agent", turn.agent().profile().name());
                     MDC.put("iteration", Integer.toString(turn.iteration()));
                     try {
-                        ledger.checkpoint();
+                        scope.possiblyStarted();
                         return delegate.call(input, context);
                     } finally {
                         MDC.clear();
+                        finished.countDown();
                     }
                 });
+        var thread = Thread.ofVirtual().unstarted(future);
+        var worker =
+                scope.registerWorker(
+                        thread,
+                        deadline -> {
+                            scope.cancelWorker(thread, () -> future.cancel(true));
+                            return finished.await(
+                                    Math.max(0, deadline - System.nanoTime()),
+                                    TimeUnit.NANOSECONDS);
+                        });
         try {
+            thread.start();
             return future.get(wait, TimeUnit.NANOSECONDS);
         } catch (TimeoutException timeout) {
             if (budget.expired()) {
                 throw new TurnDeadlineExceededException();
             }
-            throw new ToolTimeoutException();
+            throw new com.agentos.core.tool.ToolExecutionScope.ToolTimeoutException();
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             if (budget.expired()) {
@@ -303,24 +403,24 @@ public final class GovernedToolCallback implements ToolCallback {
             throw new IllegalStateException("工具内部错误");
         } finally {
             if (!future.isDone()) {
-                future.cancel(true);
+                scope.cancelWorker(thread, () -> future.cancel(true));
             }
             // 不等待不合作的 I/O，确保调用方仍能在共享 hard stop 内结束。
-            executor.shutdownNow();
-        }
-    }
-
-    private static final class ToolTimeoutException extends RuntimeException {
-        private static final long serialVersionUID = 1L;
-
-        ToolTimeoutException() {
-            super("工具自身超时");
+            if (finished.getCount() == 0) {
+                worker.close();
+            }
         }
     }
 
     /** 审计写入使用独立虚拟线程等待，等待上限取业务 deadline 或 hard stop 的剩余时间。 */
     private <T> T withinBudget(Callable<T> action, TurnExecutionBudget budget, boolean hardStop) {
-        long remaining = hardStop ? budget.remainingHardStopNanos() : budget.remainingNanos();
+        return withinBudget(action, budget, hardStop, Long.MAX_VALUE);
+    }
+
+    private <T> T withinBudget(
+            Callable<T> action, TurnExecutionBudget budget, boolean hardStop, long cap) {
+        long remaining =
+                Math.min(cap, hardStop ? budget.remainingHardStopNanos() : budget.remainingNanos());
         if (remaining <= 0) {
             throw new TurnDeadlineExceededException();
         }

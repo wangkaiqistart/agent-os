@@ -23,8 +23,27 @@ public record HttpToolProperties(
         @DefaultValue("3") int maxRedirects,
         int maxResponseBytes,
         Duration timeout,
-        @DefaultValue("10000") int maxResultChars) {
+        @DefaultValue("10000") int maxResultChars,
+        @DefaultValue("1048576") int maxRequestBytes) {
+    public HttpToolProperties(
+            List<String> allowedDomains,
+            String userAgent,
+            int maxRedirects,
+            int maxResponseBytes,
+            Duration timeout,
+            int maxResultChars) {
+        this(
+                allowedDomains,
+                userAgent,
+                maxRedirects,
+                maxResponseBytes,
+                timeout,
+                maxResultChars,
+                1048576);
+    }
+
     /** 紧凑构造器先归一化缺省值再校验；record 最终保存归一化后的不可变字段。 */
+    @org.springframework.boot.context.properties.bind.ConstructorBinding
     public HttpToolProperties {
         allowedDomains =
                 allowedDomains == null
@@ -39,6 +58,9 @@ public record HttpToolProperties(
         }
         if (maxRedirects < 0 || maxRedirects > 3) {
             throw new IllegalArgumentException("max-redirects 必须在 0 到 3 之间");
+        }
+        if (maxRequestBytes < 1 || maxRequestBytes > 1048576) {
+            throw new IllegalArgumentException("max-request-bytes 超出范围");
         }
         if (maxResponseBytes < 1 || maxResponseBytes > 1_048_576) {
             throw new IllegalArgumentException("max-response-bytes 超出范围");

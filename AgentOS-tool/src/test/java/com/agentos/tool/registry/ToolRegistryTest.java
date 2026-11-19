@@ -12,6 +12,26 @@ import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
 
 class ToolRegistryTest {
+    @Test
+    void failedPublicationPreservesOldVersionAndSnapshotDoesNotRebind() {
+        var a = callback("a");
+        var registry = new ToolRegistry(List.of(a));
+        var snapshot = registry.resolve(profile(List.of("a")));
+        assertThatThrownBy(() ->
+                        registry.publish(
+                                List.of(
+                                        snapshot.descriptors().getFirst(),
+                                        snapshot.descriptors().getFirst()),
+                                List.of()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(registry.resolve(profile(List.of("a"))).version()).isEqualTo(snapshot.version());
+        registry.publish(List.of(), List.of());
+        assertThat(snapshot.modelCallbacks()).containsExactly(a);
+        assertThat(snapshot.bindingByName().get("a").callback()).isSameAs(a);
+        assertThatThrownBy(() -> registry.resolve(profile(List.of("a"))))
+                .isInstanceOf(UnknownAgentToolException.class);
+    }
+
     static AgentProfile profile(List<String> tools) {
         return new AgentProfile("a", "", new Profile(null, "m", null, null, null), tools, null);
     }
@@ -22,7 +42,7 @@ class ToolRegistryTest {
                 return ToolDefinition.builder()
                         .name(name)
                         .description("test")
-                        .inputSchema("{}")
+                        .inputSchema("{\"type\":\"object\"}")
                         .build();
             }
 

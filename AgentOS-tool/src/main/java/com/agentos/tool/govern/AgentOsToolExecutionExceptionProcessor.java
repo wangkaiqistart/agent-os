@@ -2,6 +2,7 @@ package com.agentos.tool.govern;
 
 import com.agentos.core.audit.AuditWriteException;
 import com.agentos.core.tool.Redactor;
+import com.agentos.core.tool.ToolCleanupUnconfirmedException;
 import com.agentos.core.turn.LeaseLostException;
 import com.agentos.core.turn.TurnDeadlineExceededException;
 import java.util.List;
@@ -31,6 +32,9 @@ public final class AgentOsToolExecutionExceptionProcessor
         }
         if (cause instanceof TurnDeadlineExceededException t) {
             throw t;
+        }
+        if (cause instanceof ToolCleanupUnconfirmedException cleanup) {
+            throw cleanup;
         }
         return redactor.redact(cause == null ? "工具执行失败" : cause.getMessage());
     }

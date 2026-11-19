@@ -174,7 +174,11 @@ class HttpToolsTest {
     void schemaExposesOnlyUrlAndRejectedInitialUrlsSendZeroRequests() throws Exception {
         try (var server = new LocalHttpServer();
                 var http = tools(1048576, Duration.ofSeconds(2))) {
-            var callback = org.springframework.ai.support.ToolCallbacks.from(http)[0];
+            var callback =
+                    java.util.Arrays.stream(org.springframework.ai.support.ToolCallbacks.from(http))
+                            .filter(cb -> cb.getToolDefinition().name().equals("http_get"))
+                            .findFirst()
+                            .orElseThrow();
             var schema =
                     tools.jackson.databind.json.JsonMapper.builder()
                             .build()
