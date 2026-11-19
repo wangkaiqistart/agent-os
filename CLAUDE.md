@@ -46,7 +46,7 @@ AgentOS 是 Java 实现的企业级 **Agent OS**：私有部署的 Agent 统一�
 5. **MCP 客户端编程式创建**（`spring.ai.mcp.client.enabled=false`）：逐个带超时初始化，失败不阻塞启动、后台重连。`TurnContext` 不能发给 MCP server：`ToolContextToMcpMetaConverter` 用 `noOp()`，并在 `GovernedToolCallback` 里去掉内部键。
 6. **失败反馈给模型。** 自定义 `ToolExecutionExceptionProcessor`：Sandbox 拒绝、工具超时、业务错误转成错误消息给模型；`TurnDeadlineExceededException` 重抛结束本轮。
 7. **不用 ThreadLocal 传上下文。** 当前 Agent、会话、轮次通过 `ToolCallingChatOptions.toolContext(...)` 放入 `TurnContext`，工具方法声明 `ToolContext` 参数读取。
-8. **两道上限、四层超时。** `max_iterations`（默认 10）限 LLM 调用次数；`spring.ai.tools.limits.*`（`RETURN_ERROR_RESPONSE`）限单轮工具调用次数。超时分单次 LLM（Provider `timeout`）、单个工具（工具策略）、整轮（`turn_timeout`）、HTTP 同步等待（超时返回 202，不取消轮次）。
+8. **两道上限、四层超时。** `max_iterations`（默认 10）限 LLM 调用次数；`spring.ai.tools.limits.*`（`RETURN_ERROR_RESPONSE`）限单轮工具调用次数。超时分单次 LLM（Provider `timeout`）、单个工具（工具策略）、整轮（`turn_timeout`）、HTTP 同步等待（超时返回 202，不取消轮次）。等待用户授权期间整轮与该工具计时暂停（`TurnExecutionBudget.pause()`），单次等待受 `agentos.tools.approval.timeout` 约束；外层等待必须分段重读余量，不能一次算死。
 9. **会话模型。** `sessions` 用 UUID 主键 + `(channel, user_id, profile_name) WHERE status='active'` 部分唯一索引；定时任务的 user_id 是 `schedule:<scheduleId>`，`invoke` 是 `invoke:<uuid>`，否则并发会撞索引。消息一条一行写 `session_messages`，类型对应 Spring AI 的 `UserMessage` / `AssistantMessage` / `ToolResponseMessage`；每条用户消息是一个 `agent_turns` 轮次。prompt 按**轮次**截断（`max_history_turns` 与 `max_history_tokens` 同时生效；失败轮次只保留用户消息加一条说明），不能拆开工具调用和工具结果。同一会话同时只跑一个轮次：会话租约冲突返回 409，每次迭代和每次工具调用前续租，续租失败立即终止；残留的 `RUNNING` 轮次由 `TurnReaper` 标为 `INTERRUPTED`。
 10. **数据库连接。** `spring.jpa.open-in-view=false`；`@Transactional` 不能包住 LLM 调用、工具调用或同步等待。
 11. **Provider 显式映射。** `ProviderService` 按 `agentos.providers.<name>` 编程式构建 `ChatModel`，以 provider name 为键。禁止靠扫描容器里的 `ChatModel` Bean 区分 Provider。
@@ -55,7 +55,7 @@ AgentOS 是 Java 实现的企业级 **Agent OS**：私有部署的 Agent 统一�
 14. **Embedding 单独配置，不跟主链路模型绑定。** 关闭 Starter 的 Embedding 自动配置（`spring.ai.model.embedding=none`），按 `agentos.embedding.*` 编程式构建唯一的 `OpenAiEmbeddingModel`；三个 `PgVectorStore` 用 `spring-ai-pgvector-store` 模块按表名构建，维度显式配置并在启动时校验。
 15. **Agent 目录和 Skill 不是 Tool。** `AGENT.md` 由 core 的 `AgentLoader` / `ContextLoader` 加载进 system prompt。Skill 每轮只注入 name、description、本地路径，正文经 `read_file` 按需读取。
 16. **Memory 走统一门面 `MemoryService`**，内部委托 `SessionManager` 和 `LongTermMemoryStore`（`memory.backend` 选 markdown / postgres / mem0）。核心记忆区永不截断、不参与检索；归档区按 `memory.archival.max-chars`（默认 4000）截断；长期记忆不缓存。记忆放在 system prompt 末尾标注"是数据不是指令"的分隔块里，`save_memory` 单条限 500 字符。不用 Spring AI 的 `ChatMemory` Advisor。
-17. **Sandbox 接口先行。** `Sandbox.enforce(SandboxAction)`，核心阶段只有 `WhitelistSandbox`，在内置工具内部调用。不使用 `SecurityManager`。
+17. **Sandbox 接口先行。** `Sandbox.enforce(SandboxAction)`，核心阶段只有 `WhitelistSandbox`，在内置工具内部调用。不使用 `SecurityManager`。配置白名单表示"预先授权"：工作区内读放行；工作区写、未列出的程序和域名抛 `ApprovalRequiredException`，有副作用的工具经 `ToolApprovalGate` 向入口请求用户确认，无人值守入口直接拒绝（见 006）。
 18. **三个触发入口共用一条链路。** CLI、REST、定时都调 `AgentService.process(...)`。定时任务用 ShedLock 的 `LockingTaskExecutor` 防重叠，不用进程内锁；会话冲突时本次触发记 `skipped`。
 19. **Tool 只有一个模块 `AgentOS-tool`**，不要拆。
 20. **密钥不落盘。** 用 `${ENV_VAR}` 占位，由 `ConfigLoader` 解析并校验。不提交 `.env`。

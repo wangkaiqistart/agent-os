@@ -403,10 +403,12 @@ spring:
 |----|------|------|-------|
 | 单次 LLM 调用 | `agentos.providers.<name>.timeout`，实际取它与剩余整轮时间的较小值 | 60s | 连接自身超时为FAILED；受剩余整轮预算压短并到deadline时为TIMED_OUT；不能一律当Provider故障 |
 | 单个工具 | 工具策略 `timeout`（见 6.1） | 30s | 作为错误结果反馈给模型，循环继续 |
-| 整轮 | `AGENT.md` 的 `settings.turn_timeout` | 300s | 抛 `TurnDeadlineExceededException`，轮次标记 `TIMED_OUT` |
+| 整轮 | `AGENT.md` 的 `settings.turn_timeout` | 300s | 抛 `TurnDeadlineExceededException`，轮次标记 `TIMED_OUT`；等待用户授权（见 6.7）的时间不计入 |
 | HTTP 同步等待 | `agentos.web.sync-wait` | 60s | 返回 202 和 `turnId`，轮次在后台继续，见 7.4 |
 
 HTTP 等待超时**不取消**轮次：工具可能已经产生副作用，中途取消会留下一半的结果。定时任务没有等待方，只受整轮超时约束。
+
+等待人工授权时整轮计时与该工具自身计时**暂停**（`TurnExecutionBudget.pause()`），恢复后截止时间整体后移，`agent_turns.deadline_at` 在下一次续租时同步；取消与租约检查照常生效。单次等待受 `agentos.tools.approval.timeout`（默认 10 分钟）约束，超时按拒绝处理，避免长期占住会话租约。
 
 **会话串行。** 同一会话同一时间只跑一个轮次，消息顺序依赖这一点。
 
@@ -612,19 +614,20 @@ tool_invocations由GovernedToolCallback先记后做、结束更新。只对审�
 
 | 实现 | 工具 | 默认边界 |
 |---|---|---|
-| FileTools | read_file/write_file/list_dir/edit_file/grep/glob | 严格UTF-8；单文件1MiB；结果200项、扫描1000项；独立读写授权 |
-| ShellTools | shell | 精确真实程序+独立argv；输出64KiB；环境清空后显式构造 |
-| HttpTools | http_get/http_post | 域名白名单；请求/响应1MiB；POST无跳转/重试 |
+| FileTools | read_file/write_file/list_dir/edit_file/grep/glob | 严格UTF-8；单文件1MiB；结果200项、扫描1000项；工作区内可读，写入需用户确认（006） |
+| ShellTools | shell | 程序名按PATH解析为真实路径+独立argv；输出64KiB；未预授权的命令需用户确认（006）；环境清空后只继承基础变量 |
+| HttpTools | http_get/http_post | 白名单域名直接访问，其他域名需用户确认（006）；请求/响应1MiB；POST无跳转/重试 |
 | AskUserTools | ask_user | 显式入口能力；问题/回答4000字符；无人值守立即UNSUPPORTED |
 | WebSearchTools | web_search | Brave协议；查询1000字符、10条、响应1MiB；未配置隐藏并安全拒绝 |
 
 默认工具/整轮预算30s、结果10000字符；共享1s清理窗口。只有明确未开始的幂等瞬时失败才可重试一次。
 `save_memory`、`recall_memory`、`notify`、完整策略引擎和工具渐进搜索未在005实现。
 
-文件根默认空，工作根不自动授权。写入使用规范目标的进程锁和稳定sidecar FileLock，默认创建以硬链接禁止覆盖，
+006 起工作区内文件默认可读、写入需用户确认，工作区外只能访问配置的读/写根（写根视为预先授权）。写入使用规范目标的进程锁和稳定sidecar FileLock，默认创建以硬链接禁止覆盖，
 显式覆盖/编辑以同目录临时文件+force+复核+ATOMIC_MOVE提交。不支持时拒绝。所有外部写方必须遵守相同锁协议，
-管理员保持目录结构稳定；不能抵御任意非协作进程的最后检查竞态。仅写权限不能读取旧正文，编辑需读写双授权。
+管理员保持目录结构稳定；不能抵御任意非协作进程的最后检查竞态。工作区外仅写权限不能读取旧正文，编辑需读写双授权。
 Shell和本地MCP授权只控制直接程序/cwd，不隔离获准程序内部的文件/网络行为；子进程树仅在可识别范围内确认清理。
+本地MCP的程序与cwd来自部署者的 `mcp_servers.yaml`，不再复用 shell 命令白名单；MCP HTTP 地址与搜索端点同理视为部署者授权。
 
 ![Plugin Tool 三档：零代码 AGENT.md 目录+MCP、轻代码自写 MCP server、重代码 @Tool Java Bean，门槛从低到高](../website/public/images/docs-plugin-tool-tiers.svg)
 
@@ -697,9 +700,11 @@ Sandbox 遵循"接口先行"原则：先定一个不携带任何实现细节的�
 ```text
 Sandbox.enforce(SandboxAction action)
 
-SandboxAction  = { type: ActionType, target: String }
-ActionType     = FILE_READ | FILE_WRITE | SHELL_COMMAND | HTTP_REQUEST
+SandboxAction  = { type: ActionType, target: String, details: List<String> }
+ActionType     = FILE_READ | FILE_WRITE | SHELL | HTTP
 ```
+
+`details` 承载目标之外的判定与展示信息（命令的 cwd 与参数、HTTP 方法、写入方式），保持接口中立。
 
 > ActionType 取四值（文件读 / 文件写 / Shell 命令 / HTTP 请求）——文件读写分开便于未来按读/写分权限；`WhitelistSandbox` 的 `enforce` 把 `FILE_READ`、`FILE_WRITE` 两 case 同路由到 `checkFilePath`。
 
@@ -712,9 +717,20 @@ ActionType     = FILE_READ | FILE_WRITE | SHELL_COMMAND | HTTP_REQUEST
 - `checkHttpUrl`（解析 host 后做通配符匹配）
 - `checkSmtpEndpoint`（按 `host:port` 精确放行 SMTP 端点，端口缺省=任意）
 
+**判定的三种结果（006）。** 白名单的含义是"预先授权"，未列出的动作分两类：
+
+| 动作 | 直接放行 | 需要用户授权（`ApprovalRequiredException`） | 硬拒绝 |
+|---|---|---|---|
+| 文件读 | 工作区或配置读根内 | — | 其他位置、锁目录与临时文件 |
+| 文件写 | 配置写根内 | 工作区内（Agent 定义、`mcp_servers.yaml`、Bootstrap 文件只允许逐次确认） | 工作区外未配置的位置 |
+| Shell | `shell.commands` 中的程序且 cwd 在其允许目录内 | 其他任意程序（cwd 须在工作区内） | 程序不存在或不可执行 |
+| HTTP | `http.allowed-domains` 内 | 其他任意 http/https 地址 | 非 http/https、带 userinfo |
+
+`ApprovalRequiredException` 继承 `SandboxViolationException`，未被处理时等同拒绝。有副作用的工具（write_file、edit_file、shell、http_get、http_post）经 `ToolApprovalGate` 调用沙箱：需要授权时通过本轮 `TurnRuntimeCapabilities` 的 `InteractionPort.approve(...)` 询问当前入口。CLI 按 Claude Code 的方式展示动作摘要和"允许本次 / 本会话不再询问 / 拒绝（可附原因）"；无人值守入口（REST 调试、定时、`chat --message`）默认返回 UNSUPPORTED，立即拒绝并提示可由部署者预先授权。"本会话不再询问"记在进程内 `SessionApprovalGrants`，按 sessionId 隔离，不写回配置；后续 HTTP 入口复用同一存储。拒绝原因作为工具错误结果交给模型。
+
 任意校验失败抛 `SandboxViolationException`，Tool 执行终止；`GovernedToolCallback` 写入 `tool_invocations`（`status=sandbox_denied`、`error_message`），异常处理器把拒绝原因作为工具结果反馈给模型（见 6.1），不需要为 Sandbox 单独新增审计逻辑。
 
-`FileTools`、`ShellTools`、`HttpTools` 在各自 `@Tool` 方法开头调用 `sandbox.enforce(...)`，校验通过才执行真正的 IO：
+`FileTools`、`ShellTools`、`HttpTools` 在各自 `@Tool` 方法中、真正的 IO 之前调用 `sandbox.enforce(...)`（有副作用的动作经 `ToolApprovalGate`），校验或授权通过才执行：
 
 ![Sandbox 校验流程：FileTools/ShellTools/HttpTools 调用 WhitelistSandbox.enforce，通过则继续执行，拒绝则抛异常并走既有审计路径](../website/public/images/docs-sandbox-flow.svg)
 

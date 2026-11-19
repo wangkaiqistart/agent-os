@@ -1,5 +1,7 @@
 # Contract：内置工具
 
+> **006 更新**：文件、命令、HTTP 的授权语义已由 [006 工具交互式授权](../../006-interactive-tool-permissions/spec.md) 修改：工作区内默认可读，工作区写入、未列出的程序与域名在交互入口询问用户，白名单表示预先授权。下文的"默认拒绝"描述以 006 为准。
+
 所有参数均为 object，未知参数拒绝；仅列出的业务字段进入模型 schema，ToolContext/scope/交互端口
 不进入 schema。所有工具遵守 [tool-catalog.md](./tool-catalog.md) 的治理、原调用 ID、预算和脱敏。
 以下为目标契约；既有 http_get 的正常/跳转/截止时间行为保持 004 契约。
