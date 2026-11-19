@@ -38,7 +38,7 @@ class ToolAuthorizationIntegrationTest {
                         new IllegalArgumentException(
                                 "Agent tools 未注册：agents/restricted/AGENT.md，tools=outside"))
                 .when(loop)
-                .validate(profile);
+                .resolve(profile);
 
         var service =
                 new DefaultAgentService(

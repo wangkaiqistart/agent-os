@@ -76,6 +76,12 @@ class CheckDatabaseReportsTest(unittest.TestCase):
                             "slowBodyStopsTurnWithoutNextModelOrHttpRetry",
                             "oversizedBodyReturnsSafeToolErrorAndContinuesWithOneHttpRequest",
                             "completionFailurePersistsUnconfirmedAndNeverReplaysSideEffect"]}
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("db_reports", SCRIPT)
+                    checker = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(checker)
+                    for short in checker.CAPABILITY_CLASSES:
+                        targets[("AgentOS-boot", "com.agentos.boot." + short)] = ["actualDatabaseCase"]
                     for (module, name), methods in targets.items():
                         if missing and module == "AgentOS-boot":
                             continue
@@ -83,10 +89,24 @@ class CheckDatabaseReportsTest(unittest.TestCase):
                         path.mkdir(parents=True, exist_ok=True)
                         cases = "".join(f'<testcase classname="{name}" name="{method}">'
                                         + ("<skipped/>" if skipped else "") + "</testcase>" for method in methods)
-                        (path / f"TEST-{name}.xml").write_text(f'<testsuite>{cases}</testsuite>')
-                    result = subprocess.run([sys.executable, str(SCRIPT), str(storage), "--tools"],
+                        (path / f"TEST-{name}.xml").write_text(f'<testsuite tests="{len(methods)}">{cases}<system-out>pgvector/pgvector:pg17 Database version: 17.12</system-out></testsuite>')
+                    result = subprocess.run([sys.executable, str(SCRIPT), str(storage), "--tools", "--since", "0"],
                                             check=False, capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0 if not missing and not skipped else 1)
+
+    def test_stale_suite_and_empty_suite_cannot_count_as_current_run(self):
+        import importlib.util
+        import time
+        spec = importlib.util.spec_from_file_location("db_reports_freshness", SCRIPT)
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "report.xml"
+            report.write_text(self.report())
+            self.assertIsNone(checker.successful_suite(report, CLASS_NAME, time.time() + 10))
+            report.write_text('<testsuite tests="0"/>')
+            self.assertIsNone(checker.successful_suite(report, CLASS_NAME, 0))
+
 
 
 if __name__ == "__main__":

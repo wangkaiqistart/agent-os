@@ -26,13 +26,39 @@ TOOL_EVIDENCE = {
 }
 
 
-def check_tool_evidence(root):
+# 005完整集成矩阵；每类必须是本轮真实PostgreSQL用例，保留004关键方法检查。
+CAPABILITY_CLASSES = (
+    "ToolSnapshotBeforeTurnIntegrationTest", "PluginToolAcceptanceIntegrationTest",
+    "FileToolsAcceptanceIntegrationTest", "ShellToolsAcceptanceIntegrationTest",
+    "McpToolAcceptanceIntegrationTest", "HttpPostAcceptanceIntegrationTest",
+    "FileSearchAcceptanceIntegrationTest", "AskUserAcceptanceIntegrationTest",
+    "WebSearchAcceptanceIntegrationTest", "WebSearchUnconfiguredAcceptanceIntegrationTest",
+    "ToolCapabilityMatrixIntegrationTest", "ToolCapabilitiesDeadlineIntegrationTest",
+    "ToolCapabilitiesPrivacyIntegrationTest",
+)
+
+
+def successful_suite(report, name, since):
+    try:
+        suite = ET.parse(report).getroot()
+        cases = [c for c in suite.iter("testcase") if c.get("classname") == name]
+        if report.stat().st_mtime < since or not cases or int(suite.get("tests", 0)) != len(cases):
+            raise ValueError()
+        if any(int(suite.get(k, 0)) for k in ("failures", "errors", "skipped")):
+            raise ValueError()
+        if any(c.find(tag) is not None for c in cases for tag in ("skipped", "failure", "error")):
+            raise ValueError()
+    except (ET.ParseError, OSError, ValueError):
+        print(f"数据库证据缺失、过期或未成功执行：{name}", file=sys.stderr)
+        return None
+    return suite
+
+
+def check_tool_evidence(root, since):
     for (module, name), methods in TOOL_EVIDENCE.items():
         report = root / module / "target/surefire-reports" / f"TEST-{name}.xml"
-        try:
-            suite = ET.parse(report).getroot()
-        except (ET.ParseError, OSError):
-            print(f"Tool 数据库证据报告缺失或无法解析：{name}", file=sys.stderr)
+        suite = successful_suite(report, name, since)
+        if suite is None:
             return False
         for method in methods:
             cases = [case for case in suite.iter("testcase")
@@ -41,7 +67,17 @@ def check_tool_evidence(root):
                                      for tag in ("skipped", "failure", "error")):
                 print(f"Tool 数据库证据未成功执行：{name}.{method}", file=sys.stderr)
                 return False
-    print("Tool 数据库证据已执行并通过（2 个测试类、7 个关键用例）。")
+    for short_name in CAPABILITY_CLASSES:
+        name = "com.agentos.boot." + short_name
+        report = root / "AgentOS-boot/target/surefire-reports" / f"TEST-{name}.xml"
+        suite = successful_suite(report, name, since)
+        if suite is None:
+            return False
+        output = "".join(suite.itertext())
+        if "Database version: 17." not in output or "pgvector/pgvector:pg17" not in output:
+            print(f"005 PostgreSQL运行证据缺失：{name}", file=sys.stderr)
+            return False
+    print(f"Tool 数据库证据已执行并通过（004的2类/7方法，005的{len(CAPABILITY_CLASSES)}类）。")
     return True
 
 
@@ -50,6 +86,8 @@ def main():
     parser.add_argument("reports", nargs="?", type=Path,
                         default=Path("AgentOS-storage/target/surefire-reports"))
     parser.add_argument("--tools", action="store_true", help="同时核对 Tool 数据库验收证据")
+    parser.add_argument("--since", type=float, default=None,
+                        help="本轮verify开始的Unix秒；--tools未给出时使用根target/verify-started-at")
     args = parser.parse_args()
     reports = args.reports
     report = reports / f"TEST-{CLASS_NAME}.xml"
@@ -72,8 +110,15 @@ def main():
         print("数据库连通性测试未成功执行，缺失、跳过或失败均不允许。", file=sys.stderr)
         return 1
     print("数据库连通性测试已执行并通过。")
-    if args.tools and not check_tool_evidence(reports.resolve().parents[2]):
-        return 1
+    if args.tools:
+        root = reports.resolve().parents[2]
+        try:
+            since = args.since if args.since is not None else float((root / "target/verify-started-at").read_text())
+        except (OSError, ValueError):
+            print("缺少本轮verify起始时间；先记录target/verify-started-at或传--since。", file=sys.stderr)
+            return 1
+        if successful_suite(report, CLASS_NAME, since) is None or not check_tool_evidence(root, since):
+            return 1
     return 0
 
 

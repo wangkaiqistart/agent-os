@@ -408,7 +408,7 @@ class ReActDeadlineIntegrationTest {
                             return ToolDefinition.builder()
                                     .name("test_tool")
                                     .description("测试")
-                                    .inputSchema("{}")
+                                    .inputSchema("{\"type\":\"object\"}")
                                     .build();
                         }
 
@@ -564,7 +564,16 @@ class ReActDeadlineIntegrationTest {
                         }
                     };
             return new ToolRegistry(
-                    List.of(ToolCallbacks.from(http)[0], retry).stream()
+                    List.of(
+                                    java.util.Arrays.stream(ToolCallbacks.from(http))
+                                            .filter(cb ->
+                                                    cb.getToolDefinition()
+                                                            .name()
+                                                            .equals("http_get"))
+                                            .findFirst()
+                                            .orElseThrow(),
+                                    retry)
+                            .stream()
                             .map(cb ->
                                     (ToolCallback)
                                             new GovernedToolCallback(

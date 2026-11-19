@@ -353,6 +353,36 @@ class ArchitectureRulesTest {
                 .check(classes);
     }
 
+    @Test
+    void capabilityPathsRemainCoveredAndOnlyManagedProcessStartsChildren() {
+        for (String type :
+                java.util.List.of(
+                        "com.agentos.tool.file.FileTools", "com.agentos.tool.process.ShellTools",
+                        "com.agentos.tool.mcp.McpClientService",
+                                "com.agentos.tool.interaction.AskUserTools",
+                        "com.agentos.tool.search.WebSearchTools",
+                                "com.agentos.web.tool.ToolCatalogController",
+                        "com.agentos.boot.ToolCatalogApplication",
+                                "com.agentos.cli.ToolListCommand")) {
+            assertThat(classes.contain(type)).as(type).isTrue();
+        }
+        noClasses()
+                .that()
+                .doNotHaveFullyQualifiedName("com.agentos.tool.process.ManagedProcess")
+                .should()
+                .callMethod(ProcessBuilder.class, "start")
+                .because("子进程必须由统一所有权、环境和有界清理实现创建")
+                .check(classes);
+        noClasses()
+                .that()
+                .resideInAnyPackage("com.agentos.web.tool..", "com.agentos.cli..")
+                .should()
+                .dependOnClassesThat()
+                .areAssignableTo(org.springframework.ai.model.tool.ToolCallingManager.class)
+                .because("查询和CLI只使用core端口，不直接执行工具")
+                .check(classes);
+    }
+
     static class MethodTransaction {
         @org.springframework.transaction.annotation.Transactional
         void run(com.agentos.core.provider.ProviderService provider) {

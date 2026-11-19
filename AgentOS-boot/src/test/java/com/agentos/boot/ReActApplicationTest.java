@@ -71,7 +71,7 @@ class ReActApplicationTest {
         Files.createDirectories(deadlineAgent);
         Files.writeString(
                 deadlineAgent.resolve("AGENT.md"),
-                // 给真实 PostgreSQL/HTTP 启动开销留出余量，仍由 700ms 的慢响应消耗整轮预算。
+                // HTTP 夹具在本轮结束前不返回响应，不能依赖数据库/网络额外开销来耗尽预算。
                 "---\nname: deadline\nprovider:\n  model: test-model\ntools: [http_get]\nsettings:\n  turn_timeout: 750ms\n---\n调用工具。\n");
         model = LocalModelServer.start();
         weather =
@@ -440,9 +440,10 @@ class ReActApplicationTest {
                         "deadline-call",
                         "http://127.0.0.1:" + weather.getAddress().getPort() + "/weather"));
         weatherCalls.set(0);
+        var releaseResponse = new java.util.concurrent.CountDownLatch(1);
         beforeHttp.set(() -> {
             try {
-                Thread.sleep(700);
+                releaseResponse.await(3, java.util.concurrent.TimeUnit.SECONDS);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
@@ -473,6 +474,7 @@ class ReActApplicationTest {
                                     System.nanoTime() - started))
                     .isLessThan(1200);
         } finally {
+            releaseResponse.countDown();
             beforeHttp.set(() -> {});
         }
     }
