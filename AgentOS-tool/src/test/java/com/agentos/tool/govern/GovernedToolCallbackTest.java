@@ -101,6 +101,52 @@ class GovernedToolCallbackTest {
     }
 
     @Test
+    void runLogsCarryToolNameStatusAndDurationButNeverArgumentsOrResults() {
+        var appender =
+                new ch.qos.logback.core.read.ListAppender<
+                        ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start();
+        var logger =
+                (ch.qos.logback.classic.Logger)
+                        org.slf4j.LoggerFactory.getLogger(GovernedToolCallback.class);
+        logger.addAppender(appender);
+        try {
+            var recorder = mock(ToolInvocationRecorder.class);
+            when(recorder.begin(any())).thenAnswer(i -> i.getArgument(0));
+            var ok = govern(callback(c -> "RESULT_SENTINEL"), recorder, Duration.ofSeconds(1));
+            ok.call("{}", context(Duration.ofSeconds(5), () -> {}));
+            var failing =
+                    govern(
+                            callback(c -> {
+                                throw new IllegalStateException("FAILURE_TEXT_SENTINEL");
+                            }),
+                            recorder,
+                            Duration.ofSeconds(1));
+            assertThatThrownBy(() -> failing.call("{}", context(Duration.ofSeconds(5), () -> {})))
+                    .isInstanceOf(RuntimeException.class);
+        } finally {
+            logger.detachAppender(appender);
+        }
+        var messages =
+                appender.list.stream()
+                        .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                        .toList();
+        assertThat(messages)
+                .anyMatch(m -> m.startsWith("工具调用开始 tool=") && m.contains("callId="))
+                .anyMatch(m ->
+                        m.startsWith("工具调用结束 tool=")
+                                && m.contains("status=success")
+                                && m.contains("durationMs="))
+                .anyMatch(m ->
+                        m.startsWith("工具调用结束 tool=")
+                                && m.contains("status=failed")
+                                && m.contains("failureType=IllegalStateException"));
+        // 结果正文和异常文本只能出现在（已脱敏的）审计里，不能进日志。
+        assertThat(String.join("\n", messages))
+                .doesNotContain("RESULT_SENTINEL", "FAILURE_TEXT_SENTINEL");
+    }
+
+    @Test
     void postResultFatalCheckpointStillAuditsOnlyGovernedResultWithoutRetry() {
         for (boolean deadline : List.of(false, true)) {
             var recorder = mock(ToolInvocationRecorder.class);

@@ -122,7 +122,7 @@ public final class AgentLoader {
                 integer(values.getOrDefault("max_iterations", 10)),
                 integer(values.getOrDefault("max_history_turns", 20)),
                 integer(values.getOrDefault("max_history_tokens", 32_000)),
-                duration(values.getOrDefault("turn_timeout", "30s")));
+                duration(values.getOrDefault("turn_timeout", "300s")));
     }
 
     /** 解析文件开头由 --- 包围的 YAML；后面的 Markdown 保持为任务指令文本。 */

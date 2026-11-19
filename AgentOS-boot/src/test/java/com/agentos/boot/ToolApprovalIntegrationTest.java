@@ -276,6 +276,61 @@ class ToolApprovalIntegrationTest {
     }
 
     @Test
+    void runLogsFollowTheTurnFromStartToEndWithoutContent(ApplicationContext context)
+            throws Exception {
+        var appender =
+                new ch.qos.logback.core.read.ListAppender<
+                        ch.qos.logback.classic.spi.ILoggingEvent>();
+        appender.start();
+        var root =
+                (ch.qos.logback.classic.Logger)
+                        org.slf4j.LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        root.addAppender(appender);
+        try (var cli = new CliSession()) {
+            cli.answerWhenPrompted("1", 0);
+            run(
+                    context,
+                    cli,
+                    "log-write",
+                    "write_file",
+                    Map.of("path", "log-check.txt", "content", "BODY_SENTINEL_不应出现在日志"));
+        } finally {
+            root.detachAppender(appender);
+        }
+        var messages =
+                appender.list.stream()
+                        .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                        .toList();
+        // 同一轮的日志按发生顺序排列，覆盖起止、模型调用、授权和工具调用。
+        var expected =
+                List.of(
+                        "轮次开始 agent=main",
+                        "第 1/10 次模型调用开始",
+                        "第 1 次模型调用返回 toolCalls=1 tools=[write_file]",
+                        "工具调用开始 tool=write_file",
+                        "工具授权 type=FILE_WRITE outcome=ALLOW_ONCE waitedMs=",
+                        "工具调用结束 tool=write_file",
+                        "第 2/10 次模型调用开始",
+                        "第 2 次模型调用返回 toolCalls=0 answerChars=",
+                        "轮次结束 status=SUCCEEDED");
+        int from = 0;
+        for (String fragment : expected) {
+            int found = -1;
+            for (int i = from; i < messages.size(); i++) {
+                if (messages.get(i).contains(fragment)) {
+                    found = i;
+                    break;
+                }
+            }
+            assertThat(found).as("日志缺失或顺序不对：" + fragment).isGreaterThanOrEqualTo(0);
+            from = found + 1;
+        }
+        assertThat(messages.stream().filter(m -> m.contains("工具调用结束")).findFirst().orElse(""))
+                .contains("status=success", "attempts=1", "durationMs=");
+        assertThat(String.join("\n", messages)).doesNotContain("BODY_SENTINEL", "log-check.txt");
+    }
+
+    @Test
     void waitingForApprovalDoesNotConsumeTheTurnTimeout(ApplicationContext context)
             throws Exception {
         try (var cli = new CliSession()) {

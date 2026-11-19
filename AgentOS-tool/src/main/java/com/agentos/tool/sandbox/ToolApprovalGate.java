@@ -78,6 +78,7 @@ public final class ToolApprovalGate {
                         : TurnRuntimeCapabilities.NONE;
         scope.checkpoint();
         ApprovalDecision decision;
+        long waitStarted = System.nanoTime();
         try (var paused = scope.pauseClock()) {
             decision =
                     capabilities
@@ -93,7 +94,12 @@ public final class ToolApprovalGate {
                                     scope);
         }
         // 只记录类别和决定，不记录路径、参数或 URL。
-        log.info("工具授权 type={} outcome={}", subject.type(), decision.outcome());
+        log.info(
+                "工具授权 type={} outcome={} waitedMs={}",
+                subject.type(),
+                decision.outcome(),
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(
+                        System.nanoTime() - waitStarted));
         switch (decision.outcome()) {
             case ALLOW_ONCE -> {
                 return;

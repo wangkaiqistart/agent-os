@@ -20,6 +20,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
@@ -32,6 +34,7 @@ import org.springframework.ai.tool.metadata.ToolMetadata;
  * 不负责选择工具或循环调用；这些工作仍由唯一注入的官方 Manager 完成。
  */
 public final class GovernedToolCallback implements ToolCallback {
+    private static final Logger log = LoggerFactory.getLogger(GovernedToolCallback.class);
     // 工具内部热循环（逐行搜索、输出排空、10ms 等待轮询）最多每秒续租一次，避免每次检查都发起数据库事务；
     // 租约 TTL 远大于该间隔，治理边界的检查点仍每次续租。
     private static final java.time.Duration IN_TOOL_RENEW_INTERVAL =
@@ -195,6 +198,8 @@ public final class GovernedToolCallback implements ToolCallback {
                         policy.timeout(),
                         ledger::checkpoint,
                         IN_TOOL_RENEW_INTERVAL);
+        // 只记录工具名、来源和调用标识；参数与结果正文不进日志，审计表才保存（已脱敏）。
+        log.info("工具调用开始 tool={} source={} callId={}", call.name(), actualSource, call.id());
         var values = new java.util.HashMap<String, Object>(context.getContext());
         values.put(ToolContextKeys.TOOL_SCOPE, scope);
         var scopedContext = new ToolContext(java.util.Map.copyOf(values));
@@ -310,6 +315,27 @@ public final class GovernedToolCallback implements ToolCallback {
                         policy.idempotent(),
                         attempts,
                         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+        int resultChars = original == null ? 0 : original.intValue();
+        String logged =
+                "工具调用结束 tool={} source={} callId={} status={} attempts={} durationMs={} resultChars={} truncated={}";
+        Object[] loggedArgs = {
+            call.name(),
+            actualSource,
+            call.id(),
+            status,
+            attempts,
+            end.durationMs(),
+            resultChars,
+            truncated
+        };
+        if (failure == null) {
+            log.info(logged, loggedArgs);
+        } else {
+            // 失败只记异常类型，不记消息（可能含远端错误正文，已脱敏的版本在审计表里）。
+            log.warn(
+                    logged + " failureType={}",
+                    appendArg(loggedArgs, failure.getClass().getSimpleName()));
+        }
         // 结果写入失败也必须中止 Manager；操作可能已发生，绝不能因审计失败重试副作用。
         try {
             withinBudget(
@@ -342,6 +368,12 @@ public final class GovernedToolCallback implements ToolCallback {
                             redactor.redact("工具 " + call.name() + " 执行失败：" + error + "；本轮不自动重试")));
         }
         scope.confirmSubmission();
+        return result;
+    }
+
+    private static Object[] appendArg(Object[] args, Object extra) {
+        var result = java.util.Arrays.copyOf(args, args.length + 1);
+        result[args.length] = extra;
         return result;
     }
 

@@ -43,7 +43,7 @@ V1/V2 已有 source、状态、attempts、error/result 字段，本期无新业�
 
 **Project Type**: 九模块 Maven 单体，CLI + 最小只读 MVC 入口；不拆 Tool 模块。
 
-**Performance Goals**: 默认模型 10 次、单工具 10 次、工具总计 30 次、整轮 30s；
+**Performance Goals**: 默认模型 10 次、单工具 10 次、工具总计 30 次、整轮 300s（006 起由 30s 调整）；
 五类慢场景各 20 次，p95 ≤ 配置预算 + 1s；受控进程清理在同一窗口确认；
 永不响应 MCP 来源使本地就绪增加 ≤ 1s；无人值守提问 20 次均 < 1s。
 

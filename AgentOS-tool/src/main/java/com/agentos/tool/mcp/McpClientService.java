@@ -22,9 +22,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** 每来源后台初始化和未来重连；目录整体发布，失败不阻塞本地就绪。 */
 public final class McpClientService implements AutoCloseable {
+    private static final Logger log = LoggerFactory.getLogger(McpClientService.class);
     private final Map<String, ToolSourceState> entries = new LinkedHashMap<>();
     private final Path workspace;
     private final ShellToolProperties shells;
@@ -111,6 +114,12 @@ public final class McpClientService implements AutoCloseable {
             source.reason = null;
             publish();
         }
+        // 只记录服务名和传输类型；地址、凭证、环境变量不进日志。
+        log.info(
+                "MCP 来源开始连接 server={} transport={}",
+                source.config.name(),
+                source.config.transport());
+        long connectStarted = System.nanoTime();
         var budget = TurnExecutionBudget.start(Duration.ofSeconds(10));
         synchronized (this) {
             source.initDeadline = budget.deadlineNanos();
@@ -202,6 +211,11 @@ public final class McpClientService implements AutoCloseable {
                 source.failures = 0;
                 source.nextReconnectAt = null;
                 publish();
+                log.info(
+                        "MCP 来源可用 server={} tools={} elapsedMs={}",
+                        config.name(),
+                        source.known.size(),
+                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - connectStarted));
             }
             transport.setExceptionHandler(ignored ->
                     invalidate(
@@ -253,6 +267,12 @@ public final class McpClientService implements AutoCloseable {
                 source.reason = reason;
                 publish();
                 long delay = McpReconnectScheduler.delay(++source.failures).toMillis();
+                log.warn(
+                        "MCP 来源不可用 server={} reason={} failures={} nextRetryMs={}",
+                        name,
+                        reason,
+                        source.failures,
+                        delay);
                 source.nextReconnectAt = java.time.Instant.now().plusMillis(delay);
                 scheduler.schedule(
                         () ->

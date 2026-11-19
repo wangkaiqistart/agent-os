@@ -138,7 +138,7 @@ public class JpaLlmCallRecorder implements LlmCallRecorder {
         }
         try {
             var event =
-                    (confirmed ? log.atInfo() : log.atError())
+                    (!confirmed ? log.atError() : record.success() ? log.atInfo() : log.atWarn())
                             .addKeyValue("event", "llm_call")
                             .addKeyValue("write_id", writeId.toString())
                             .addKeyValue(
@@ -170,7 +170,7 @@ public class JpaLlmCallRecorder implements LlmCallRecorder {
                             .addKeyValue("startedAt", text(record.startedAt()))
                             .addKeyValue("durationMs", record.durationMs());
             if (confirmed) {
-                event.log("模型调用审计");
+                event.log("模型调用审计 {}", record.summary());
             } else {
                 // 默认控制台格式不显示 key-value，正文也提供安全关联与配置上限，便于现场定位。
                 event.log(

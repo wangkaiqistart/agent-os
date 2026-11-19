@@ -166,8 +166,15 @@ public final class ReActLoop {
             int maxIterations = agent.profile().settings().maxIterations();
             for (int iteration = 1; iteration <= maxIterations; iteration++) {
                 MDC.put("iteration", Integer.toString(iteration));
-                log.debug("ReAct iteration {} started", iteration);
                 guard.checkpoint(turn, budget);
+                log.info(
+                        "第 {}/{} 次模型调用开始 model={} historyMessages={} tools={} remainingSec={}",
+                        iteration,
+                        maxIterations,
+                        agent.profile().providerProfile().model(),
+                        history.size(),
+                        callbacks.size(),
+                        budget.remaining().toSeconds());
                 var context =
                         new TurnContext(
                                 turn.sessionId(),
@@ -195,8 +202,19 @@ public final class ReActLoop {
                     return new Result(TurnStatus.FAILED, "模型返回了空回答", iteration);
                 }
                 var output = generation.getOutput();
+                String answer = output.getText();
+                log.info(
+                        "第 {} 次模型调用返回 toolCalls={} {}",
+                        iteration,
+                        output.getToolCalls().size(),
+                        output.getToolCalls().isEmpty()
+                                ? "answerChars=" + (answer == null ? 0 : answer.length())
+                                : "tools="
+                                        + output.getToolCalls().stream()
+                                                .map(call -> call.name())
+                                                .toList());
                 if (output.getToolCalls().isEmpty()) {
-                    String text = output.getText();
+                    String text = answer;
                     if (text == null || text.isBlank()) {
                         return new Result(TurnStatus.FAILED, "模型返回了空回答", iteration);
                     }
@@ -247,6 +265,7 @@ public final class ReActLoop {
                     return new Result(TurnStatus.SUCCEEDED, text, iteration);
                 }
                 if (iteration == maxIterations) {
+                    log.warn("已达到模型调用上限 maxIterations={}，本轮停止继续调用模型", maxIterations);
                     String limit = "已达到模型调用上限（" + maxIterations + "），本轮停止继续调用模型";
                     messages.append(turn, iteration, List.of(new AssistantMessage(limit)));
                     return new Result(TurnStatus.MAX_ITERATIONS, limit, iteration);

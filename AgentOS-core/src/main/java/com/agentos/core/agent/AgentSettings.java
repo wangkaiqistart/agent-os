@@ -30,7 +30,8 @@ public record AgentSettings(
 
     /** 未提供 settings 时的统一默认值，和 AgentLoader 的字段缺省规则一致。 */
     public static AgentSettings defaults() {
-        return new AgentSettings(10, 20, 32_000, Duration.ofSeconds(30));
+        // 整轮默认 300 秒，与技术方案四层超时一致：一轮可能含多次推理模型调用和网页抓取，30 秒不够用。
+        return new AgentSettings(10, 20, 32_000, Duration.ofSeconds(300));
     }
 
     /** 正 token 上限预留 10% 余量；0 表示不加载历史。 */

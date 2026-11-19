@@ -49,7 +49,7 @@ public class LoggingLlmCallRecorder implements LlmCallRecorder {
                 .addKeyValue("errorSummary", record.errorSummary())
                 .addKeyValue("startedAt", text(record.startedAt()))
                 .addKeyValue("durationMs", record.durationMs())
-                .log("Provider 调用完成");
+                .log("Provider 调用完成 {}", record.summary());
     }
 
     /** 非空对象转字符串，null 保持 null。 */

@@ -10,7 +10,7 @@ class AgentSettingsTest {
     @Test
     void defaultsMatchContract() {
         assertThat(AgentSettings.defaults())
-                .isEqualTo(new AgentSettings(10, 20, 32_000, Duration.ofSeconds(30)));
+                .isEqualTo(new AgentSettings(10, 20, 32_000, Duration.ofSeconds(300)));
     }
 
     @Test

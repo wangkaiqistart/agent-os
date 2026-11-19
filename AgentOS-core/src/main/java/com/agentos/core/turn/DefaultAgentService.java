@@ -222,7 +222,8 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                 managedSink,
                 startedTurn,
                 toolSnapshot,
-                capabilities);
+                capabilities,
+                startNanos);
     }
 
     private TurnResult executeStarted(
@@ -233,12 +234,23 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
             ManagedTurnSink managedSink,
             TurnSnapshot turn,
             com.agentos.core.tool.ToolCatalogSnapshot toolSnapshot,
-            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities,
+            long startNanos) {
         // 预算按 turnId 显式登记；MDC 只用于当前线程的日志关联，不作为业务上下文传递。
         budgets.register(turnId, budget);
         MDC.put("sessionId", turn.sessionId().toString());
         MDC.put("turnId", turn.turnId().toString());
         MDC.put("agent", agent.profile().name());
+        // 只记录规模和配置，不记录用户消息正文。
+        log.info(
+                "轮次开始 agent={} channel={} trigger={} timeoutSec={} maxIterations={} tools={} messageChars={}",
+                agent.profile().name(),
+                request.channel(),
+                request.trigger(),
+                agent.profile().settings().turnTimeout().toSeconds(),
+                agent.profile().settings().maxIterations(),
+                toolSnapshot == null ? 0 : toolSnapshot.modelCallbacks().size(),
+                request.message().length());
         TurnResult result;
         try {
             // 3. TurnRunner 在另一条虚拟线程中跑循环，并对外层等待设置 hard stop。
@@ -286,6 +298,11 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
         } catch (TurnDeadlineExceededException e) {
             boolean closing = budget.cancelled() && !budget.expired();
             TurnStatus interruptedStatus = closing ? TurnStatus.INTERRUPTED : TurnStatus.TIMED_OUT;
+            log.warn(
+                    "轮次{} timeoutSec={} elapsedMs={}",
+                    closing ? "被取消" : "超过整轮时限",
+                    agent.profile().settings().turnTimeout().toSeconds(),
+                    elapsedMillis(startNanos));
             String timeoutText = budget.submissionAwareText("本轮处理超时");
             // 超时同样需要更新轮次、释放属于自己的租约，不能只取消线程就直接返回。
             TurnStore.FinishResult finish =
@@ -309,6 +326,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
         } catch (LeaseLostException e) {
+            log.warn("轮次中断：会话租约或输出端已失效 elapsedMs={}", elapsedMillis(startNanos));
             String interruptedText = budget.submissionAwareText("本轮处理已中断");
             TurnStore.FinishResult finish =
                     finishWithinHardStop(
@@ -331,6 +349,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                     ? PersistenceStatus.CONFIRMED
                                     : PersistenceStatus.UNCONFIRMED);
         } catch (ToolCleanupUnconfirmedException e) {
+            log.warn("轮次终止：工具资源清理未确认 elapsedMs={}", elapsedMillis(startNanos));
             // 资源是否停止与持久化是否确认分别表达；不能把未知执行状态反馈模型后继续。
             String cleanupMessage = budget.submissionAwareText(e.getMessage());
             TurnStore.FinishResult finish =
@@ -378,6 +397,12 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             0,
                             PersistenceStatus.UNCONFIRMED);
         } catch (RuntimeException e) {
+            // 只记录异常类型和 Provider 的失败类别，不记录异常文本（可能含响应内容或凭证）。
+            log.warn(
+                    "轮次失败 failureType={} {} elapsedMs={}",
+                    e.getClass().getSimpleName(),
+                    failureDetail(e),
+                    elapsedMillis(startNanos));
             String failedText = budget.submissionAwareText("处理失败");
             // 给用户固定失败文案；存储摘要做有限脱敏，不向输出端返回原始内部异常。
             TurnStore.FinishResult finish =
@@ -409,9 +434,39 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
             MDC.remove("agent");
             MDC.remove("iteration");
         }
+        log.atInfo()
+                .addKeyValue("event", "turn_end")
+                .addKeyValue("sessionId", turn.sessionId().toString())
+                .addKeyValue("turnId", turnId.toString())
+                .addKeyValue("agent", agent.profile().name())
+                .log(
+                        "轮次结束 status={} iterations={} durationMs={} persistence={} budgetPausedMs={}",
+                        result.status(),
+                        result.iterations(),
+                        elapsedMillis(startNanos),
+                        result.persistenceStatus(),
+                        java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(budget.pausedNanos()));
         // 已确认的业务结果不可被终结通知撤销，通知等待也共享 hard stop。
         managedSink.finish(result);
         return result;
+    }
+
+    private static long elapsedMillis(long startNanos) {
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+    }
+
+    /** Provider 失败时补充最后一次尝试的失败类别和 HTTP 状态；其他异常没有额外信息。 */
+    private static String failureDetail(RuntimeException error) {
+        if (error instanceof com.agentos.core.provider.ProviderCallException provider
+                && !provider.getCalls().isEmpty()) {
+            var last = provider.getCalls().getLast();
+            return "providerFailure="
+                    + last.failureKind()
+                    + (last.httpStatus() == null ? "" : " http=" + last.httpStatus())
+                    + " attempts="
+                    + provider.getCalls().size();
+        }
+        return "";
     }
 
     /** 未分类内部异常仅记录安全类型，不保存可能含凭证的原始详情。 */

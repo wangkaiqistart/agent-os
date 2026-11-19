@@ -80,4 +80,31 @@ public record LlmCallRecord(
             throw new IllegalArgumentException("图片数量和耗时不能为负数");
         }
     }
+
+    /**
+     * 供控制台阅读的一行摘要：只含 provider、模型、次数、耗时、token 和失败类别。
+     *
+     * <p>默认控制台格式不显示结构化字段，所以把现场定位最常用的几项放进正文；不含 prompt、
+     * 模型输出和 errorSummary，后者只出现在结构化字段里。
+     */
+    public String summary() {
+        var text = new StringBuilder();
+        text.append("provider=").append(provider);
+        text.append(" model=").append(responseModel != null ? responseModel : requestedModel);
+        text.append(" iteration=").append(iteration);
+        text.append(" mode=").append(mode);
+        text.append(" attempt=").append(attempt);
+        text.append(" durationMs=").append(durationMs);
+        if (success) {
+            text.append(" finish=").append(finishReason);
+            text.append(" toolCalls=").append(toolCallCount);
+            text.append(" tokens=").append(promptTokens).append('/').append(completionTokens);
+        } else {
+            text.append(" failure=").append(failureKind);
+            if (httpStatus != null) {
+                text.append(" http=").append(httpStatus);
+            }
+        }
+        return text.toString();
+    }
 }
