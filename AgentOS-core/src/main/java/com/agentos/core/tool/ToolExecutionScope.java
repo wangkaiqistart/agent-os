@@ -25,6 +25,11 @@ public final class ToolExecutionScope implements AutoCloseable {
             new java.util.concurrent.locks.ReentrantLock();
     private final LongSupplier clock;
     private final long deadlineNanos;
+    // 工具内部 I/O 检查点复用最近一次续租的最短间隔；0 表示每次都续租。
+    private final long renewIntervalNanos;
+    // 以下两项只在 checkpointLock 内读写。
+    private boolean renewedOnce;
+    private long lastRenewedNanos;
 
     private record OwnedResource(Object key, CancellationResource cancellation, Thread worker) {}
 
@@ -62,7 +67,21 @@ public final class ToolExecutionScope implements AutoCloseable {
             TurnExecutionBudget budget,
             Duration timeout,
             Runnable checkpoint) {
-        this(turn, callId, budget, timeout, checkpoint, System::nanoTime);
+        this(turn, callId, budget, timeout, checkpoint, Duration.ZERO, System::nanoTime);
+    }
+
+    /**
+     * 治理层使用：工具内部热循环（逐行搜索、输出排空、等待轮询）的检查点在 renewInterval 内复用上次续租，
+     * 预算与取消仍每次检查；{@link #checkpointAndRenew()} 不受此限制。
+     */
+    public ToolExecutionScope(
+            TurnContext turn,
+            String callId,
+            TurnExecutionBudget budget,
+            Duration timeout,
+            Runnable checkpoint,
+            Duration renewInterval) {
+        this(turn, callId, budget, timeout, checkpoint, renewInterval, System::nanoTime);
     }
 
     public ToolExecutionScope(
@@ -72,6 +91,17 @@ public final class ToolExecutionScope implements AutoCloseable {
             Duration timeout,
             Runnable checkpoint,
             LongSupplier clock) {
+        this(turn, callId, budget, timeout, checkpoint, Duration.ZERO, clock);
+    }
+
+    public ToolExecutionScope(
+            TurnContext turn,
+            String callId,
+            TurnExecutionBudget budget,
+            Duration timeout,
+            Runnable checkpoint,
+            Duration renewInterval,
+            LongSupplier clock) {
         this.turn = turn;
         this.callId = Objects.requireNonNull(callId);
         this.budget = Objects.requireNonNull(budget);
@@ -80,6 +110,10 @@ public final class ToolExecutionScope implements AutoCloseable {
         if (timeout == null || timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("工具预算必须为正数");
         }
+        if (renewInterval == null || renewInterval.isNegative()) {
+            throw new IllegalArgumentException("续租间隔不能为负数");
+        }
+        renewIntervalNanos = renewInterval.toNanos();
         deadlineNanos = Math.min(clock.getAsLong() + timeout.toNanos(), budget.deadlineNanos());
     }
 
@@ -103,7 +137,17 @@ public final class ToolExecutionScope implements AutoCloseable {
         return Math.max(0, deadlineNanos - clock.getAsLong());
     }
 
+    /** 工具内部 I/O 检查点：每次检查预算和取消，续租按 renewInterval 限频。 */
     public void checkpoint() {
+        checkpoint(false);
+    }
+
+    /** 治理边界（每次尝试前、取得结果后）的检查点：总是续租。 */
+    public void checkpointAndRenew() {
+        checkpoint(true);
+    }
+
+    private void checkpoint(boolean forceRenew) {
         checkBudget();
         try {
             // stdout/stderr/等待线程共享同一租约；串行检查，避免本轮续租事务互相抢同一行锁。
@@ -131,7 +175,18 @@ public final class ToolExecutionScope implements AutoCloseable {
             if (closed.get()) {
                 throw new IllegalStateException("工具调用已关闭");
             }
-            checkpoint.run();
+            // 线程已中断时不复用，交给续租检查点按租约丢失处理。
+            boolean reuse =
+                    !forceRenew
+                            && renewIntervalNanos > 0
+                            && renewedOnce
+                            && clock.getAsLong() - lastRenewedNanos < renewIntervalNanos
+                            && !Thread.currentThread().isInterrupted();
+            if (!reuse) {
+                checkpoint.run();
+                lastRenewedNanos = clock.getAsLong();
+                renewedOnce = true;
+            }
             checkBudget();
             if (closed.get()) {
                 throw new IllegalStateException("工具调用已关闭");

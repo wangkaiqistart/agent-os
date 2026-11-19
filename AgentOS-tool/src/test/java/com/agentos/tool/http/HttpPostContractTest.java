@@ -194,4 +194,34 @@ class HttpPostContractTest {
             assertThat(target.calls).hasValue(0);
         }
     }
+
+    @Test
+    void nonSuccessStatusIsReportedInsteadOfUnconfirmed() throws Exception {
+        try (var server = new LocalHttpServer();
+                var target = new LocalHttpServer();
+                var tools =
+                        new HttpTools(properties(), new WhitelistSandbox(List.of("127.0.0.1")))) {
+            target.text("/target", 200, "unused");
+            server.redirect("/redirect", target.url("/target"));
+            server.text("/rejected", 400, "REMOTE_PRIVATE_SENTINEL");
+            server.text("/broken", 503, "REMOTE_PRIVATE_SENTINEL");
+            var expected =
+                    java.util.Map.of(
+                            "/rejected", "HTTP 400",
+                            "/broken", "HTTP 503",
+                            "/redirect", "UNSUPPORTED_REDIRECT");
+            for (var entry : expected.entrySet()) {
+                try (var scope = scope(Duration.ofSeconds(1))) {
+                    assertThatThrownBy(() ->
+                                    tools.http_post(
+                                            server.url(entry.getKey()), "{}", null, context(scope)))
+                            .hasMessageContaining(entry.getValue())
+                            .hasMessageNotContaining("未确认")
+                            .hasMessageNotContaining("REMOTE_PRIVATE_SENTINEL");
+                }
+            }
+            assertThat(server.calls).hasValue(3);
+            assertThat(target.calls).hasValue(0);
+        }
+    }
 }

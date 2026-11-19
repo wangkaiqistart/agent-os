@@ -32,6 +32,10 @@ import org.springframework.ai.tool.metadata.ToolMetadata;
  * 不负责选择工具或循环调用；这些工作仍由唯一注入的官方 Manager 完成。
  */
 public final class GovernedToolCallback implements ToolCallback {
+    // 工具内部热循环（逐行搜索、输出排空、10ms 等待轮询）最多每秒续租一次，避免每次检查都发起数据库事务；
+    // 租约 TTL 远大于该间隔，治理边界的检查点仍每次续租。
+    private static final java.time.Duration IN_TOOL_RENEW_INTERVAL =
+            java.time.Duration.ofSeconds(1);
     private com.agentos.core.tool.ToolDescriptor registration;
     private String source = "builtin";
     private final com.agentos.tool.registry.ToolDefinitionValidator validator =
@@ -184,7 +188,12 @@ public final class GovernedToolCallback implements ToolCallback {
         }
         var scope =
                 new com.agentos.core.tool.ToolExecutionScope(
-                        turn, call.id(), budget, policy.timeout(), ledger::checkpoint);
+                        turn,
+                        call.id(),
+                        budget,
+                        policy.timeout(),
+                        ledger::checkpoint,
+                        IN_TOOL_RENEW_INTERVAL);
         var values = new java.util.HashMap<String, Object>(context.getContext());
         values.put(ToolContextKeys.TOOL_SCOPE, scope);
         var scopedContext = new ToolContext(java.util.Map.copyOf(values));
@@ -213,7 +222,7 @@ public final class GovernedToolCallback implements ToolCallback {
                                 : "UNAVAILABLE：工具来源不可用");
             }
             for (; ; ) {
-                scope.checkpoint();
+                scope.checkpointAndRenew();
                 if (budget.cancelled() || budget.expired()) {
                     throw new TurnDeadlineExceededException();
                 }
@@ -244,7 +253,7 @@ public final class GovernedToolCallback implements ToolCallback {
                 result = StructuredToolResult.limit(result, policy.maxResultChars(), original);
             }
             // 先治理已取得的结果，再检查租约/预算；检查失败的完成审计也不能携带原始长正文。
-            scope.checkpoint();
+            scope.checkpointAndRenew();
             scope.completed();
             status = "success";
         } catch (RuntimeException ex) {

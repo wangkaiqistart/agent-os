@@ -357,4 +357,65 @@ class ToolExecutionScopeTest {
         assertThat(scope.cleanupConfirmed()).isFalse();
         assertThat(scope.safeReason()).isEqualTo("CLEANUP_UNCONFIRMED");
     }
+
+    @Test
+    void inToolCheckpointsReuseRecentRenewalButStillObserveCancellation() {
+        var renewals = new AtomicInteger();
+        var clock = new AtomicLong(System.nanoTime());
+        var budget = TurnExecutionBudget.start(Duration.ofSeconds(30));
+        var scope =
+                new ToolExecutionScope(
+                        null,
+                        "throttled",
+                        budget,
+                        Duration.ofSeconds(10),
+                        renewals::incrementAndGet,
+                        Duration.ofSeconds(1),
+                        clock::get);
+        try {
+            // 治理边界总是续租，并作为后续复用的起点。
+            scope.checkpointAndRenew();
+            for (int i = 0; i < 1000; i++) {
+                scope.checkpoint();
+            }
+            assertThat(renewals).hasValue(1);
+            clock.addAndGet(Duration.ofMillis(1001).toNanos());
+            scope.checkpoint();
+            assertThat(renewals).hasValue(2);
+            scope.checkpointAndRenew();
+            assertThat(renewals).hasValue(3);
+            // 复用续租期间取消仍立即生效，不等待下一次续租。
+            budget.cancel();
+            assertThatThrownBy(scope::checkpoint).isInstanceOf(TurnDeadlineExceededException.class);
+            assertThat(renewals).hasValue(3);
+        } finally {
+            scope.close();
+        }
+    }
+
+    @Test
+    void interruptedThreadDoesNotReuseRecentRenewal() {
+        var renewals = new AtomicInteger();
+        var scope =
+                new ToolExecutionScope(
+                        null,
+                        "interrupted",
+                        TurnExecutionBudget.start(Duration.ofSeconds(30)),
+                        Duration.ofSeconds(10),
+                        () -> {
+                            renewals.incrementAndGet();
+                            if (Thread.currentThread().isInterrupted()) {
+                                throw new LeaseLostException();
+                            }
+                        },
+                        Duration.ofSeconds(60));
+        try {
+            scope.checkpointAndRenew();
+            Thread.currentThread().interrupt();
+            assertThatThrownBy(scope::checkpoint).isInstanceOf(LeaseLostException.class);
+        } finally {
+            Thread.interrupted();
+            scope.close();
+        }
+    }
 }

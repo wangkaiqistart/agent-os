@@ -120,12 +120,9 @@ agentos:
       port: 8080
       access-token: ${AGENTOS_TOOL_QUERY_TOKEN:}
     file:
-      read-allowed-paths:
-        - /Volumes/Data/my_project/agent-os/.AgentOS
-        - /tmp/agentos-tool-demo/input
-        - /tmp/agentos-tool-demo/output
-      write-allowed-paths:
-        - /tmp/agentos-tool-demo/output
+      # 默认无文件权限；部署者在 --config 指定的配置里填已存在的真实目录
+      read-allowed-paths: []
+      write-allowed-paths: []
       lock-root: .tool-locks
       max-file-bytes: 1048576
       max-results: 200

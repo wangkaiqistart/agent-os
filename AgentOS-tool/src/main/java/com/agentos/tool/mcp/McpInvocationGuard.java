@@ -63,7 +63,12 @@ public final class McpInvocationGuard implements ToolCallback {
                                             delegate.call(input, new ToolContext(Map.of())));
                                 } catch (RuntimeException failure) {
                                     result.completeExceptionally(
-                                            new McpToolException("REMOTE_FAILED：远程动作可能已生效"));
+                                            remoteReportedError(failure)
+                                                    ? new McpToolException(
+                                                            "REMOTE_ERROR：远程工具报告执行失败，调用已结束；"
+                                                                    + "远端错误内容不回显")
+                                                    : new McpToolException(
+                                                            "REMOTE_FAILED：远程动作可能已生效"));
                                 }
                             });
             try {
@@ -87,12 +92,24 @@ public final class McpInvocationGuard implements ToolCallback {
                 worker.interrupt();
                 throw new McpToolException("INTERRUPTED：远程动作可能已生效");
             } catch (ExecutionException failed) {
-                worker.interrupt();
-                throw new McpToolException("REMOTE_FAILED：远程动作可能已生效");
+                // 委托已经返回（远端报错或请求级失败），不再有在途调用，不能借 scope 关闭拆掉整条连接；
+                // 真正的断连由 transport 异常处理器单独失效该代次。
+                registration.close();
+                throw failed.getCause() instanceof McpToolException known
+                        ? known
+                        : new McpToolException("REMOTE_FAILED：远程动作可能已生效");
             } catch (RuntimeException failure) {
                 worker.interrupt();
                 throw failure;
             }
         }
+    }
+
+    /** 官方 SyncMcpToolCallback 把 isError=true 的结果包装成带固定前缀的 IllegalStateException。 */
+    private static boolean remoteReportedError(RuntimeException failure) {
+        return failure instanceof org.springframework.ai.tool.execution.ToolExecutionException
+                && failure.getCause() instanceof IllegalStateException remote
+                && remote.getMessage() != null
+                && remote.getMessage().startsWith("Error calling tool: ");
     }
 }

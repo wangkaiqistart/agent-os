@@ -166,6 +166,47 @@ class McpFailureBoundaryTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"stdio", "streamable-http"})
+    void remoteBusinessErrorKeepsConnectionAndHidesRemoteText(String mode) throws Exception {
+        try (var fixture = new LocalMcpServers(mode)) {
+            var registry = new ToolRegistry(List.of());
+            try (var service =
+                    McpTestSupport.service(
+                            List.of(fixture.configuration("biz")), fixture.directory(), registry)) {
+                service.start();
+                McpTestSupport.available(service, "biz");
+                var generation = service.generation("biz");
+                var callback =
+                        registry.resolve(
+                                        McpTestSupport.profile(
+                                                List.of("mcp_biz__echo"), List.of("biz")))
+                                .executionCallbacks()
+                                .getFirst();
+                fixture.control(Map.of("isError", true, "errorText", "REMOTE_BIZ_SENTINEL"));
+                assertThatThrownBy(() ->
+                                callback.call(
+                                        "{}",
+                                        McpTestSupport.context(
+                                                "mcp_biz__echo", Duration.ofSeconds(2))))
+                        .hasMessageContaining("REMOTE_ERROR")
+                        .hasMessageNotContaining("REMOTE_BIZ_SENTINEL");
+                // 远端业务错误不是断连：同一代次保持可用，下一次调用直接成功，不触发重连。
+                assertThat(generation.available()).isTrue();
+                assertThat(service.generation("biz")).isSameAs(generation);
+                fixture.control(Map.of());
+                assertThat(
+                                callback.call(
+                                        "{}",
+                                        McpTestSupport.context(
+                                                "mcp_biz__echo", Duration.ofSeconds(2))))
+                        .contains("echo");
+                assertThat(fixture.stats().path("call").asInt()).isEqualTo(2);
+                assertThat(fixture.stats().path("initialize").asInt()).isEqualTo(1);
+            }
+        }
+    }
+
     @Test
     void stdioDoesNotInheritUnlistedHostEnvironment() throws Exception {
         try (var fixture = new LocalMcpServers("stdio")) {

@@ -11,6 +11,7 @@ import com.agentos.core.turn.TurnExecutionBudget;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
@@ -162,12 +163,30 @@ public final class HttpTools implements AutoCloseable {
                         .header("Content-Type", type + "; charset=UTF-8")
                         .header("User-Agent", properties.userAgent())
                         .build();
+        HttpResponse<byte[]> response;
         try {
-            var response =
+            response =
                     BoundedHttpIo.exchange(client, request, scope, properties.maxResponseBytes());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException("HTTP提交响应状态：" + response.statusCode());
-            }
+        } catch (com.agentos.core.turn.TurnDeadlineExceededException
+                | com.agentos.core.turn.LeaseLostException
+                | ToolExecutionScope.ToolTimeoutException terminal) {
+            throw terminal;
+        } catch (RuntimeException failure) {
+            throw new IllegalStateException("HTTP提交未确认；提交可能已生效");
+        }
+        // 已收到完整状态行：服务端明确给出了结果，按状态码如实反馈，不再归为"未确认"。
+        int status = response.statusCode();
+        if (status >= 300 && status < 400) {
+            throw new IllegalStateException(
+                    "UNSUPPORTED_REDIRECT：服务端返回跳转（HTTP " + status + "），未跟随；请求已送达原地址，提交可能已生效");
+        }
+        if (status < 200 || status >= 300) {
+            throw new IllegalStateException(
+                    (status >= 500 ? "HTTP_STATUS：服务端处理失败（HTTP " : "HTTP_STATUS：服务端拒绝了请求（HTTP ")
+                            + status
+                            + "），响应正文不回显");
+        }
+        try {
             String text = new String(response.body(), StandardCharsets.UTF_8);
             boolean truncated = false;
             while (true) {
