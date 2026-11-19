@@ -57,6 +57,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
      */
     static HttpStatus toHttpStatus(ErrorCode code) {
         return switch (code) {
+            case UNAUTHORIZED -> HttpStatus.UNAUTHORIZED;
             case INVALID_ARGUMENT -> HttpStatus.BAD_REQUEST;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case SESSION_BUSY -> HttpStatus.CONFLICT;
