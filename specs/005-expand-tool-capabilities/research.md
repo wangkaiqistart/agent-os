@@ -123,7 +123,7 @@
   模型可见集合隐藏不可用项，执行集合为原已授权失效项保留安全拒绝回调，真实远程动作数为零。
 - **数据边界**：显式设置 `ToolContextToMcpMetaConverter.noOp()`，远程调用前另构造空业务上下文，
   不采用仅列举几个内部键再删除的黑名单。批准元数据未来另行白名单添加，本期默认为空。
-  MCP 远端 `isError` 内容按不可信错误处理。关闭官方 MCP callback/transport 原始内容日志，
+  MCP 远端 `isError` 内容按不可信数据处理：脱敏、限长后作为工具错误结果回给模型，不进日志。关闭官方 MCP callback/transport 原始内容日志，
   安全包装层只记来源、状态、类型，不记原始 Throwable、地址、stderr、参数或结果。
 - **Alternatives considered**：服务名即授权全部工具、不可用时回退同名本地工具、把完整
   `ToolContext` 给官方默认转换器均拒绝。

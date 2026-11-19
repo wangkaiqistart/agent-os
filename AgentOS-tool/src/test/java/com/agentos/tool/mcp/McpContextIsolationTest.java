@@ -57,13 +57,16 @@ class McpContextIsolationTest {
                                 true,
                                 "errorText",
                                 "REMOTE_PRIVATE_SENTINEL https://secret.example/?token=private"));
+                // 远端错误说明回给模型以便修正参数，但先经脱敏：URL 中的令牌不外泄，日志也不记录正文。
                 assertThatThrownBy(() ->
                                 callback.call(
                                         "{}",
                                         McpTestSupport.context(
                                                 "mcp_privacy__echo", Duration.ofSeconds(2))))
-                        .hasMessageNotContaining("REMOTE_PRIVATE_SENTINEL")
-                        .hasMessageNotContaining("secret.example");
+                        .hasMessageContaining("REMOTE_ERROR")
+                        .hasMessageContaining("REMOTE_PRIVATE_SENTINEL")
+                        .hasMessageNotContaining("token=private")
+                        .hasMessageNotContaining("TextContent[");
             }
         } finally {
             rootLogger.detachAppender(appender);

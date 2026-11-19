@@ -35,7 +35,8 @@ public final class McpToolRegistration {
                     if (!remote.matches("[A-Za-z0-9_-]+") || definition.name().length() > 64) {
                         throw new McpToolException("INVALID_DEFINITION");
                     }
-                    var guarded = new McpInvocationGuard(callback, generation, invalidate);
+                    var guarded =
+                            new McpInvocationGuard(callback, generation, invalidate, redactor);
                     String description = redactor.summarize(definition.description(), 4000);
                     if (description == null || description.isBlank()) {
                         description = "外部MCP工具";

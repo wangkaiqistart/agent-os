@@ -168,7 +168,7 @@ class McpFailureBoundaryTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"stdio", "streamable-http"})
-    void remoteBusinessErrorKeepsConnectionAndHidesRemoteText(String mode) throws Exception {
+    void remoteBusinessErrorKeepsConnectionAndReturnsRemoteText(String mode) throws Exception {
         try (var fixture = new LocalMcpServers(mode)) {
             var registry = new ToolRegistry(List.of());
             try (var service =
@@ -190,7 +190,7 @@ class McpFailureBoundaryTest {
                                         McpTestSupport.context(
                                                 "mcp_biz__echo", Duration.ofSeconds(2))))
                         .hasMessageContaining("REMOTE_ERROR")
-                        .hasMessageNotContaining("REMOTE_BIZ_SENTINEL");
+                        .hasMessageContaining("REMOTE_BIZ_SENTINEL");
                 // 远端业务错误不是断连：同一代次保持可用，下一次调用直接成功，不触发重连。
                 assertThat(generation.available()).isTrue();
                 assertThat(service.generation("biz")).isSameAs(generation);

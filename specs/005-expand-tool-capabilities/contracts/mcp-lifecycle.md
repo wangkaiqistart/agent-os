@@ -62,7 +62,9 @@ Agent 同时声明 server-id 与公开名。来源不可用但配置存在时 Ag
 设置 `ToolContextToMcpMetaConverter.noOp()`，在委托前再构造只含允许元数据的上下文（默认空）。
 会话/轮次对象、账本、预算、交互能力、workspace、租约全部不发送，不出现在模型输入 schema。
 只删除三个旧内部键不是充分隔离，新加内部键也不得外泄。
-远端 isError、JSON-RPC 错误、stderr 都是不可信原文，外层转换为安全错误。
+远端 isError、JSON-RPC 错误、stderr 都是不可信原文。isError 表示远端已完成调用并报告失败：
+以 `REMOTE_ERROR` 返回给模型，附带其文本内容，先经 Redactor 脱敏再截到 2000 字符，用于修正参数；
+不写日志，也不失效连接。JSON-RPC/传输错误与 stderr 仍只转换为固定分类的安全错误。
 官方 MCP callback/session/transport 内容 logger 关闭，安全层只记录关联 ID/来源/状态。
 
 scope 到期或取消后，先取消等待；SDK 不能确认单请求取消时使该 generation 不可用并有界关闭。

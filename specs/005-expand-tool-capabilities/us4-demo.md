@@ -21,7 +21,7 @@ mvn -B -ntp -pl AgentOS-tool -am -Dtest=McpTransportContractTest,McpContextIsola
 - PostgreSQL 测试对每 transport 执行允许、未授权、begin失败、complete未确认四种路径；实际远程动作分别为1/0/0/1，保留原 callId 与 `mcp:<id>` 来源。begin失败没有审计行，complete未确认保留原行和一次尝试，不重放。
 - 旧代次回调失效后调用计数不增加；新轮次隐藏不可用来源，恢复只能重新绑定新代次。新工具不自动授权，恢复缺失声明工具在建轮次前报错。
 - 后台启动调度返回小于1秒；慢来源不拖累健康来源。初始化及全分页共用10秒，累计1001个工具拒绝发布，慢分页不能逐页续时。
-- 1 MiB 以上响应、断线、跳转均安全失败，业务调用只有一次，重定向目标请求为0。STDIO 宿主 HOME/PATH 不继承，显式业务变量可见；stderr只排空。未知内部上下文哨兵未进入远端业务参数或 metadata，远端错误内容未进入公开错误或原始日志。
+- 1 MiB 以上响应、断线、跳转均安全失败，业务调用只有一次，重定向目标请求为0。STDIO 宿主 HOME/PATH 不继承，显式业务变量可见；stderr只排空。未知内部上下文哨兵未进入远端业务参数或 metadata，远端 isError 内容经脱敏、限长后只出现在返回模型的 REMOTE_ERROR 中，URL 令牌被遮蔽，未进入原始日志。
 
 ## 生命周期与限制
 
