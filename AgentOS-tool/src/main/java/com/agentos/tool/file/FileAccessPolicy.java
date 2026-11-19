@@ -9,13 +9,20 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 
-/** 按真实路径组件授权；工作根仅解析相对路径，不隐含授权。 */
+/**
+ * 按真实路径组件授权。
+ *
+ * <p>工作区内可读也可写（写入是否需要用户确认由沙箱判定）；工作区外只有配置的读/写根可访问，
+ * 其中写根视为预先授权，不再询问。
+ */
 public final class FileAccessPolicy {
     public static final String TEMP_PREFIX = ".agentos-write-";
     private final Path workspace;
     private final FileToolProperties properties;
     private final List<Path> reads;
     private final List<Path> writes;
+    // 工作区真实路径；工作区目录尚不存在时为空，此时只按配置的根授权。
+    private final List<Path> workspaceRoot;
     private final Path lockRoot;
 
     public FileAccessPolicy(Path workspace, FileToolProperties properties) {
@@ -23,6 +30,7 @@ public final class FileAccessPolicy {
         this.properties = properties;
         reads = canonicalRoots(properties.readAllowedPaths());
         writes = canonicalRoots(properties.writeAllowedPaths());
+        workspaceRoot = canonicalWorkspace(this.workspace);
         Path configured = resolve(properties.lockRoot());
         try {
             // 默认无权限的应用/查询不创建运行目录，现有祖先仍解析真实位置。
@@ -70,6 +78,15 @@ public final class FileAccessPolicy {
         return List.copyOf(result);
     }
 
+    private static List<Path> canonicalWorkspace(Path workspace) {
+        try {
+            Path real = workspace.toRealPath();
+            return Files.isDirectory(real) ? List.of(real) : List.of();
+        } catch (IOException missing) {
+            return List.of();
+        }
+    }
+
     private Path resolve(Path path) {
         return path.isAbsolute() ? path.normalize() : workspace.resolve(path).normalize();
     }
@@ -88,9 +105,20 @@ public final class FileAccessPolicy {
 
     public void enforce(Path canonical, boolean write) {
         if (protectedPath(canonical)
-                || (write ? writes : reads).stream().noneMatch(canonical::startsWith)) {
-            throw new SandboxViolationException("DENIED：文件目标未授权");
+                || (workspaceRoot.stream().noneMatch(canonical::startsWith)
+                        && (write ? writes : reads).stream().noneMatch(canonical::startsWith))) {
+            throw new SandboxViolationException("DENIED：文件目标未授权（只能访问工作区或配置的目录）");
         }
+    }
+
+    /** 写入目标是否在配置的写根内（预先授权，不需要用户确认）。 */
+    public boolean preApprovedWrite(Path canonical) {
+        return !protectedPath(canonical) && writes.stream().anyMatch(canonical::startsWith);
+    }
+
+    /** 工作区内的真实路径，工作区不存在时为空。 */
+    public java.util.Optional<Path> workspaceRealPath() {
+        return workspaceRoot.stream().findFirst();
     }
 
     public boolean protectedPath(Path path) {

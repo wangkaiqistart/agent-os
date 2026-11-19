@@ -205,6 +205,8 @@ abstract class ToolCapabilitiesFixture {
                 "agentos.tools.shell.commands[0].env.DEPLOYMENT_TOKEN",
                 () -> "shell-deployment-private");
         r.add("agentos.tools.shell.commands[0].allowed-cwds[0]", () -> workspace.toString());
+        // 只继承 LANG，HOME 等其他宿主变量作为"未列入继承名单"的哨兵（默认配置会继承 HOME）。
+        r.add("agentos.tools.shell.inherit-environment[0]", () -> "LANG");
         r.add("agentos.tools.search.endpoint", () -> url() + "/search");
         r.add("agentos.tools.search.api-key", () -> SECRET);
     }

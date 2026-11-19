@@ -12,6 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class FileToolsContractTest {
     @TempDir Path workspace;
+    @TempDir Path external;
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Test
@@ -37,13 +38,16 @@ class FileToolsContractTest {
                     .isEqualTo(6);
             assertThatThrownBy(() -> tools.write_file("absent/child", "x", false, ctx))
                     .hasMessageContaining("UNAVAILABLE");
+            // 工作区外的读写根相互独立：只配写根不代表可以读回。
             var writeOnly =
                     new FileTools(
                             new FileAccessPolicy(
                                     workspace,
-                                    FileToolProperties.defaults(List.of(), List.of(workspace))));
-            writeOnly.write_file("note.txt", "仅写", true, ctx);
-            assertThatThrownBy(() -> writeOnly.read_file("note.txt", ctx))
+                                    FileToolProperties.defaults(List.of(), List.of(external))));
+            String outside = external.resolve("note.txt").toString();
+            writeOnly.write_file(outside, "仅写", true, ctx);
+            assertThat(Files.readString(external.resolve("note.txt"))).isEqualTo("仅写");
+            assertThatThrownBy(() -> writeOnly.read_file(outside, ctx))
                     .hasMessageContaining("DENIED");
         }
     }

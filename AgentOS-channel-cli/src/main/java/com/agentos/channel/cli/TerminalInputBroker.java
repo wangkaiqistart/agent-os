@@ -1,5 +1,7 @@
 package com.agentos.channel.cli;
 
+import com.agentos.core.interaction.ApprovalDecision;
+import com.agentos.core.interaction.ApprovalRequest;
 import com.agentos.core.interaction.InteractionPort;
 import com.agentos.core.interaction.InteractionRequest;
 import com.agentos.core.interaction.InteractionResult;
@@ -113,6 +115,104 @@ public class TerminalInputBroker implements InteractionPort, AutoCloseable {
             }
         } finally {
             pending.result.complete(InteractionResult.of(InteractionResult.Status.CANCELLED));
+        }
+    }
+
+    /**
+     * 以 Claude Code 的方式请求授权：展示动作摘要和编号选项，读取一行回答。
+     *
+     * <p>与提问共用同一个 reader 和 owner；超时或取消后迟到的那一行照常丢弃。
+     */
+    @Override
+    public ApprovalDecision approve(ApprovalRequest request, ToolExecutionScope scope) {
+        scope.checkpoint();
+        Pending pending = acquire(ApprovalDecision.MAX_FEEDBACK_CHARS);
+        if (pending == null) {
+            return ApprovalDecision.of(ApprovalDecision.Outcome.EOF);
+        }
+        if (pending.generation == -1) {
+            return ApprovalDecision.of(ApprovalDecision.Outcome.CANCELLED);
+        }
+        var subject = request.subject();
+        var options = new java.util.ArrayList<ApprovalDecision.Outcome>();
+        output.println();
+        output.println("╭─ 需要授权：" + subject.title());
+        subject.lines().forEach(line -> output.println("│ " + line));
+        output.println("╰─");
+        options.add(ApprovalDecision.Outcome.ALLOW_ONCE);
+        output.println("  " + options.size() + ". 允许本次");
+        if (subject.sessionGrantAllowed()) {
+            options.add(ApprovalDecision.Outcome.ALLOW_SESSION);
+            output.println("  " + options.size() + ". 允许，本会话不再询问" + subject.grantLabel());
+        }
+        options.add(ApprovalDecision.Outcome.DENY);
+        output.println("  " + options.size() + ". 拒绝（也可以直接输入原因，告诉 Agent 该怎么做）");
+        output.print("请选择 [1-" + options.size() + "]：");
+        output.flush();
+        try {
+            while (true) {
+                scope.checkpoint();
+                long remaining = request.deadlineNanos() - System.nanoTime();
+                if (remaining <= 0) {
+                    output.println();
+                    output.println("（等待授权超时，已拒绝）");
+                    output.flush();
+                    return ApprovalDecision.of(ApprovalDecision.Outcome.TIMED_OUT);
+                }
+                try {
+                    var answer =
+                            pending.result.get(
+                                    Math.max(
+                                            1,
+                                            Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(10))),
+                                    TimeUnit.NANOSECONDS);
+                    return decide(answer, options);
+                } catch (java.util.concurrent.TimeoutException waiting) {
+                    // 等待期间持续复核租约和取消；整轮计时由调用方暂停。
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    scope.checkpoint();
+                    return ApprovalDecision.of(ApprovalDecision.Outcome.CANCELLED);
+                } catch (java.util.concurrent.ExecutionException failed) {
+                    return ApprovalDecision.of(ApprovalDecision.Outcome.EOF);
+                }
+            }
+        } finally {
+            pending.result.complete(InteractionResult.of(InteractionResult.Status.CANCELLED));
+        }
+    }
+
+    /** 数字按展示的选项解析；y/n 是快捷键；空行拒绝；其他文字视为拒绝原因。 */
+    static ApprovalDecision decide(
+            InteractionResult answer, java.util.List<ApprovalDecision.Outcome> options) {
+        switch (answer.status()) {
+            case ANSWERED -> {
+                String text = answer.answer().strip();
+                if (text.matches("[0-9]+")) {
+                    int index = Integer.parseInt(text) - 1;
+                    if (index >= 0 && index < options.size()) {
+                        return ApprovalDecision.of(options.get(index));
+                    }
+                    return ApprovalDecision.of(ApprovalDecision.Outcome.DENY);
+                }
+                String lower = text.toLowerCase(java.util.Locale.ROOT);
+                if (lower.equals("y") || lower.equals("yes")) {
+                    return ApprovalDecision.of(ApprovalDecision.Outcome.ALLOW_ONCE);
+                }
+                if (text.isEmpty() || lower.equals("n") || lower.equals("no")) {
+                    return ApprovalDecision.of(ApprovalDecision.Outcome.DENY);
+                }
+                return ApprovalDecision.deny(text);
+            }
+            case EOF -> {
+                return ApprovalDecision.of(ApprovalDecision.Outcome.EOF);
+            }
+            case TOO_LONG -> {
+                return ApprovalDecision.of(ApprovalDecision.Outcome.DENY);
+            }
+            default -> {
+                return ApprovalDecision.of(ApprovalDecision.Outcome.CANCELLED);
+            }
         }
     }
 

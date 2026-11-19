@@ -24,7 +24,12 @@ public final class ToolExecutionScope implements AutoCloseable {
     private final java.util.concurrent.locks.ReentrantLock checkpointLock =
             new java.util.concurrent.locks.ReentrantLock();
     private final LongSupplier clock;
-    private final long deadlineNanos;
+    // 工具自身的截止时刻（未计暂停）；实际截止还受整轮预算约束，见 deadlineNanos()。
+    private final long ownDeadlineNanos;
+    private final Object pauseLock = new Object();
+    private long pausedNanos;
+    private int pauseDepth;
+    private long pauseStartedNanos;
     // 工具内部 I/O 检查点复用最近一次续租的最短间隔；0 表示每次都续租。
     private final long renewIntervalNanos;
     // 以下两项只在 checkpointLock 内读写。
@@ -57,6 +62,12 @@ public final class ToolExecutionScope implements AutoCloseable {
     }
 
     public interface Registration extends AutoCloseable {
+        @Override
+        void close();
+    }
+
+    /** pauseClock 的恢复句柄；关闭即恢复计时，重复关闭无效果。 */
+    public interface Paused extends AutoCloseable {
         @Override
         void close();
     }
@@ -114,7 +125,7 @@ public final class ToolExecutionScope implements AutoCloseable {
             throw new IllegalArgumentException("续租间隔不能为负数");
         }
         renewIntervalNanos = renewInterval.toNanos();
-        deadlineNanos = Math.min(clock.getAsLong() + timeout.toNanos(), budget.deadlineNanos());
+        ownDeadlineNanos = clock.getAsLong() + timeout.toNanos();
     }
 
     public UUID turnId() {
@@ -130,11 +141,42 @@ public final class ToolExecutionScope implements AutoCloseable {
     }
 
     public long deadlineNanos() {
-        return deadlineNanos;
+        long now = clock.getAsLong();
+        long shift;
+        synchronized (pauseLock) {
+            shift = pausedNanos + (pauseDepth > 0 ? now - pauseStartedNanos : 0);
+        }
+        return Math.min(ownDeadlineNanos + shift, budget.deadlineNanos());
+    }
+
+    /**
+     * 等待人工授权期间同时暂停工具自身计时和整轮计时；关闭返回的句柄后恢复，可嵌套。
+     *
+     * <p>取消、租约检查不受影响，等待方仍应持续调用 {@link #checkpoint()}。
+     */
+    public Paused pauseClock() {
+        var turnPause = budget.pause();
+        synchronized (pauseLock) {
+            if (pauseDepth++ == 0) {
+                pauseStartedNanos = clock.getAsLong();
+            }
+        }
+        var closed = new AtomicBoolean();
+        return () -> {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            synchronized (pauseLock) {
+                if (--pauseDepth == 0) {
+                    pausedNanos += clock.getAsLong() - pauseStartedNanos;
+                }
+            }
+            turnPause.close();
+        };
     }
 
     public long remainingNanos() {
-        return Math.max(0, deadlineNanos - clock.getAsLong());
+        return Math.max(0, deadlineNanos() - clock.getAsLong());
     }
 
     /** 工具内部 I/O 检查点：每次检查预算和取消，续租按 renewInterval 限频。 */

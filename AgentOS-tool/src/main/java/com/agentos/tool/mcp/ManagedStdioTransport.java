@@ -45,15 +45,32 @@ public final class ManagedStdioTransport implements McpClientTransport {
     public Mono<Void> connect(
             Function<Mono<McpSchema.JSONRPCMessage>, Mono<McpSchema.JSONRPCMessage>> handler) {
         return Mono.fromRunnable(() -> {
-            var command = shells.authorizeExecutable(config.command().toString());
-            var cwd = shells.authorizeCwd(command, config.cwd(), config.cwd().toString());
+            // 程序与 cwd 来自部署者的 mcp_servers.yaml，本身就是授权；不复用模型 shell 工具的命令白名单。
+            java.nio.file.Path executable;
+            java.nio.file.Path cwd;
+            try {
+                if (config.command() == null
+                        || !config.command().isAbsolute()
+                        || config.cwd() == null) {
+                    throw new IOException();
+                }
+                executable = config.command().toRealPath();
+                cwd = config.cwd().toRealPath();
+                if (!java.nio.file.Files.isRegularFile(executable)
+                        || !java.nio.file.Files.isExecutable(executable)
+                        || !java.nio.file.Files.isDirectory(cwd)) {
+                    throw new IOException();
+                }
+            } catch (IOException | RuntimeException invalid) {
+                throw new McpToolException("CONNECT_FAILED");
+            }
             synchronized (writeLock) {
                 if (closed.get() || process != null) {
                     throw new McpToolException("CLOSED");
                 }
                 process =
                         ManagedProcess.start(
-                                command.executable(),
+                                executable,
                                 config.args(),
                                 cwd,
                                 new ProcessEnvironmentPolicy(shells).build(config.env()),

@@ -33,7 +33,8 @@ import org.springframework.context.annotation.Bean;
     ToolCallingProperties.class,
     com.agentos.tool.file.FileToolProperties.class,
     com.agentos.core.config.WorkspaceProperties.class,
-    com.agentos.tool.process.ShellToolProperties.class
+    com.agentos.tool.process.ShellToolProperties.class,
+    com.agentos.tool.sandbox.ApprovalProperties.class
 })
 public class ToolAutoConfiguration {
     @Bean
@@ -49,6 +50,20 @@ public class ToolAutoConfiguration {
         return new WhitelistSandbox(properties.allowedDomains(), files, shell);
     }
 
+    /** 进程内按会话记录"本会话不再询问"；CLI 与后续 HTTP 入口共用。 */
+    @Bean
+    com.agentos.tool.sandbox.SessionApprovalGrants sessionApprovalGrants() {
+        return new com.agentos.tool.sandbox.SessionApprovalGrants();
+    }
+
+    @Bean
+    com.agentos.tool.sandbox.ToolApprovalGate toolApprovalGate(
+            Sandbox sandbox,
+            com.agentos.tool.sandbox.SessionApprovalGrants grants,
+            com.agentos.tool.sandbox.ApprovalProperties properties) {
+        return new com.agentos.tool.sandbox.ToolApprovalGate(sandbox, grants, properties.timeout());
+    }
+
     @Bean
     com.agentos.tool.file.FileAccessPolicy fileAccessPolicy(
             com.agentos.core.config.WorkspaceProperties workspace,
@@ -58,8 +73,10 @@ public class ToolAutoConfiguration {
 
     @Bean
     com.agentos.tool.file.FileTools fileTools(
-            com.agentos.tool.file.FileAccessPolicy policy, Sandbox sandbox) {
-        return new com.agentos.tool.file.FileTools(policy, sandbox);
+            com.agentos.tool.file.FileAccessPolicy policy,
+            Sandbox sandbox,
+            com.agentos.tool.sandbox.ToolApprovalGate gate) {
+        return new com.agentos.tool.file.FileTools(policy, sandbox, gate);
     }
 
     public static java.util.List<ToolDescriptor> fileDescriptors(
@@ -90,8 +107,10 @@ public class ToolAutoConfiguration {
 
     @Bean
     com.agentos.tool.file.FileEditTools fileEditTools(
-            com.agentos.tool.file.FileAccessPolicy policy, Sandbox sandbox) {
-        return new com.agentos.tool.file.FileEditTools(policy, sandbox);
+            com.agentos.tool.file.FileAccessPolicy policy,
+            Sandbox sandbox,
+            com.agentos.tool.sandbox.ToolApprovalGate gate) {
+        return new com.agentos.tool.file.FileEditTools(policy, sandbox, (stage, temp) -> {}, gate);
     }
 
     @Bean
@@ -128,10 +147,10 @@ public class ToolAutoConfiguration {
     com.agentos.tool.process.ShellTools shellTools(
             com.agentos.core.config.WorkspaceProperties workspace,
             com.agentos.tool.process.ShellToolProperties properties,
-            Sandbox sandbox,
+            com.agentos.tool.sandbox.ToolApprovalGate gate,
             Redactor redactor) {
         return new com.agentos.tool.process.ShellTools(
-                workspace.root(), properties, sandbox, redactor);
+                workspace.root(), properties, redactor, gate);
     }
 
     public static java.util.List<ToolDescriptor> shellDescriptors(
@@ -204,8 +223,9 @@ public class ToolAutoConfiguration {
     }
 
     @Bean
-    HttpTools httpTools(HttpToolProperties properties, Sandbox sandbox) {
-        return new HttpTools(properties, sandbox);
+    HttpTools httpTools(
+            HttpToolProperties properties, com.agentos.tool.sandbox.ToolApprovalGate gate) {
+        return new HttpTools(properties, gate);
     }
 
     @Bean

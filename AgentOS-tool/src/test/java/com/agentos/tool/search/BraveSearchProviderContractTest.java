@@ -86,17 +86,19 @@ class BraveSearchProviderContractTest {
                             .hasMessageNotContaining("search-secret-sentinel");
                 }
             }
+            // 搜索端点由部署者配置，本身就是授权，不要求再列入 HTTP 域名白名单。
             try (var s = WebSearchContractTest.scope()) {
-                assertThatThrownBy(() ->
+                assertThat(
                                 new BraveSearchProvider(
                                                 WebSearchContractTest.config(
-                                                        url + "/search", "key"),
+                                                        url + "/search", "search-secret-sentinel"),
                                                 new WhitelistSandbox(List.of()),
                                                 redactor)
-                                        .search("q", 1, s))
-                        .isInstanceOf(com.agentos.core.tool.SandboxViolationException.class);
+                                        .search("hello world", 1, s)
+                                        .items())
+                        .hasSize(1);
             }
-            assertThat(requests).hasValue(1);
+            assertThat(requests).hasValue(2);
             assertThat(hits).hasValue(0);
         } finally {
             server.stop(0);

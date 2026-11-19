@@ -13,6 +13,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -20,12 +21,17 @@ import org.springframework.ai.tool.annotation.ToolParam;
 /** HTTP工具；跳转、连接、响应头和分片正文共享同一个scope。 */
 public final class HttpTools implements AutoCloseable {
     private final HttpToolProperties properties;
-    private final Sandbox sandbox;
+    private final com.agentos.tool.sandbox.ToolApprovalGate gate;
     private final HttpClient client;
 
     public HttpTools(HttpToolProperties properties, Sandbox sandbox) {
+        this(properties, com.agentos.tool.sandbox.ToolApprovalGate.of(sandbox));
+    }
+
+    public HttpTools(
+            HttpToolProperties properties, com.agentos.tool.sandbox.ToolApprovalGate gate) {
         this.properties = properties;
-        this.sandbox = sandbox;
+        this.gate = gate;
         client =
                 HttpClient.newBuilder()
                         .followRedirects(HttpClient.Redirect.NEVER)
@@ -33,7 +39,10 @@ public final class HttpTools implements AutoCloseable {
                         .build();
     }
 
-    @Tool(name = "http_get", description = "读取已授权 HTTP/HTTPS 地址，返回响应正文")
+    @Tool(
+            name = "http_get",
+            description =
+                    "读取 HTTP/HTTPS 地址并返回响应正文。域名未预先授权时会请求用户确认（每次跳转到新域名也会），" + "用户拒绝时不要重复访问同一地址")
     public String http_get(
             @ToolParam(description = "完整 HTTP 或 HTTPS URL") String url, ToolContext context) {
         var supplied = (ToolExecutionScope) context.getContext().get(ToolContextKeys.TOOL_SCOPE);
@@ -61,7 +70,9 @@ public final class HttpTools implements AutoCloseable {
         try {
             for (int redirects = 0; ; redirects++) {
                 scope.checkpoint();
-                sandbox.enforce(new SandboxAction(ActionType.HTTP, uri.toString()));
+                gate.enforce(
+                        new SandboxAction(ActionType.HTTP, uri.toString(), List.of("GET")),
+                        context);
                 var request =
                         HttpRequest.newBuilder(uri)
                                 .GET()
@@ -98,7 +109,10 @@ public final class HttpTools implements AutoCloseable {
         }
     }
 
-    @Tool(name = "http_post", description = "向已授权HTTP/HTTPS地址提交UTF-8正文；不重试或跟随跳转，2xx仅表示传输成功")
+    @Tool(
+            name = "http_post",
+            description =
+                    "向 HTTP/HTTPS 地址提交UTF-8正文；不重试或跟随跳转，2xx仅表示传输成功。" + "域名未预先授权时会请求用户确认，用户拒绝时不要重复提交")
     public String http_post(
             @ToolParam(description = "完整HTTP或HTTPS地址") String url,
             @ToolParam(description = "UTF-8文本或JSON正文") String body,
@@ -152,7 +166,7 @@ public final class HttpTools implements AutoCloseable {
         } catch (RuntimeException invalid) {
             throw new SandboxViolationException("DENIED：HTTP地址无效");
         }
-        sandbox.enforce(new SandboxAction(ActionType.HTTP, uri.toString()));
+        gate.enforce(new SandboxAction(ActionType.HTTP, uri.toString(), List.of("POST")), context);
         if (Boolean.getBoolean("jdk.httpclient.enableAllMethodRetry")) {
             throw new IllegalStateException("DENIED：不支持启用所有HTTP方法重试的运行环境");
         }

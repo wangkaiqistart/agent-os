@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -24,6 +25,7 @@ public final class FileEditTools {
     private final FileWriteCoordinator coordinator;
     private final AtomicFileCommitter committer;
     private final FileTools reader;
+    private final com.agentos.tool.sandbox.ToolApprovalGate gate;
 
     public FileEditTools(FileAccessPolicy policy, Sandbox sandbox) {
         this(policy, sandbox, (stage, temp) -> {});
@@ -31,15 +33,27 @@ public final class FileEditTools {
 
     public FileEditTools(
             FileAccessPolicy policy, Sandbox sandbox, AtomicFileCommitter.FaultHook hook) {
+        this(policy, sandbox, hook, com.agentos.tool.sandbox.ToolApprovalGate.of(sandbox));
+    }
+
+    public FileEditTools(
+            FileAccessPolicy policy,
+            Sandbox sandbox,
+            AtomicFileCommitter.FaultHook hook,
+            com.agentos.tool.sandbox.ToolApprovalGate gate) {
         this.policy = policy;
         this.sandbox = sandbox;
+        this.gate = gate;
         resolver = new FileTargetResolver(policy);
         coordinator = new FileWriteCoordinator(policy);
         committer = new AtomicFileCommitter(resolver, hook);
         reader = new FileTools(policy, sandbox);
     }
 
-    @Tool(name = "edit_file", description = "在同时有读写权限的UTF-8文件中精确替换唯一匹配，空白旧文本合法，多匹配拒绝")
+    @Tool(
+            name = "edit_file",
+            description =
+                    "在工作区内的UTF-8文件中精确替换唯一匹配的旧文本，执行前会请求用户确认；空白旧文本合法，" + "无匹配或多匹配时拒绝。用户拒绝时不要重复同样的修改")
     public String edit_file(
             @ToolParam(description = "待编辑路径") String path,
             @ToolParam(description = "长度大于0的旧文本，允许纯空白") String oldText,
@@ -54,7 +68,32 @@ public final class FileEditTools {
             throw new FileToolException("TOO_LARGE");
         }
         sandbox.enforce(new SandboxAction(ActionType.FILE_READ, path));
-        sandbox.enforce(new SandboxAction(ActionType.FILE_WRITE, path));
+        // 先确认能唯一匹配，注定失败的编辑不打扰用户确认；加锁后仍按摘要复核。
+        var planned = resolver.resolve(path, true);
+        String preview = reader.readText(planned, scope);
+        int at = preview.indexOf(oldText);
+        if (at < 0 || preview.indexOf(oldText, at + 1) >= 0) {
+            throw new FileToolException("CONFLICT：旧文本必须恰好匹配一次");
+        }
+        gate.enforce(
+                new SandboxAction(
+                        ActionType.FILE_WRITE,
+                        path,
+                        List.of(
+                                "方式  编辑（替换 1 处）",
+                                "位置  第 "
+                                        + (preview.substring(0, at)
+                                                        .chars()
+                                                        .filter(c -> c == '\n')
+                                                        .count()
+                                                + 1)
+                                        + " 行起",
+                                "变化  "
+                                        + oldText.lines().count()
+                                        + " 行 → "
+                                        + Math.max(1, newText.lines().count())
+                                        + " 行")),
+                context);
         var before = resolver.resolve(path, true);
         AtomicFileCommitter.Result committed = null;
         try (var lease = coordinator.acquire(before.target(), scope)) {

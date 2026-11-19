@@ -116,6 +116,31 @@ public record ShellToolProperties(
         throw new SandboxViolationException("DENIED：工作目录未授权");
     }
 
+    /**
+     * 查找预先授权的命令：真实程序精确匹配，且真实 cwd 位于该命令的允许目录内。
+     *
+     * <p>相对的允许目录按工作区解析，这里传入的 executable 与 cwd 都应已是真实路径。
+     */
+    public java.util.Optional<Command> preApproved(Path executable, Path cwd, Path workspace) {
+        for (var command : commands) {
+            if (!command.executable().equals(executable)) {
+                continue;
+            }
+            for (Path root : command.allowedCwds()) {
+                try {
+                    Path canonicalRoot =
+                            (root.isAbsolute() ? root : workspace.resolve(root)).toRealPath();
+                    if (Files.isDirectory(canonicalRoot) && cwd.startsWith(canonicalRoot)) {
+                        return java.util.Optional.of(command);
+                    }
+                } catch (IOException | java.nio.file.InvalidPathException missing) {
+                    // 配置的目录不存在时跳过该项，不放行。
+                }
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
     public static ShellToolProperties defaults(List<Command> commands) {
         return new ShellToolProperties(commands, List.of(), 65536, Duration.ofSeconds(30), 10000);
     }

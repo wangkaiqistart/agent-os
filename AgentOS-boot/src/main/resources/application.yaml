@@ -120,7 +120,7 @@ agentos:
       port: 8080
       access-token: ${AGENTOS_TOOL_QUERY_TOKEN:}
     file:
-      # 默认无文件权限；部署者在 --config 指定的配置里填已存在的真实目录
+      # 工作区内可直接读取，写入需用户确认；以下为工作区外的额外目录（写目录视为预先授权，不再询问）
       read-allowed-paths: []
       write-allowed-paths: []
       lock-root: .tool-locks
@@ -130,11 +130,16 @@ agentos:
       timeout: 30s
       max-result-chars: 10000
     shell:
+      # 列出的命令视为预先授权（无人值守入口只能执行这些）；其他程序在交互入口执行前询问用户
       commands:
-      inherit-environment: []
+      # 子进程只继承这些基础变量，不继承 AgentOS 的密钥等其余环境
+      inherit-environment: [PATH, HOME, LANG, TMPDIR, USER]
       max-output-bytes: 65536
       timeout: 30s
       max-result-chars: 10000
+    approval:
+      # 单次等待用户授权的上限；等待期间整轮计时暂停
+      timeout: 10m
     interaction:
       max-question-chars: 4000
       max-answer-chars: 4000
@@ -148,6 +153,7 @@ agentos:
       max-response-bytes: 1048576
       timeout: 30s
     http:
+      # 列出的域名视为预先授权；其他域名在交互入口访问前询问用户
       allowed-domains: ${AGENTOS_TOOLS_HTTP_ALLOWEDDOMAINS:}
       user-agent: AgentOS/0.1
       max-redirects: 3

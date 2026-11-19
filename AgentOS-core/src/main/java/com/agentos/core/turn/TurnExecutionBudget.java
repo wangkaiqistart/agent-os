@@ -14,6 +14,11 @@ public final class TurnExecutionBudget {
     private final long deadlineNanos;
     private final long hardStopNanos;
     private final Instant deadline;
+    // 等待人工授权时暂停计时：已结束的暂停累计到 pausedNanos，进行中的暂停从 pauseStartedNanos 起算。
+    private final Object pauseLock = new Object();
+    private long pausedNanos;
+    private int pauseDepth;
+    private long pauseStartedNanos;
     private final java.util.concurrent.atomic.AtomicLong cancellationStop =
             new java.util.concurrent.atomic.AtomicLong(Long.MAX_VALUE);
     private final java.util.concurrent.atomic.AtomicBoolean cancelled =
@@ -121,13 +126,58 @@ public final class TurnExecutionBudget {
                 now + nanos, now + nanos + cleanup.toNanos(), Instant.now().plus(duration));
     }
 
+    /**
+     * 暂停整轮计时，直到返回的句柄关闭；只用于等待人工授权，可嵌套。
+     *
+     * <p>暂停期间剩余预算保持不变；关闭后 deadline 与 hard stop 一起后移暂停时长。取消不受暂停影响。
+     */
+    public Pause pause() {
+        synchronized (pauseLock) {
+            if (pauseDepth++ == 0) {
+                pauseStartedNanos = System.nanoTime();
+            }
+        }
+        return new Pause();
+    }
+
+    public final class Pause implements AutoCloseable {
+        private final java.util.concurrent.atomic.AtomicBoolean closed =
+                new java.util.concurrent.atomic.AtomicBoolean();
+
+        private Pause() {}
+
+        @Override
+        public void close() {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            synchronized (pauseLock) {
+                if (--pauseDepth == 0) {
+                    pausedNanos += System.nanoTime() - pauseStartedNanos;
+                }
+            }
+        }
+    }
+
+    /** 累计暂停过的时长（含进行中的暂停）；为 0 表示截止时间从未后移。 */
+    public long pausedNanos() {
+        return shiftNanos(System.nanoTime());
+    }
+
+    /** 到 now 为止累计暂停的时长，含进行中的暂停。 */
+    private long shiftNanos(long now) {
+        synchronized (pauseLock) {
+            return pausedNanos + (pauseDepth > 0 ? now - pauseStartedNanos : 0);
+        }
+    }
+
     /** 适合存储或跨组件传递的绝对时间；进程内是否耗尽以单调计时检查为准。 */
     public Instant deadline() {
-        return deadline;
+        return deadline.plusNanos(shiftNanos(System.nanoTime()));
     }
 
     public long deadlineNanos() {
-        return deadlineNanos;
+        return deadlineNanos + shiftNanos(System.nanoTime());
     }
 
     /** 业务预算是否用尽：到期后 checkpoint 拒绝继续调用模型或追加答案。 */
@@ -142,12 +192,14 @@ public final class TurnExecutionBudget {
 
     /** 余量最小返回零，避免负数被下游误当作无限超时等特殊值。 */
     public long remainingNanos() {
-        return Math.max(0, deadlineNanos - System.nanoTime());
+        long now = System.nanoTime();
+        return Math.max(0, deadlineNanos + shiftNanos(now) - now);
     }
 
     /** TurnRunner 使用的外层等待余量，包含额外的一秒窗口。 */
     public long remainingHardStopNanos() {
-        return Math.max(0, Math.min(hardStopNanos, cancellationStop.get()) - System.nanoTime());
+        long now = System.nanoTime();
+        return Math.max(0, Math.min(hardStopNanos + shiftNanos(now), cancellationStop.get()) - now);
     }
 
     public Duration remaining() {

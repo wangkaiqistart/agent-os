@@ -102,6 +102,19 @@ public class AgentTurnEntity {
         return deadlineAt;
     }
 
+    /**
+     * 等待人工授权会暂停整轮计时，截止时间随之后移；只后移不提前。
+     *
+     * <p>库时钟与进程单调时钟有毫秒级偏差，后移不足 100ms 时不写库，避免每次续租都更新轮次行。
+     */
+    public boolean extendDeadline(Instant candidate) {
+        if (candidate == null || !candidate.isAfter(deadlineAt.plusMillis(100))) {
+            return false;
+        }
+        deadlineAt = candidate;
+        return true;
+    }
+
     /** 记录终态和对外文本，不会自动追加 session_messages，也不负责释放会话租约。 */
     public void finish(String status, String text, String error, Instant at) {
         this.status = status;

@@ -47,7 +47,9 @@ public final class FileSearchTools {
         return cap;
     }
 
-    @Tool(name = "grep", description = "在已授权UTF-8文件中按字面区分大小写查找，返回相对路径、1起行号和有界内容，标明截断与不完整")
+    @Tool(
+            name = "grep",
+            description = "在工作区（或部署者配置的目录）内的UTF-8文件中按字面区分大小写查找，返回相对路径、1起行号和有界内容，标明截断与不完整")
     public String grep(
             @ToolParam(description = "目录或文件路径") String path,
             @ToolParam(description = "非空白字面文本，不是正则") String text,
@@ -97,7 +99,9 @@ public final class FileSearchTools {
         return bounded("matches", items, truncated[0], scanned);
     }
 
-    @Tool(name = "glob", description = "按相对路径匹配已授权文件，支持*/?/**，不递归目录软链接，返回排序后的路径和不完整状态")
+    @Tool(
+            name = "glob",
+            description = "在工作区（或部署者配置的目录）内按相对路径模式匹配文件，支持*/?/**，不递归目录软链接，返回排序后的路径和不完整状态")
     public String glob(
             @ToolParam(description = "目录或文件路径") String path,
             @ToolParam(description = "/分隔的相对模式，仅支持*/?/**") String pattern,

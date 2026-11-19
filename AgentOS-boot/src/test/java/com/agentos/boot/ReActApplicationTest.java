@@ -392,8 +392,9 @@ class ReActApplicationTest {
                 tools.jackson.databind.json.JsonMapper.builder()
                         .build()
                         .readTree(model.requests().get(1));
+        // 未预先授权的域名需要用户确认；该入口无人值守，所以直接拒绝并告诉模型原因。
         assertThat(second.get("messages").get(3).get("content").asText())
-                .contains("沙箱拒绝")
+                .contains("DENIED", "无人值守")
                 .doesNotContain("DENIED_SECRET");
         var jdbc = new JdbcTemplate(context.getBean(DataSource.class));
         assertThat(

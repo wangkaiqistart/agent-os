@@ -36,14 +36,23 @@ public final class FileTools {
     private final FileWriteCoordinator coordinator;
     private final AtomicFileCommitter committer;
     private final Sandbox sandbox;
+    private final com.agentos.tool.sandbox.ToolApprovalGate gate;
 
     public FileTools(FileAccessPolicy policy) {
         this(policy, new com.agentos.tool.sandbox.WhitelistSandbox(List.of(), policy));
     }
 
     public FileTools(FileAccessPolicy policy, Sandbox sandbox) {
+        this(policy, sandbox, com.agentos.tool.sandbox.ToolApprovalGate.of(sandbox));
+    }
+
+    public FileTools(
+            FileAccessPolicy policy,
+            Sandbox sandbox,
+            com.agentos.tool.sandbox.ToolApprovalGate gate) {
         this.policy = policy;
         this.sandbox = sandbox;
+        this.gate = gate;
         resolver = new FileTargetResolver(policy);
         coordinator = new FileWriteCoordinator(policy);
         committer = new AtomicFileCommitter(resolver);
@@ -59,9 +68,9 @@ public final class FileTools {
         return scope;
     }
 
-    @Tool(name = "read_file", description = "严格读取已授权目录内的UTF-8普通文件，过大或非法编码会拒绝")
+    @Tool(name = "read_file", description = "读取工作区（或部署者配置的目录）内的UTF-8普通文件，无需用户确认；过大或非法编码会拒绝")
     public String read_file(
-            @ToolParam(description = "工作根相对路径或已授权绝对路径") String path, ToolContext context) {
+            @ToolParam(description = "工作区相对路径，或已配置目录内的绝对路径") String path, ToolContext context) {
         var scope = scope(context);
         sandbox.enforce(new SandboxAction(ActionType.FILE_READ, path));
         var version = resolver.resolve(path, false);
@@ -139,7 +148,11 @@ public final class FileTools {
         }
     }
 
-    @Tool(name = "write_file", description = "原子写入已授权目录，默认仅创建，覆盖已有文件必须显式overwrite=true，不创建父目录")
+    @Tool(
+            name = "write_file",
+            description =
+                    "原子写入工作区内的文件，执行前会请求用户确认；默认仅创建，覆盖已有文件必须显式overwrite=true，"
+                            + "不创建父目录。用户拒绝时不要重复同样的写入")
     public String write_file(
             @ToolParam(description = "待写文件路径") String path,
             @ToolParam(description = "UTF-8正文，可为空") String content,
@@ -165,7 +178,19 @@ public final class FileTools {
         } catch (CharacterCodingException invalid) {
             throw new FileToolException("INVALID_ARGUMENT");
         }
-        sandbox.enforce(new SandboxAction(ActionType.FILE_WRITE, path));
+        var planned = resolver.resolve(path, true);
+        if (planned.exists() && !Boolean.TRUE.equals(overwrite)) {
+            // 注定失败的写入不打扰用户确认。
+            throw new FileToolException("CONFLICT：目标已存在");
+        }
+        gate.enforce(
+                new SandboxAction(
+                        ActionType.FILE_WRITE,
+                        path,
+                        List.of(
+                                "方式  " + (planned.exists() ? "覆盖已有文件" : "新建"),
+                                "大小  " + bytes.length + " 字节")),
+                context);
         var beforeLock = resolver.resolve(path, true);
         AtomicFileCommitter.Result committed = null;
         try (var lease = coordinator.acquire(beforeLock.target(), scope)) {
@@ -192,7 +217,7 @@ public final class FileTools {
         return boundedText(result, "path");
     }
 
-    @Tool(name = "list_dir", description = "列出已授权目录的直接子项，不递归；达到条目或扫描上限会标明不完整")
+    @Tool(name = "list_dir", description = "列出工作区（或部署者配置的目录）内某个目录的直接子项，不递归；达到条目或扫描上限会标明不完整")
     public String list_dir(
             @ToolParam(description = "目录路径") String path,
             @ToolParam(description = "返回条数，默认200，可按部署限制收紧", required = false) Integer limit,

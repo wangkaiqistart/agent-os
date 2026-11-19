@@ -199,7 +199,17 @@ public class JpaTurnStore implements TurnStore {
         SessionEntity session = sessions.findByIdForUpdate(turn.sessionId()).orElse(null);
         AgentTurnEntity parent = turns.findById(turn.turnId()).orElse(null);
         Instant now = databaseNow();
-        if (budget.expired() || (parent != null && !parent.getDeadlineAt().isAfter(now))) {
+        if (budget.expired()) {
+            throw new com.agentos.core.turn.TurnDeadlineExceededException();
+        }
+        // 等待人工授权时进程内预算暂停、截止时间后移；同步到库内截止时间，否则会被误判为到期。
+        // 从未暂停的轮次不改库内截止时间，库内到期仍是独立的终止依据。
+        boolean extended =
+                parent != null
+                        && budget.pausedNanos() > 0
+                        && "RUNNING".equals(parent.getStatus())
+                        && parent.extendDeadline(now.plus(budget.remaining()));
+        if (parent != null && !parent.getDeadlineAt().isAfter(now)) {
             throw new com.agentos.core.turn.TurnDeadlineExceededException();
         }
         if (session == null
@@ -219,6 +229,9 @@ public class JpaTurnStore implements TurnStore {
                         now.plus(properties.leaseTtl()),
                         parent.getDeadlineAt().plus(properties.leaseGrace())));
         sessions.save(session);
+        if (extended) {
+            turns.save(parent);
+        }
         return true;
     }
 

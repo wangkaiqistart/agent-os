@@ -15,6 +15,8 @@ import java.util.concurrent.TimeUnit;
  * 必须由调用方显式传入；调用线程的 Spring 事务和 MDC 不会因此自动传播。
  */
 public final class TurnRunner {
+    private static final long SLICE_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
+
     /** 同步等待任务结果；运行时业务异常保留原类型，超时或等待被中断统一转成轮次超时。 */
     public <T> T run(Callable<T> task, TurnExecutionBudget budget) {
         Objects.requireNonNull(task);
@@ -24,14 +26,24 @@ public final class TurnRunner {
         try {
             Future<T> future = executor.submit(task);
             try {
-                // 至少等待 1ns，耗尽时也不传入可能被其他 API 解释为“无限”的零超时。
-                return future.get(
-                        Math.max(1, budget.remainingHardStopNanos()), TimeUnit.NANOSECONDS);
-            } catch (java.util.concurrent.TimeoutException e) {
-                // cancel(true) 只是请求中断；Provider 的 HTTP 超时仍是停止外部 I/O 的重要约束。
-                budget.cancel();
-                future.cancel(true);
-                throw new TurnDeadlineExceededException();
+                // 等待人工授权时整轮计时会暂停、hard stop 随之后移，所以分段等待并每段重读余量。
+                while (true) {
+                    long remaining = budget.remainingHardStopNanos();
+                    if (remaining <= 0) {
+                        // cancel(true) 只是请求中断；Provider 的 HTTP 超时仍是停止外部 I/O 的重要约束。
+                        budget.cancel();
+                        future.cancel(true);
+                        throw new TurnDeadlineExceededException();
+                    }
+                    try {
+                        // 至少等待 1ns，耗尽时也不传入可能被其他 API 解释为“无限”的零超时。
+                        return future.get(
+                                Math.max(1, Math.min(remaining, SLICE_NANOS)),
+                                TimeUnit.NANOSECONDS);
+                    } catch (java.util.concurrent.TimeoutException slice) {
+                        // 本段等完，回到循环重新计算余量。
+                    }
+                }
             } catch (InterruptedException e) {
                 // InterruptedException 会清掉中断标志，恢复后让上层也能感知关闭或取消。
                 Thread.currentThread().interrupt();

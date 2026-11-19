@@ -36,6 +36,7 @@ public final class GovernedToolCallback implements ToolCallback {
     // 租约 TTL 远大于该间隔，治理边界的检查点仍每次续租。
     private static final java.time.Duration IN_TOOL_RENEW_INTERVAL =
             java.time.Duration.ofSeconds(1);
+    private static final long WAIT_SLICE_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
     private com.agentos.core.tool.ToolDescriptor registration;
     private String source = "builtin";
     private final com.agentos.tool.registry.ToolDefinitionValidator validator =
@@ -389,12 +390,21 @@ public final class GovernedToolCallback implements ToolCallback {
                         });
         try {
             thread.start();
-            return future.get(wait, TimeUnit.NANOSECONDS);
-        } catch (TimeoutException timeout) {
-            if (budget.expired()) {
-                throw new TurnDeadlineExceededException();
+            // 等待人工授权时工具与整轮计时会暂停，所以分段等待并每段重读余量。
+            while (true) {
+                try {
+                    return future.get(
+                            Math.max(1, Math.min(wait, WAIT_SLICE_NANOS)), TimeUnit.NANOSECONDS);
+                } catch (TimeoutException slice) {
+                    wait = Math.min(budget.remainingNanos(), scope.remainingNanos());
+                    if (wait <= 0) {
+                        if (budget.expired()) {
+                            throw new TurnDeadlineExceededException();
+                        }
+                        throw new com.agentos.core.tool.ToolExecutionScope.ToolTimeoutException();
+                    }
+                }
             }
-            throw new com.agentos.core.tool.ToolExecutionScope.ToolTimeoutException();
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             if (budget.expired()) {

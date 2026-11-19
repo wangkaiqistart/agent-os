@@ -13,6 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 class EditFileContractTest {
     @TempDir Path root;
+    @TempDir Path external;
 
     private FileEditTools tools(FileAccessPolicy policy) {
         return new FileEditTools(policy, new WhitelistSandbox(List.of(), policy));
@@ -129,24 +130,27 @@ class EditFileContractTest {
     @Test
     void editingRequiresBothPermissionsAndBoundsOriginalAndResultBytes() throws Exception {
         Files.writeString(root.resolve("file"), "target");
+        // 工作区外的目标必须同时配置读根和写根才能编辑。
+        Files.writeString(external.resolve("file"), "target");
+        String outside = external.resolve("file").toString();
         for (boolean readOnly : List.of(true, false)) {
             var policy =
                     new FileAccessPolicy(
                             root,
                             FileToolProperties.defaults(
-                                    readOnly ? List.of(root) : List.of(),
-                                    readOnly ? List.of() : List.of(root)));
+                                    readOnly ? List.of(external) : List.of(),
+                                    readOnly ? List.of() : List.of(external)));
             try (var scope = FileTestSupport.scope()) {
                 assertThatThrownBy(() ->
                                 tools(policy)
                                         .edit_file(
-                                                "file",
+                                                outside,
                                                 "target",
                                                 "changed",
                                                 FileTestSupport.context(scope)))
                         .hasMessageContaining("DENIED");
             }
-            assertThat(Files.readString(root.resolve("file"))).isEqualTo("target");
+            assertThat(Files.readString(external.resolve("file"))).isEqualTo("target");
         }
         var tools = tools(FileTestSupport.policy(root));
         try (var scope = FileTestSupport.scope()) {
