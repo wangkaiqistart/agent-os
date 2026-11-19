@@ -238,10 +238,14 @@ public class JpaToolInvocationRecorder implements ToolInvocationRecorder {
                 || r.iteration() < 1
                 || r.toolCallId() == null
                 || r.toolCallId().isBlank()
-                || !"builtin".equals(r.source())
                 || r.toolName() == null
                 || r.toolName().isBlank()) {
             throw new AuditWriteException("工具审计缺少关联或来源");
+        }
+        try {
+            com.agentos.core.tool.ToolDescriptor.requireSource(r.source());
+        } catch (IllegalArgumentException invalid) {
+            throw new AuditWriteException("工具审计来源不合法");
         }
     }
 

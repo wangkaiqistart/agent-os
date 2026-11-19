@@ -274,7 +274,14 @@ public class JpaTurnStore implements TurnStore {
                 || session.getLeaseUntil() == null
                 || !session.getLeaseUntil().isAfter(now)
                 || !"active".equals(session.getStatus())) {
-            entity.interrupt("会话租约已失效", now);
+            // 仅仍 RUNNING 的本轮收口可追加固定警告；上方已有终态始终优先。
+            // 不接受失效 owner 的任意答案，也不清除接管者的租约。
+            var budget = budgets == null ? null : budgets.get(turn.turnId());
+            entity.finish(
+                    "INTERRUPTED",
+                    budget == null ? "本轮已中断" : budget.submissionAwareText("本轮已中断"),
+                    "会话租约已失效",
+                    now);
             if (turn.owner().equals(session.getLeaseOwner())) {
                 session.lease(null, null);
             }
