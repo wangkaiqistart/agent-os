@@ -13,6 +13,19 @@
     <description>核心能力四：内置 Tool、GovernedToolCallback、ToolRegistry、MCP Client、Sandbox、通知适配器（三合一模块，不要拆）</description>
 
     <dependencies>
+        <!-- 仅用于源码中有依据的局部误报说明，与质量门引擎版本一致。 -->
+        <dependency>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-annotations</artifactId>
+            <version>${spotbugs.version}</version>
+            <scope>provided</scope>
+            <optional>true</optional>
+        </dependency>
+        <!-- 直接复用官方 Jackson 3 schema 校验器，版本沿用 Spring AI BOM。 -->
+        <dependency>
+            <groupId>io.modelcontextprotocol.sdk</groupId>
+            <artifactId>mcp-json-jackson3</artifactId>
+        </dependency>
         <!-- 直接使用 Jackson 3 解析/脱敏工具 JSON；沿用 Boot BOM 管理的既有版本。 -->
         <dependency>
             <groupId>tools.jackson.core</groupId>
