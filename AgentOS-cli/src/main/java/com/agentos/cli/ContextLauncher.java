@@ -20,6 +20,19 @@ public interface ContextLauncher {
         return launch(workspaceRoot);
     }
 
+    default CatalogContext launchCatalog(Path workspaceRoot, Path configPath, boolean serve) {
+        throw new IllegalStateException("工具目录需要完整应用启动器");
+    }
+
+    interface CatalogContext extends AutoCloseable {
+        com.agentos.core.tool.ToolCatalogQuery query();
+
+        default void await() throws InterruptedException {}
+
+        @Override
+        default void close() {}
+    }
+
     /** 只暴露业务入口和关闭能力，CLI 无需持有 Spring 的 ApplicationContext 类型。 */
     interface RunningContext extends AutoCloseable {
         AgentService agentService();

@@ -86,6 +86,12 @@ public final class AgentOSCli {
                         providers));
         commandLine.addSubcommand(
                 "chat", new ChatCommand(launcher, directory, null, identity, providers));
+        var tool = new CommandLine(new ToolCommand());
+        tool.addSubcommand(
+                "list", new ToolListCommand(launcher, executionDirectory, configPath::get));
+        tool.addSubcommand(
+                "serve", new ToolServeCommand(launcher, executionDirectory, configPath::get));
+        commandLine.addSubcommand("tool", tool);
         // 参数解析也可能包含用户输入原值，统一输出安全用法说明，不泄露解析器原文。
         commandLine.setParameterExceptionHandler((error, arguments) -> {
             error.getCommandLine().getErr().println("命令参数不合法，请使用 --help 检查参数");

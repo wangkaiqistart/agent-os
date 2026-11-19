@@ -130,16 +130,22 @@ public final class ChatCommand implements Callable<Integer> {
                             ? new BufferedReader(
                                     new InputStreamReader(System.in, StandardCharsets.UTF_8))
                             : input;
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.equals("/exit")) {
-                    break;
+            try (var broker = new CliInputBroker(reader, spec.commandLine().getOut())) {
+                String line;
+                while ((line = broker.readChatLine()) != null) {
+                    if (line.equals("/exit")) {
+                        break;
+                    }
+                    if (line.isBlank()) {
+                        spec.commandLine().getErr().println("消息不能为空");
+                        continue;
+                    }
+                    process(
+                            context,
+                            selected,
+                            line,
+                            new com.agentos.core.interaction.TurnRuntimeCapabilities(broker));
                 }
-                if (line.isBlank()) {
-                    spec.commandLine().getErr().println("消息不能为空");
-                    continue;
-                }
-                process(context, selected, line);
             }
             return 0;
         } catch (IOException | RuntimeException e) {
@@ -207,12 +213,24 @@ public final class ChatCommand implements Callable<Integer> {
     }
 
     private int process(ContextLauncher.RunningContext context, String selected, String text) {
+        return process(context, selected, text, null);
+    }
+
+    private int process(
+            ContextLauncher.RunningContext context,
+            String selected,
+            String text,
+            com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
         try {
+            var request = new ProcessRequest("cli", identity.userId(), selected, text, "cli");
             TurnResult result =
-                    context.agentService()
-                            .process(
-                                    new ProcessRequest(
-                                            "cli", identity.userId(), selected, text, "cli"));
+                    capabilities == null
+                            ? context.agentService().process(request)
+                            : context.agentService()
+                                    .process(
+                                            request,
+                                            com.agentos.core.turn.TurnSink.NOOP,
+                                            capabilities);
             if (result.persistenceStatus() == PersistenceStatus.UNCONFIRMED) {
                 spec.commandLine()
                         .getErr()

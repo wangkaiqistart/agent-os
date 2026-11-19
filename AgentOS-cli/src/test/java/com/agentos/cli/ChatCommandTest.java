@@ -303,7 +303,7 @@ class ChatCommandTest {
     @Test
     void normalizedWorkspaceReachesLauncherAndInteractiveInputClosesOnExitOrEof() throws Exception {
         agent("main");
-        when(service.process(any())).thenReturn(success());
+        when(service.process(any(), any(), any())).thenReturn(success());
         var passed = new java.util.concurrent.atomic.AtomicReference<Path>();
         ContextLauncher recording =
                 root -> {
@@ -324,7 +324,7 @@ class ChatCommandTest {
             assertThat(passed.get()).isEqualTo(workspace.toAbsolutePath().normalize());
             assertThat(closed[0]).isTrue();
         }
-        verify(service, org.mockito.Mockito.times(2)).process(any());
+        verify(service, org.mockito.Mockito.times(2)).process(any(), any(), any());
         assertThat(output.toString()).contains("消息不能为空");
     }
 
@@ -338,7 +338,7 @@ class ChatCommandTest {
         org.mockito.Mockito.doThrow(new AgentOSException(ErrorCode.SESSION_BUSY, "busy"))
                 .doReturn(success())
                 .when(service)
-                .process(any());
+                .process(any(), any(), any());
         var command =
                 new ChatCommand(
                         launcher(),

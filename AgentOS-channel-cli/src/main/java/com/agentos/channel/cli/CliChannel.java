@@ -10,14 +10,18 @@ import java.util.function.Consumer;
  * 可独立测试的终端输入输出适配器，不把交互细节带进 core。
  *
  * <p>输入/输出流由调用方传入并管理关闭，本类只读取、打印与 flush。
- * 当前 ChatCommand 仍自行读标准输入，尚未接入本类。
+ * ChatCommand 与工具交互共用同一 broker，不竞争标准输入。
  */
 public final class CliChannel {
-    private final BufferedReader input;
+    private final TerminalInputBroker broker;
     private final PrintWriter output;
 
     public CliChannel(BufferedReader input, PrintWriter output) {
-        this.input = Objects.requireNonNull(input);
+        this(new TerminalInputBroker(input, output), output);
+    }
+
+    public CliChannel(TerminalInputBroker broker, PrintWriter output) {
+        this.broker = Objects.requireNonNull(broker);
         this.output = Objects.requireNonNull(output);
     }
 
@@ -26,8 +30,16 @@ public final class CliChannel {
      * IO 异常或回调异常直接传播，exit 不是 finally 清理钩子。
      */
     public void readLoop(Consumer<String> message, Runnable exit) throws IOException {
+        try {
+            readMessages(message, exit);
+        } finally {
+            broker.close();
+        }
+    }
+
+    private void readMessages(Consumer<String> message, Runnable exit) throws IOException {
         String line;
-        while ((line = input.readLine()) != null) {
+        while ((line = broker.readChatLine()) != null) {
             if (line.equals("/exit")) {
                 exit.run();
                 return;
