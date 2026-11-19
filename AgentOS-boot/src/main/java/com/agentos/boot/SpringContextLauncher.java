@@ -29,6 +29,11 @@ public final class SpringContextLauncher implements ContextLauncher {
     }
 
     @Override
+    public CatalogContext launchCatalog(Path workspaceRoot, Path configPath, boolean serve) {
+        return new ToolCatalogContextLauncher().launch(workspaceRoot, configPath, serve);
+    }
+
+    @Override
     public RunningContext launch(Path workspaceRoot) {
         return launch(workspaceRoot, null);
     }

@@ -70,6 +70,10 @@ server:
 # 日志：控制台给人看（chat 模式下保持可读），文件写 ECS JSON 给机器看
 # MDC 约定键：sessionId、turnId、agent、iteration，由 ReActLoop 在每轮开始时写入、结束时清理
 logging:
+  # MCP协议/回调的原始错误可能含远端正文或凭证，安全层只保留固定分类。
+  level:
+    io.modelcontextprotocol: "OFF"
+    org.springframework.ai.mcp: "OFF"
   file:
     name: .AgentOS/logs/agentos.log
   structured:
@@ -110,10 +114,47 @@ agentos:
     backoff-second: 500ms
     attempt-timeout: 2s                 # 远程数据库完整事务上限，含提交；仍扣同一整轮/清理预算
   tools:
+    query:
+      enabled: false
+      bind-address: 127.0.0.1
+      port: 8080
+      access-token: ${AGENTOS_TOOL_QUERY_TOKEN:}
+    file:
+      read-allowed-paths:
+        - /Volumes/Data/my_project/agent-os/.AgentOS
+        - /tmp/agentos-tool-demo/input
+        - /tmp/agentos-tool-demo/output
+      write-allowed-paths:
+        - /tmp/agentos-tool-demo/output
+      lock-root: .tool-locks
+      max-file-bytes: 1048576
+      max-results: 200
+      max-scan-entries: 1000
+      timeout: 30s
+      max-result-chars: 10000
+    shell:
+      commands:
+      inherit-environment: []
+      max-output-bytes: 65536
+      timeout: 30s
+      max-result-chars: 10000
+    interaction:
+      max-question-chars: 4000
+      max-answer-chars: 4000
+      timeout: 30s
+    search:
+      provider: brave
+      endpoint: https://api.search.brave.com/res/v1/web/search
+      api-key: ${AGENTOS_SEARCH_API_KEY:}
+      max-query-chars: 1000
+      max-results: 10
+      max-response-bytes: 1048576
+      timeout: 30s
     http:
       allowed-domains: ${AGENTOS_TOOLS_HTTP_ALLOWEDDOMAINS:}
       user-agent: AgentOS/0.1
       max-redirects: 3
+      max-request-bytes: 1048576
       max-response-bytes: 1048576
       timeout: 30s
       max-result-chars: 10000
