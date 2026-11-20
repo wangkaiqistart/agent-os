@@ -84,6 +84,30 @@ class RetryPolicyTest {
                 });
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"length", "content_filter"})
+    @DisplayName("结束原因为截断或内容过滤：是模型的正常输出，只发 1 次请求、记 1 条成功记录（007 FR-013）")
+    void doesNotRetryTruncatedOrFilteredResponses(String finishReason) {
+        stub.enqueue(
+                StubResponse.json(
+                        200, ChatBodies.OK.replace("\"stop\"", "\"" + finishReason + "\"")));
+
+        runner(stub.baseUrl())
+                .run(context -> {
+                    ProviderResult result = context.getBean(ProviderService.class).call(request());
+
+                    assertThat(stub.requestCount()).isEqualTo(1);
+                    assertThat(result.calls())
+                            .singleElement()
+                            .satisfies(call -> {
+                                assertThat(call.success()).isTrue();
+                                assertThat(call.finishReason()).isEqualToIgnoringCase(finishReason);
+                            });
+                    assertThat(result.response().getResult().getMetadata().getFinishReason())
+                            .isEqualToIgnoringCase(finishReason);
+                });
+    }
+
     @Test
     @DisplayName("503 连续两次：2 次请求后抛 PROVIDER_UNAVAILABLE，无 Retry-After 时等待约 500 毫秒（US2-2）")
     void failsAfterTwoServerErrors() {

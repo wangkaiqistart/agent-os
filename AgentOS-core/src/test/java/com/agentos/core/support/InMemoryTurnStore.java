@@ -95,6 +95,13 @@ public final class InMemoryTurnStore implements TurnStore {
         }
     }
 
+    /** 测试查看收尾时写入的状态、文本与错误信息。 */
+    public FinishResult result(UUID turnId) {
+        synchronized (sessions) {
+            return results.get(turnId);
+        }
+    }
+
     public Optional<TurnSnapshot> find(UUID id) {
         synchronized (sessions) {
             return Optional.ofNullable(turns.get(id));

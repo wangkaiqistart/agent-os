@@ -198,6 +198,43 @@ class PromptHistoryTest {
         }
     }
 
+    @Test
+    void truncatedFilteredAndCancelledTurnsKeepOnlyUserMessageAndFixedNotice() throws Exception {
+        PromptBuilder builder = builder();
+        LoadedAgent agent = agent(new AgentSettings(10, 20, 100_000, Duration.ofMinutes(5)));
+        List<HistoryTurn> history =
+                List.of(
+                        failed("t1", "FAILED", "OUTPUT_TRUNCATED：模型输出达到上限被截断", "q-truncated"),
+                        failed("t2", "FAILED", "CONTENT_FILTERED：回答被内容安全策略过滤", "q-filtered"),
+                        failed("t3", "CANCELLED", "本轮已取消", "q-cancelled"),
+                        failed("t4", "FAILED", "内部处理失败：X", "q-other"));
+
+        List<Message> prompt = builder.build(agent, history, "current");
+        List<String> texts = prompt.stream().map(Message::getText).toList();
+
+        assertThat(texts)
+                .contains(
+                        "q-truncated",
+                        "上一轮处理未完成：上一轮回答因长度上限被截断",
+                        "q-filtered",
+                        "上一轮处理未完成：上一轮回答被内容策略过滤",
+                        "q-cancelled",
+                        "上一轮处理未完成：本轮已被用户取消",
+                        "q-other",
+                        "上一轮处理未完成：处理失败")
+                .doesNotContain("PARTIAL_ANSWER")
+                .noneMatch(text -> text != null && text.contains("OUTPUT_TRUNCATED"))
+                .noneMatch(text -> text != null && text.contains("内部处理失败"));
+    }
+
+    private static HistoryTurn failed(String id, String status, String error, String question) {
+        return new HistoryTurn(
+                UUID.nameUUIDFromBytes(id.getBytes()),
+                status,
+                error,
+                List.of(new UserMessage(question), new AssistantMessage("PARTIAL_ANSWER")));
+    }
+
     private PromptBuilder builder() throws Exception {
         var workspace = Files.createTempDirectory("prompt-history");
         Files.writeString(workspace.resolve("AGENTS.md"), "bootstrap");

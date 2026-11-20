@@ -10,5 +10,8 @@ public final class ToolContextKeys {
 
     public static final String RUNTIME_CAPABILITIES = "agentos.runtimeCapabilities";
 
+    /** 值为本轮的 {@link TurnEventPublisher}；与其他内部键一样不会经 MCP 发给外部服务。 */
+    public static final String TURN_EVENTS = "agentos.turnEvents";
+
     private ToolContextKeys() {}
 }

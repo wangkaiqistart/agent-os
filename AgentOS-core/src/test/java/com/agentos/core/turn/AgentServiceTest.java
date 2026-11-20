@@ -70,6 +70,111 @@ class AgentServiceTest {
     }
 
     @Test
+    void fullTurnEventSequenceIsWellFormed() {
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withConfiguration(
+                        org.springframework.boot.autoconfigure.AutoConfigurations.of(
+                                org.springframework.ai.model.tool.autoconfigure
+                                        .ToolCallingAutoConfiguration.class))
+                .run(ctx -> {
+                    var workspace = Files.createTempDirectory("agent-service-events");
+                    AgentFixtures.agent(workspace, "a");
+                    Files.writeString(
+                            workspace.resolve("agents/a/AGENT.md"),
+                            "---\nname: a\nprovider:\n  model: test-model\ntools: [weather]\n---\n助手\n");
+                    var provider =
+                            new ScriptedProviderService()
+                                    .enqueue(
+                                            new ChatResponse(
+                                                    List.of(
+                                                            new Generation(
+                                                                    AssistantMessage.builder()
+                                                                            .content("先查")
+                                                                            .toolCalls(
+                                                                                    List.of(
+                                                                                            new AssistantMessage
+                                                                                                    .ToolCall(
+                                                                                                    "id1",
+                                                                                                    "function",
+                                                                                                    "weather",
+                                                                                                    "{}")))
+                                                                            .build()))))
+                                    .enqueue(
+                                            new ChatResponse(
+                                                    List.of(
+                                                            new Generation(
+                                                                    new AssistantMessage("晴")))));
+                    org.springframework.ai.tool.ToolCallback weather =
+                            org.springframework.ai.tool.function.FunctionToolCallback.builder(
+                                            "weather",
+                                            (java.util.Map<String, Object> in) -> "sunny")
+                                    .description("天气")
+                                    .inputType(java.util.Map.class)
+                                    .build();
+                    var sessions = new InMemorySessionManager();
+                    var turns = new InMemoryTurnStore(sessions);
+                    var service =
+                            new DefaultAgentService(
+                                    new AgentLoader(workspace.resolve("agents")),
+                                    new ContextLoader(workspace),
+                                    mock(ProviderCatalog.class),
+                                    sessions,
+                                    turns,
+                                    new ReActLoop(
+                                            provider,
+                                            new InMemoryMessageStore(),
+                                            new PromptBuilder(new ContextLoader(workspace)),
+                                            new TurnGuard(turns),
+                                            new com.agentos.core.tool.ToolCatalog() {
+                                                public void validate(
+                                                        com.agentos.core.agent.AgentProfile p) {}
+
+                                                public List<
+                                                                org.springframework.ai.tool
+                                                                        .ToolCallback>
+                                                        callbacks(
+                                                                com.agentos.core.agent.AgentProfile
+                                                                        p) {
+                                                    return List.of(weather);
+                                                }
+                                            },
+                                            new ToolExecutor(
+                                                    ctx.getBean(
+                                                            org.springframework.ai.model.tool
+                                                                    .ToolCallingManager.class))),
+                                    new TurnBudgetRegistry());
+                    var sink = new com.agentos.core.support.RecordingTurnSink();
+
+                    TurnResult result =
+                            service.process(new ProcessRequest("cli", "u", "a", "hi", "cli"), sink);
+
+                    assertThat(result.status()).isEqualTo(TurnStatus.SUCCEEDED);
+                    sink.assertWellFormed();
+                    assertThat(sink.types())
+                            .containsExactly(
+                                    "run.started",
+                                    "step.started",
+                                    "message.started",
+                                    "message.delta",
+                                    "message.ended",
+                                    "step.finished",
+                                    "tool.started",
+                                    "tool.finished",
+                                    "step.started",
+                                    "message.started",
+                                    "message.delta",
+                                    "message.ended",
+                                    "step.finished",
+                                    "run.completed");
+                    assertThat(sink.events)
+                            .allSatisfy(e -> {
+                                assertThat(e.turnId()).isEqualTo(result.turnId());
+                                assertThat(e.sessionId()).isNotNull();
+                            });
+                });
+    }
+
+    @Test
     void blankMessageIsRejectedBeforeCreatingSession() throws Exception {
         var workspace = Files.createTempDirectory("agent-service-blank");
         AgentFixtures.agent(workspace, "assistant");

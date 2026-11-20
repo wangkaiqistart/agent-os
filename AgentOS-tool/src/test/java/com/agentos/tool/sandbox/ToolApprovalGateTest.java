@@ -15,6 +15,8 @@ import com.agentos.core.tool.SandboxViolationException;
 import com.agentos.core.tool.ToolExecutionScope;
 import com.agentos.core.turn.ToolContextKeys;
 import com.agentos.core.turn.TurnContext;
+import com.agentos.core.turn.TurnEventPayload;
+import com.agentos.core.turn.TurnEventPublisher;
 import com.agentos.core.turn.TurnExecutionBudget;
 import com.agentos.tool.file.FileAccessPolicy;
 import com.agentos.tool.file.FileToolProperties;
@@ -278,5 +280,119 @@ class ToolApprovalGateTest {
             assertThat(budget.expired()).isFalse();
             scope.checkpoint();
         }
+    }
+
+    /** 记录发布的事件及发布时刻。 */
+    private record Published(TurnEventPayload payload, java.time.Instant at) {}
+
+    private static ToolContext contextWithEvents(
+            UUID sessionId, InteractionPort port, ToolExecutionScope scope, List<Published> out) {
+        var values = new java.util.HashMap<>(context(sessionId, port, scope).getContext());
+        TurnEventPublisher publisher =
+                payload -> out.add(new Published(payload, java.time.Instant.now()));
+        values.put(ToolContextKeys.TURN_EVENTS, publisher);
+        return new ToolContext(values);
+    }
+
+    @Test
+    void approvalEventsCarryRequestAndDecisionButNotDenialReason() {
+        var outcomes =
+                List.of(
+                        ApprovalDecision.of(ApprovalDecision.Outcome.ALLOW_ONCE),
+                        ApprovalDecision.of(ApprovalDecision.Outcome.ALLOW_SESSION),
+                        ApprovalDecision.deny("请改用 DENIAL_REASON_SENTINEL"),
+                        ApprovalDecision.of(ApprovalDecision.Outcome.TIMED_OUT),
+                        ApprovalDecision.of(ApprovalDecision.Outcome.UNSUPPORTED),
+                        ApprovalDecision.of(ApprovalDecision.Outcome.CANCELLED));
+        var expected =
+                List.of(
+                        TurnEventPayload.ApprovalDecisionKind.ALLOW_ONCE,
+                        TurnEventPayload.ApprovalDecisionKind.ALLOW_SESSION,
+                        TurnEventPayload.ApprovalDecisionKind.DENY,
+                        TurnEventPayload.ApprovalDecisionKind.TIMED_OUT,
+                        TurnEventPayload.ApprovalDecisionKind.UNATTENDED,
+                        TurnEventPayload.ApprovalDecisionKind.CANCELLED);
+        for (int i = 0; i < outcomes.size(); i++) {
+            var decision = outcomes.get(i);
+            var port = new ScriptedPort(request -> decision);
+            var events = new ArrayList<Published>();
+            var gate = ToolApprovalGate.of(sandbox(List.of(), List.of()));
+            try {
+                gate.enforce(
+                        new SandboxAction(ActionType.FILE_WRITE, "new.txt"),
+                        contextWithEvents(UUID.randomUUID(), port, scope(), events));
+            } catch (SandboxViolationException denied) {
+                assertThat(decision.allowed()).isFalse();
+            }
+            assertThat(events).hasSize(2);
+            var requested = (TurnEventPayload.ApprovalRequested) events.get(0).payload();
+            var resolved = (TurnEventPayload.ApprovalResolved) events.get(1).payload();
+            assertThat(requested.requestId()).isEqualTo(port.requests.getFirst().requestId());
+            assertThat(requested.toolCallId()).isEqualTo("call-1");
+            assertThat(requested.actionType()).isEqualTo("FILE_WRITE");
+            assertThat(requested.title()).isNotBlank();
+            assertThat(requested.lines()).isEqualTo(port.requests.getFirst().subject().lines());
+            assertThat(requested.sessionGrantAllowed()).isTrue();
+            assertThat(resolved.requestId()).isEqualTo(requested.requestId());
+            assertThat(resolved.decision()).isEqualTo(expected.get(i));
+            assertThat(events.toString()).doesNotContain("DENIAL_REASON_SENTINEL");
+        }
+    }
+
+    @Test
+    void sessionGrantSkipsApprovalEvents() {
+        var sessionId = UUID.randomUUID();
+        var gate = ToolApprovalGate.of(sandbox(List.of(), List.of()));
+        var port =
+                new ScriptedPort(
+                        request -> ApprovalDecision.of(ApprovalDecision.Outcome.ALLOW_SESSION));
+        var first = new ArrayList<Published>();
+        gate.enforce(
+                new SandboxAction(ActionType.FILE_WRITE, "a.txt"),
+                contextWithEvents(sessionId, port, scope(), first));
+        var second = new ArrayList<Published>();
+        gate.enforce(
+                new SandboxAction(ActionType.FILE_WRITE, "b.txt"),
+                contextWithEvents(sessionId, port, scope(), second));
+        assertThat(first).hasSize(2);
+        assertThat(second).isEmpty();
+    }
+
+    @Test
+    void approvalEventTimestampsReflectWaitWhileClockPaused() {
+        var port =
+                new ScriptedPort(request -> {
+                    try {
+                        Thread.sleep(300);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return ApprovalDecision.of(ApprovalDecision.Outcome.ALLOW_ONCE);
+                });
+        var events = new ArrayList<Published>();
+        ToolApprovalGate.of(sandbox(List.of(), List.of()))
+                .enforce(
+                        new SandboxAction(ActionType.FILE_WRITE, "slow.txt"),
+                        contextWithEvents(UUID.randomUUID(), port, scope(), events));
+        assertThat(Duration.between(events.get(0).at(), events.get(1).at()))
+                .isGreaterThanOrEqualTo(Duration.ofMillis(300));
+    }
+
+    @Test
+    void interactionFailureResolvesAsCancelled() {
+        var port =
+                new ScriptedPort(request -> {
+                    throw new com.agentos.core.turn.LeaseLostException();
+                });
+        var events = new ArrayList<Published>();
+        assertThatThrownBy(() ->
+                        ToolApprovalGate.of(sandbox(List.of(), List.of()))
+                                .enforce(
+                                        new SandboxAction(ActionType.FILE_WRITE, "x.txt"),
+                                        contextWithEvents(
+                                                UUID.randomUUID(), port, scope(), events)))
+                .isInstanceOf(com.agentos.core.turn.LeaseLostException.class);
+        assertThat(((TurnEventPayload.ApprovalResolved) events.getLast().payload()).decision())
+                .isEqualTo(TurnEventPayload.ApprovalDecisionKind.CANCELLED);
     }
 }

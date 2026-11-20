@@ -856,7 +856,7 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 - **错误码规范：** 标准 HTTP 状态码加内部错误码（400 参数错误、404 资源不存在、409 会话正有轮次在执行、500 内部错误、503 Provider 故障）。
 - **CORS：** 核心阶段开放所有源方便调试，扩展阶段加白名单。
 - **请求大小限制：** 单条消息最大 32KB，Session 历史返回最多最近 100 条。
-- **同步等待与超时：** `POST /sessions/{id}/messages` 和 `POST /agents/{name}/invoke` 最多同步等待 `agentos.web.sync-wait`（默认 60 秒）。轮次在此之前结束就直接返回结果；没结束则返回 **202**，响应体带 `sessionId` 和 `turnId`，轮次在后台继续，调用方用 `GET /sessions/{id}` 查看轮次状态（`RUNNING` / `SUCCEEDED` / `FAILED` / `TIMED_OUT` / `LIMIT_EXCEEDED` / `MAX_ITERATIONS` / `INTERRUPTED`）和最终回复。整轮超过 `turn_timeout` 时轮次标记 `TIMED_OUT`。这样不新增端点，也不会因为 HTTP 超时中途取消已经产生副作用的工具调用。
+- **同步等待与超时：** `POST /sessions/{id}/messages` 和 `POST /agents/{name}/invoke` 最多同步等待 `agentos.web.sync-wait`（默认 60 秒）。轮次在此之前结束就直接返回结果；没结束则返回 **202**，响应体带 `sessionId` 和 `turnId`，轮次在后台继续，调用方用 `GET /sessions/{id}` 查看轮次状态（`RUNNING` / `SUCCEEDED` / `FAILED` / `TIMED_OUT` / `LIMIT_EXCEEDED` / `MAX_ITERATIONS` / `INTERRUPTED` / `CANCELLED`）和最终回复。整轮超过 `turn_timeout` 时轮次标记 `TIMED_OUT`。这样不新增端点，也不会因为 HTTP 超时中途取消已经产生副作用的工具调用。
 - **无状态调用也有会话。** `invoke` 每次调用创建一个一次性会话（channel 为 `api-invoke`，user_id 为 `invoke:<uuid>`），轮次结束后立即归档，这样审计表的 `session_id`、`turn_id` 在任何入口下都有值。user_id 每次不同，并发调用同一个 Agent 时不会撞上"活跃会话唯一"的索引。
 
 ### 7.5 核心阶段不做的部分
@@ -1166,10 +1166,10 @@ volumes:
 | `turn_id` | `uuid` 主键 |
 | `session_id` | 关联会话 |
 | `trigger` | `cli` / `web` / `api-invoke` / `scheduler` / IM 渠道名 |
-| `status` | `RUNNING` / `SUCCEEDED` / `FAILED` / `TIMED_OUT` / `LIMIT_EXCEEDED` / `MAX_ITERATIONS` / `INTERRUPTED`（租约丢失、进程崩溃或关闭时未完成） |
+| `status` | `RUNNING` / `SUCCEEDED` / `FAILED` / `TIMED_OUT` / `LIMIT_EXCEEDED` / `MAX_ITERATIONS` / `INTERRUPTED`（租约丢失、进程崩溃或关闭时未完成） / `CANCELLED`（用户主动取消，V3 迁移加入） |
 | `iterations` | 实际迭代次数 |
 | `final_text` | 最终回复（轮询查询用） |
-| `error_message` | 失败信息（可空） |
+| `error_message` | 失败信息（可空）；输出被截断、内容被过滤的失败以错误码开头（`OUTPUT_TRUNCATED：…` / `CONTENT_FILTERED：…`），供下一轮上下文给出对应说明 |
 | `started_at` / `finished_at` | 起止时间 |
 | `deadline_at` | 整轮截止时间 |
 

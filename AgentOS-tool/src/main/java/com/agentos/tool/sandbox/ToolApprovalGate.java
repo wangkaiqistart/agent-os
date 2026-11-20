@@ -10,6 +10,8 @@ import com.agentos.core.tool.SandboxViolationException;
 import com.agentos.core.tool.ToolExecutionScope;
 import com.agentos.core.turn.ToolContextKeys;
 import com.agentos.core.turn.TurnContext;
+import com.agentos.core.turn.TurnEventPayload;
+import com.agentos.core.turn.TurnEventPublisher;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
@@ -77,7 +79,23 @@ public final class ToolApprovalGate {
                         ? supplied
                         : TurnRuntimeCapabilities.NONE;
         scope.checkpoint();
-        ApprovalDecision decision;
+        var events =
+                values.get(ToolContextKeys.TURN_EVENTS) instanceof TurnEventPublisher publisher
+                        ? publisher
+                        : null;
+        UUID requestId = UUID.randomUUID();
+        if (events != null) {
+            // 确认请求先于交互发出；请求标识就是传给入口的 ApprovalRequest 标识。
+            events.publish(
+                    new TurnEventPayload.ApprovalRequested(
+                            requestId,
+                            scope.callId(),
+                            subject.type().name(),
+                            subject.title(),
+                            subject.lines(),
+                            subject.sessionGrantAllowed()));
+        }
+        ApprovalDecision decision = null;
         long waitStarted = System.nanoTime();
         try (var paused = scope.pauseClock()) {
             decision =
@@ -85,13 +103,15 @@ public final class ToolApprovalGate {
                             .interaction()
                             .approve(
                                     new ApprovalRequest(
-                                            UUID.randomUUID(),
+                                            requestId,
                                             sessionId,
                                             turnId,
                                             scope.callId(),
                                             subject,
                                             System.nanoTime() + timeout.toNanos()),
                                     scope);
+        } finally {
+            publishResolved(events, requestId, scope.callId(), decision);
         }
         // 只记录类别和决定，不记录路径、参数或 URL。
         log.info(
@@ -121,6 +141,36 @@ public final class ToolApprovalGate {
             case TIMED_OUT -> throw new SandboxViolationException("DENIED：等待用户授权超时，操作未执行");
             case CANCELLED, EOF -> throw new SandboxViolationException("DENIED：授权请求已取消，操作未执行");
             default -> throw new SandboxViolationException("DENIED：未获得用户授权");
+        }
+    }
+
+    /**
+     * 确认结果事件；等待中途因取消或租约失效抛出时决定记为取消。异常路径上事件发不出去不能遮盖原因，
+     * 只有正常拿到决定时，发布失败才向上抛（输出端已失效）。用户输入的拒绝原因不进事件。
+     */
+    private static void publishResolved(
+            TurnEventPublisher events,
+            UUID requestId,
+            String toolCallId,
+            ApprovalDecision decision) {
+        if (events == null) {
+            return;
+        }
+        var resolved =
+                new TurnEventPayload.ApprovalResolved(
+                        requestId,
+                        toolCallId,
+                        decision == null
+                                ? TurnEventPayload.ApprovalDecisionKind.CANCELLED
+                                : TurnEventPayload.ApprovalDecisionKind.from(decision.outcome()));
+        if (decision != null) {
+            events.publish(resolved);
+            return;
+        }
+        try {
+            events.publish(resolved);
+        } catch (RuntimeException unavailable) {
+            log.debug("确认结果事件未送达：{}", unavailable.getClass().getSimpleName());
         }
     }
 }

@@ -6,6 +6,8 @@ import com.agentos.core.interaction.TurnRuntimeCapabilities;
 import com.agentos.core.tool.Redactor;
 import com.agentos.core.tool.ToolExecutionScope;
 import com.agentos.core.turn.ToolContextKeys;
+import com.agentos.core.turn.TurnEventPayload;
+import com.agentos.core.turn.TurnEventPublisher;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.ai.chat.model.ToolContext;
@@ -47,8 +49,23 @@ public final class AskUserTools {
                         redactor.redact(question),
                         scope.deadlineNanos(),
                         properties.maxAnswerChars());
+        var events =
+                context.getContext().get(ToolContextKeys.TURN_EVENTS)
+                                instanceof TurnEventPublisher publisher
+                        ? publisher
+                        : null;
+        if (events != null) {
+            events.publish(
+                    new TurnEventPayload.InputRequested(
+                            request.requestId(), scope.callId(), request.question()));
+        }
         scope.possiblyStarted();
-        InteractionResult result = capabilities.interaction().ask(request, scope);
+        InteractionResult result = null;
+        try {
+            result = capabilities.interaction().ask(request, scope);
+        } finally {
+            publishResolved(events, request.requestId(), scope.callId(), result);
+        }
         scope.checkpoint();
         if (result.status() != InteractionResult.Status.ANSWERED) {
             throw new IllegalStateException(result.status().name());
@@ -60,5 +77,32 @@ public final class AskUserTools {
         return JsonMapper.builder()
                 .build()
                 .writeValueAsString(Map.of("answer", redactor.redact(result.answer())));
+    }
+
+    /** 提问结果事件；答案正文不进事件。异常路径上发布失败不遮盖原因。 */
+    private static void publishResolved(
+            TurnEventPublisher events,
+            UUID requestId,
+            String toolCallId,
+            InteractionResult result) {
+        if (events == null) {
+            return;
+        }
+        var resolved =
+                new TurnEventPayload.InputResolved(
+                        requestId,
+                        toolCallId,
+                        result == null
+                                ? TurnEventPayload.InputOutcome.CANCELLED
+                                : TurnEventPayload.InputOutcome.from(result.status()));
+        if (result != null) {
+            events.publish(resolved);
+            return;
+        }
+        try {
+            events.publish(resolved);
+        } catch (RuntimeException ignored) {
+            // 交互已经因取消或租约失效中断，原因由上抛的异常表达。
+        }
     }
 }

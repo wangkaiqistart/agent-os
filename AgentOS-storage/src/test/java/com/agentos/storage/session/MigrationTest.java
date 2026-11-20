@@ -51,10 +51,10 @@ class MigrationTest extends PostgresIntegrationTest {
                                     POSTGRES.getPassword())
                             .schemas("legacy_upgrade")
                             .load();
-            // migrate 会先校验已执行脚本；不执行 repair，仅追加 V2。
-            assertThat(current.migrate().migrationsExecuted).isEqualTo(1);
+            // migrate 会先校验已执行脚本；不执行 repair，仅追加 V2、V3。
+            assertThat(current.migrate().migrationsExecuted).isEqualTo(2);
             current.validate();
-            assertThat(current.info().current().getVersion().getVersion()).isEqualTo("2");
+            assertThat(current.info().current().getVersion().getVersion()).isEqualTo("3");
             assertThat(current.info().applied())
                     .filteredOn(migration ->
                             migration.getVersion() != null
@@ -70,6 +70,17 @@ class MigrationTest extends PostgresIntegrationTest {
             assertThatThrownBy(() ->
                             statement.executeUpdate(
                                     "UPDATE tool_invocations SET status = 'invalid' WHERE tool_call_id = 'unconfirmed-call'"))
+                    .isInstanceOfSatisfying(
+                            SQLException.class,
+                            failure -> assertThat(failure.getSQLState()).isEqualTo("23514"));
+            // V3：用户取消的轮次可以落 CANCELLED，未列出的状态仍被拒绝。
+            assertThat(
+                            statement.executeUpdate(
+                                    "UPDATE agent_turns SET status = 'CANCELLED' WHERE turn_id = '22222222-2222-2222-2222-222222222222'"))
+                    .isEqualTo(1);
+            assertThatThrownBy(() ->
+                            statement.executeUpdate(
+                                    "UPDATE agent_turns SET status = 'CANCELLING' WHERE turn_id = '22222222-2222-2222-2222-222222222222'"))
                     .isInstanceOfSatisfying(
                             SQLException.class,
                             failure -> assertThat(failure.getSQLState()).isEqualTo("23514"));
@@ -114,6 +125,17 @@ class MigrationTest extends PostgresIntegrationTest {
                     definitions += constraints.getString(1);
                 }
                 assertThat(definitions).contains("unconfirmed");
+            }
+            try (var constraints =
+                    connection
+                            .createStatement()
+                            .executeQuery(
+                                    "select pg_get_constraintdef(oid) from pg_constraint where conrelid='agent_turns'::regclass and contype='c'")) {
+                String definitions = "";
+                while (constraints.next()) {
+                    definitions += constraints.getString(1);
+                }
+                assertThat(definitions).contains("CANCELLED");
             }
         }
     }

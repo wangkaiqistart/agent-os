@@ -154,6 +154,12 @@ public final class GovernedToolCallback implements ToolCallback {
         var turn = (TurnContext) context.getContext().get(ToolContextKeys.TURN_CONTEXT);
         var ledger = (ToolCallLedger) context.getContext().get(ToolContextKeys.TOOL_CALL_LEDGER);
         var budget = (TurnExecutionBudget) context.getContext().get(ToolContextKeys.TURN_BUDGET);
+        // 发布器可能缺失（直接调用治理回调的旧测试），缺失时不发事件。
+        var events =
+                context.getContext().get(ToolContextKeys.TURN_EVENTS)
+                                instanceof com.agentos.core.turn.TurnEventPublisher publisher
+                        ? publisher
+                        : null;
         ledger.checkpoint();
         var call = ledger.next(getToolDefinition().name());
         String safeInput = summary(input, 10000);
@@ -212,6 +218,12 @@ public final class GovernedToolCallback implements ToolCallback {
         boolean truncated = false;
         RuntimeException failure = null;
         try {
+            if (events != null) {
+                // 审计 begin 成功后、真正执行前，按单个工具发开始事件；参数摘要与审计同值。
+                events.publish(
+                        new com.agentos.core.turn.TurnEventPayload.ToolStarted(
+                                call.id(), call.name(), actualSource, turn.iteration(), safeInput));
+            }
             ledger.checkpoint();
             validator.validateInput(getToolDefinition().inputSchema(), input);
             if (snapshot != null && !snapshot.declaredTools().contains(call.name())) {
@@ -264,7 +276,8 @@ public final class GovernedToolCallback implements ToolCallback {
             status = "success";
         } catch (RuntimeException ex) {
             if (ex instanceof TurnDeadlineExceededException) {
-                status = "timeout";
+                // 用户主动取消也经截止时间信号停下工具，审计记为中断而不是超时。
+                status = budget.userCancelled() ? "interrupted" : "timeout";
             } else if (ex instanceof LeaseLostException || ex instanceof AuditWriteException) {
                 status = "interrupted";
             } else if (ex
@@ -355,6 +368,7 @@ public final class GovernedToolCallback implements ToolCallback {
             }
             throw new AuditWriteException("工具执行后的审计未确认，操作可能已经执行");
         }
+        publishFinished(events, end, failure, scope);
         if (failure instanceof AuditWriteException
                 || failure instanceof LeaseLostException
                 || failure instanceof TurnDeadlineExceededException
@@ -369,6 +383,47 @@ public final class GovernedToolCallback implements ToolCallback {
         }
         scope.confirmSubmission();
         return result;
+    }
+
+    /**
+     * 审计完成后发结束事件；结果摘要就是模型看到的那份。已有致命原因时，事件发不出去也以原因为准；
+     * 否则说明输出端已失效，按中断结束本轮。
+     */
+    private static void publishFinished(
+            com.agentos.core.turn.TurnEventPublisher events,
+            ToolInvocationRecord end,
+            RuntimeException failure,
+            com.agentos.core.tool.ToolExecutionScope scope) {
+        if (events == null) {
+            return;
+        }
+        boolean neverRan =
+                "sandbox_denied".equals(end.status()) || "limit_skipped".equals(end.status());
+        boolean possiblyExecuted =
+                !neverRan
+                        && ("success".equals(end.status())
+                                || "unconfirmed".equals(end.status())
+                                || (failure != null
+                                        && scope.executionState()
+                                                == com.agentos.core.tool.ToolExecutionScope
+                                                        .ExecutionState.POSSIBLY_STARTED));
+        try {
+            events.publish(
+                    new com.agentos.core.turn.TurnEventPayload.ToolFinished(
+                            end.toolCallId(),
+                            end.toolName(),
+                            com.agentos.core.turn.TurnEventPayload.ToolStatus.fromAudit(
+                                    end.status()),
+                            end.durationMs() == null ? 0 : end.durationMs(),
+                            end.resultTruncated(),
+                            // 失败时模型看到的是脱敏后的错误说明，事件给出同一份摘要。
+                            end.resultText() != null ? end.resultText() : end.errorMessage(),
+                            possiblyExecuted));
+        } catch (LeaseLostException | TurnDeadlineExceededException unavailable) {
+            if (failure == null) {
+                throw unavailable;
+            }
+        }
     }
 
     private static Object[] appendArg(Object[] args, Object extra) {
@@ -428,6 +483,10 @@ public final class GovernedToolCallback implements ToolCallback {
                     return future.get(
                             Math.max(1, Math.min(wait, WAIT_SLICE_NANOS)), TimeUnit.NANOSECONDS);
                 } catch (TimeoutException slice) {
+                    if (budget.cancelled()) {
+                        // 取消（含用户取消）不必等到截止时间：停止等待，finally 里中止工具线程。
+                        throw new TurnDeadlineExceededException();
+                    }
                     wait = Math.min(budget.remainingNanos(), scope.remainingNanos());
                     if (wait <= 0) {
                         if (budget.expired()) {

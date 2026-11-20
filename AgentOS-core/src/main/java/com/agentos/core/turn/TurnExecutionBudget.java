@@ -88,15 +88,55 @@ public final class TurnExecutionBudget {
         return !auditUnconfirmed.get();
     }
 
-    /** 取消只阻止后续业务动作，不重置 deadline，也不抢占已有数据库事务。 */
+    /** 取消原因；第一次取消的原因生效，用来区分"用户取消"与关闭、输出端失效等内部原因。 */
+    public enum CancelReason {
+        /** 用户主动取消，轮次以 CANCELLED 结束。 */
+        USER,
+        /** 进程关闭。 */
+        SHUTDOWN,
+        /** 输出端（事件消费方）失效。 */
+        OUTPUT_FAILED,
+        /** 超时、起步未确认、收尾等内部原因。 */
+        INTERNAL
+    }
+
+    /**
+     * 用户取消后留给循环退出和持久化收尾的时间。循环在执行线程被中断后通常很快退出，
+     * 剩余时间用来把"已取消"写进数据库；这也是取消后 2 秒内结束的上限，固定值、不开放配置。
+     */
+    private static final Duration USER_CANCEL_WINDOW = Duration.ofSeconds(2);
+
+    private static final Duration INTERNAL_CANCEL_WINDOW = Duration.ofSeconds(1);
+
+    private final java.util.concurrent.atomic.AtomicReference<CancelReason> cancelReason =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    /** 取消只阻止后续业务动作，不重置 deadline，也不抢占已有数据库事务。等价于内部原因取消。 */
     public void cancel() {
-        cancellationStop.accumulateAndGet(
-                System.nanoTime() + Duration.ofSeconds(1).toNanos(), Math::min);
+        cancel(CancelReason.INTERNAL);
+    }
+
+    /** 按原因取消：只收紧 hard stop，不会因为后来的取消而放宽；原因以第一次为准。 */
+    public void cancel(CancelReason reason) {
+        Objects.requireNonNull(reason, "reason");
+        Duration window = reason == CancelReason.USER ? USER_CANCEL_WINDOW : INTERNAL_CANCEL_WINDOW;
+        cancelReason.compareAndSet(null, reason);
+        cancellationStop.accumulateAndGet(System.nanoTime() + window.toNanos(), Math::min);
         cancelled.set(true);
     }
 
     public boolean cancelled() {
         return cancelled.get();
+    }
+
+    /** 第一次取消的原因；未取消时为 null。 */
+    public CancelReason cancelReason() {
+        return cancelReason.get();
+    }
+
+    /** 是否由用户主动取消。 */
+    public boolean userCancelled() {
+        return cancelReason.get() == CancelReason.USER;
     }
 
     private TurnExecutionBudget(long deadlineNanos, long hardStopNanos, Instant deadline) {

@@ -106,18 +106,34 @@ public final class PromptBuilder {
             }
         }
         if (!safe.isEmpty()) {
-            safe.add(new AssistantMessage("上一轮处理未完成：" + safeReason(turn.status())));
+            safe.add(new AssistantMessage("上一轮处理未完成：" + safeReason(turn)));
         }
         return List.copyOf(safe);
     }
 
-    /** 只使用固定状态文案，不把数据库里的原始异常原因直接带回模型上下文。 */
-    private static String safeReason(String status) {
-        return switch (status == null ? "" : status.toUpperCase(java.util.Locale.ROOT)) {
+    /**
+     * 只使用固定状态文案，不把数据库里的原始异常原因直接带回模型上下文。截断与过滤的失败在
+     * error_message 前带错误码，这里只读前缀来选文案，不使用其余内容。
+     */
+    private static String safeReason(HistoryTurn turn) {
+        String status =
+                turn.status() == null ? "" : turn.status().toUpperCase(java.util.Locale.ROOT);
+        String error = turn.errorMessage() == null ? "" : turn.errorMessage();
+        return switch (status) {
             case "TIMED_OUT" -> "本轮处理超时";
             case "INTERRUPTED" -> "本轮处理已中断";
             case "MAX_ITERATIONS" -> "达到模型调用上限";
             case "LIMIT_EXCEEDED" -> "工具调用次数超限";
+            case "CANCELLED" -> "本轮已被用户取消";
+            case "FAILED" -> {
+                if (error.startsWith(TurnFailureCode.OUTPUT_TRUNCATED.name())) {
+                    yield "上一轮回答因长度上限被截断";
+                }
+                if (error.startsWith(TurnFailureCode.CONTENT_FILTERED.name())) {
+                    yield "上一轮回答被内容策略过滤";
+                }
+                yield "处理失败";
+            }
             default -> "处理失败";
         };
     }

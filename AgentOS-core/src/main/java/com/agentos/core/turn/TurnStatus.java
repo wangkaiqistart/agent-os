@@ -14,5 +14,7 @@ public enum TurnStatus {
     /** 回收失去租约等无法继续的残留 RUNNING 记录时使用。 */
     INTERRUPTED,
     /** 仅用于需要 THROW 模式时表示工具限额终止。 */
-    LIMIT_EXCEEDED
+    LIMIT_EXCEEDED,
+    /** 用户主动取消；与进程关闭、租约丢失导致的 INTERRUPTED 区分。 */
+    CANCELLED
 }

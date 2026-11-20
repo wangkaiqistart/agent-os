@@ -60,7 +60,7 @@
 规则：
 
 1. `publish(payload)`：持锁 → 检查 `valid` 且未终结 → 分配序号 → 调用 `delegate.onEvent(event)` → 释放锁。消费方抛异常时置 `valid=false`、`budget.cancel(OUTPUT_FAILED)`，抛 `LeaseLostException`（沿用现有规则，US3 场景 7）。
-2. 等锁和投递只受 hard stop 约束，超时按消费方失效处理；发布不检查整轮截止时间，超时后仍要送达已开始的工具、步骤的结束事件。
+2. 等锁和投递只受 hard stop 约束，超时按消费方失效处理；过程事件不检查整轮截止时间，超时后仍要送达已开始的工具、步骤的结束事件。只有 `message.started` / `message.delta` 在整轮到期后被拒绝（抛 `TurnDeadlineExceededException`，不使发布器失效），让不响应截止时间的模型流停下。
 3. `finish(TurnResult)`：只执行一次；把 `TurnResult` 转成 `run.completed` / `run.failed` / `run.cancelled` 之一并发布，之后任何 `publish` 都被拒绝。终结投递沿用现有"有界等待、只尝试一次、失败只记日志"的规则。
 4. 控制面 payload 只能由 `finish` 发布，`publish` 拒绝控制面类型。
 

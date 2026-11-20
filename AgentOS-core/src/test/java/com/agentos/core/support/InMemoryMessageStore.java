@@ -18,6 +18,11 @@ public final class InMemoryMessageStore implements MessageStore {
         values.computeIfAbsent(turn.turnId(), k -> new ArrayList<>()).addAll(messages);
     }
 
+    /** 测试查看某一轮追加过的消息。 */
+    public synchronized List<Message> messages(java.util.UUID turnId) {
+        return List.copyOf(values.getOrDefault(turnId, List.of()));
+    }
+
     @Override
     public synchronized List<HistoryTurn> recentTurns(SessionSnapshot session, int maxTurns) {
         List<HistoryTurn> all =

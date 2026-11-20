@@ -158,7 +158,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
             TurnExecutionBudget budget,
             com.agentos.core.tool.ToolCatalogSnapshot toolSnapshot,
             com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
-        var managedSink = new ManagedTurnSink(sink, budget);
+        var managedSink = new ManagedTurnSink(sink, budget, turnId);
         // 2. 一个短事务内确保 session 存在、取得租约、写 turn 和 USER 消息。
         // channel + userId + Agent 名称区分活跃会话；同会话已有有效租约时这里会拒绝请求。
         TurnSnapshot turn;
@@ -200,20 +200,25 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                         "轮次起步未确认，turnId={}，stage=confirm，confirmation={}，persistenceStatus=UNCONFIRMED",
                         turnId,
                         confirmation);
-                budget.cancel();
+                budget.cancel(TurnExecutionBudget.CancelReason.INTERNAL);
                 var result =
                         new TurnResult(
                                 turnId,
                                 TurnStatus.FAILED,
                                 "轮次是否建立尚未确认，未调用模型",
                                 0,
-                                PersistenceStatus.UNCONFIRMED);
+                                PersistenceStatus.UNCONFIRMED,
+                                TurnFailureCode.START_UNCONFIRMED);
+                // 会话标识未知：这是唯一允许不带会话标识的一对事件，仍保证首条为轮次开始、终态唯一。
+                publishStarted(managedSink, agent, request);
                 managedSink.finish(result);
                 return result;
             }
             turn = found.get();
         }
         final TurnSnapshot startedTurn = turn;
+        // 之后的事件都带会话标识；只有上面的起步未确认分支发出的事件没有。
+        managedSink.bindSession(startedTurn.sessionId());
         return executeStarted(
                 request,
                 agent,
@@ -253,6 +258,8 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                 request.message().length());
         TurnResult result;
         try {
+            managedSink.publish(
+                    new TurnEventPayload.RunStarted(agent.profile().name(), request.trigger()));
             // 3. TurnRunner 在另一条虚拟线程中跑循环，并对外层等待设置 hard stop。
             // budget、turn、agent 都通过参数传过去，当前线程的事务与 MDC 不会自动跟过去。
             ReActLoop.Result outcome =
@@ -271,6 +278,10 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                                     capabilities),
                                     budget);
             String outcomeText = budget.submissionAwareText(outcome.text());
+            String errorText =
+                    outcome.status() == TurnStatus.SUCCEEDED
+                            ? null
+                            : storedError(outcome.failureCode(), outcomeText);
             // 4. 先完成持久化收尾，再生成给用户的结果。业务状态和持久化确认分开表达。
             TurnStore.FinishResult finish =
                     finishWithinHardStop(
@@ -280,21 +291,23 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                             turn,
                                             outcome.status().name(),
                                             outcomeText,
-                                            outcome.status() == TurnStatus.SUCCEEDED
-                                                    ? null
-                                                    : outcomeText,
+                                            errorText,
                                             outcome.iterations()));
+            TurnStatus finalStatus =
+                    finish.persistenceConfirmed()
+                            ? TurnStatus.valueOf(finish.status())
+                            : outcome.status();
             result =
                     new TurnResult(
                             turnId,
-                            finish.persistenceConfirmed()
-                                    ? TurnStatus.valueOf(finish.status())
-                                    : outcome.status(),
+                            finalStatus,
                             finish.persistenceConfirmed() ? finish.text() : outcomeText,
                             outcome.iterations(),
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
-                                    : PersistenceStatus.UNCONFIRMED);
+                                    : PersistenceStatus.UNCONFIRMED,
+                            // 库里已是别的终态（例如被接管为 INTERRUPTED）时，循环的错误码不再适用。
+                            finalStatus == outcome.status() ? outcome.failureCode() : null);
         } catch (TurnDeadlineExceededException e) {
             boolean closing = budget.cancelled() && !budget.expired();
             TurnStatus interruptedStatus = closing ? TurnStatus.INTERRUPTED : TurnStatus.TIMED_OUT;
@@ -324,7 +337,8 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             0,
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
-                                    : PersistenceStatus.UNCONFIRMED);
+                                    : PersistenceStatus.UNCONFIRMED,
+                            closing ? cancelCode(budget) : TurnFailureCode.TIMED_OUT);
         } catch (LeaseLostException e) {
             log.warn("轮次中断：会话租约或输出端已失效 elapsedMs={}", elapsedMillis(startNanos));
             String interruptedText = budget.submissionAwareText("本轮处理已中断");
@@ -347,7 +361,8 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             0,
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
-                                    : PersistenceStatus.UNCONFIRMED);
+                                    : PersistenceStatus.UNCONFIRMED,
+                            budget.cancelled() ? cancelCode(budget) : TurnFailureCode.LEASE_LOST);
         } catch (ToolCleanupUnconfirmedException e) {
             log.warn("轮次终止：工具资源清理未确认 elapsedMs={}", elapsedMillis(startNanos));
             // 资源是否停止与持久化是否确认分别表达；不能把未知执行状态反馈模型后继续。
@@ -371,7 +386,8 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             0,
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
-                                    : PersistenceStatus.UNCONFIRMED);
+                                    : PersistenceStatus.UNCONFIRMED,
+                            TurnFailureCode.TOOL_CLEANUP_UNCONFIRMED);
         } catch (com.agentos.core.audit.AuditWriteException e) {
             String auditMessage =
                     budget.submissionAwareText(
@@ -395,7 +411,8 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             TurnStatus.FAILED,
                             auditMessage,
                             0,
-                            PersistenceStatus.UNCONFIRMED);
+                            PersistenceStatus.UNCONFIRMED,
+                            TurnFailureCode.AUDIT_UNCONFIRMED);
         } catch (RuntimeException e) {
             // 只记录异常类型和 Provider 的失败类别，不记录异常文本（可能含响应内容或凭证）。
             log.warn(
@@ -424,10 +441,11 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             0,
                             finish.persistenceConfirmed() && budget.auditsConfirmed()
                                     ? PersistenceStatus.CONFIRMED
-                                    : PersistenceStatus.UNCONFIRMED);
+                                    : PersistenceStatus.UNCONFIRMED,
+                            failureCode(e));
         } finally {
             // 无论循环成功、失败或收尾抛错，都解除进程内预算引用和当前线程的日志标记。
-            budget.cancel();
+            budget.cancel(TurnExecutionBudget.CancelReason.INTERNAL);
             budgets.remove(turnId);
             MDC.remove("sessionId");
             MDC.remove("turnId");
@@ -446,6 +464,18 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                         elapsedMillis(startNanos),
                         result.persistenceStatus(),
                         java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(budget.pausedNanos()));
+        // 库里已是成功或取消的终态时不带错误码，事件与返回值保持一致。
+        if (result.failureCode() != null
+                && (result.status() == TurnStatus.SUCCEEDED
+                        || result.status() == TurnStatus.CANCELLED)) {
+            result =
+                    new TurnResult(
+                            result.turnId(),
+                            result.status(),
+                            result.text(),
+                            result.iterations(),
+                            result.persistenceStatus());
+        }
         // 已确认的业务结果不可被终结通知撤销，通知等待也共享 hard stop。
         managedSink.finish(result);
         return result;
@@ -453,6 +483,47 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
 
     private static long elapsedMillis(long startNanos) {
         return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+    }
+
+    /** 起步未确认分支的轮次开始事件；发布失败不影响已经确定的返回值。 */
+    private static void publishStarted(
+            ManagedTurnSink sink, LoadedAgent agent, ProcessRequest request) {
+        try {
+            sink.publish(
+                    new TurnEventPayload.RunStarted(agent.profile().name(), request.trigger()));
+        } catch (RuntimeException unavailable) {
+            log.warn("轮次开始事件未送达：{}", unavailable.getClass().getSimpleName());
+        }
+    }
+
+    /** 取消导致的中断按取消原因给错误码；用户取消在调用前已改成 CANCELLED。 */
+    private static TurnFailureCode cancelCode(TurnExecutionBudget budget) {
+        var reason = budget.cancelReason();
+        if (reason == TurnExecutionBudget.CancelReason.SHUTDOWN) {
+            return TurnFailureCode.SHUTDOWN;
+        }
+        if (reason == TurnExecutionBudget.CancelReason.OUTPUT_FAILED) {
+            return TurnFailureCode.OUTPUT_FAILED;
+        }
+        return TurnFailureCode.LEASE_LOST;
+    }
+
+    /** 通用失败：Provider 失败按最后一次尝试的分类给错误码，其他为内部错误。 */
+    private static TurnFailureCode failureCode(RuntimeException error) {
+        if (error instanceof com.agentos.core.provider.ProviderCallException provider
+                && !provider.getCalls().isEmpty()
+                && provider.getCalls().getLast().failureKind() != null) {
+            return switch (provider.getCalls().getLast().failureKind()) {
+                case RATE_LIMITED -> TurnFailureCode.PROVIDER_RATE_LIMITED;
+                case SERVER_ERROR -> TurnFailureCode.PROVIDER_SERVER_ERROR;
+                case CONNECTION -> TurnFailureCode.PROVIDER_CONNECTION;
+                case AUTH -> TurnFailureCode.PROVIDER_AUTH;
+                case INVALID_REQUEST -> TurnFailureCode.PROVIDER_INVALID_REQUEST;
+                case PROTOCOL -> TurnFailureCode.PROVIDER_PROTOCOL;
+                case CANCELLED -> TurnFailureCode.INTERNAL;
+            };
+        }
+        return TurnFailureCode.INTERNAL;
     }
 
     /** Provider 失败时补充最后一次尝试的失败类别和 HTTP 状态；其他异常没有额外信息。 */
@@ -467,6 +538,17 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                     + provider.getCalls().size();
         }
         return "";
+    }
+
+    /**
+     * 截断与过滤的失败在 error_message 前加错误码，下一轮上下文据此给出对应说明；
+     * 其他失败保持原有文本。
+     */
+    private static String storedError(TurnFailureCode code, String text) {
+        if (code == TurnFailureCode.OUTPUT_TRUNCATED || code == TurnFailureCode.CONTENT_FILTERED) {
+            return code.name() + "：" + text;
+        }
+        return text;
     }
 
     /** 未分类内部异常仅记录安全类型，不保存可能含凭证的原始详情。 */
@@ -505,7 +587,7 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
             running = java.util.List.copyOf(inFlight.values());
         }
         for (var active : running) {
-            active.budget().cancel();
+            active.budget().cancel(TurnExecutionBudget.CancelReason.SHUTDOWN);
             active.caller().interrupt();
         }
         long stop = System.nanoTime() + java.time.Duration.ofSeconds(1).toNanos();
