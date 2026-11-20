@@ -42,7 +42,9 @@ class AgentOSCliTest {
                 workspace.resolve("agents/assistant/AGENT.md"),
                 "---\nname: assistant\nprovider:\n  model: local-model\n---\n指令\n");
         AgentService service = mock(AgentService.class);
-        when(service.process(org.mockito.ArgumentMatchers.any()))
+        when(service.process(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(com.agentos.core.turn.TurnSink.class)))
                 .thenReturn(
                         new TurnResult(
                                 UUID.randomUUID(),
@@ -80,7 +82,10 @@ class AgentOSCliTest {
                         "hello");
 
         assertThat(exit).isZero();
-        verify(service).process(org.mockito.ArgumentMatchers.any());
+        verify(service)
+                .process(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(com.agentos.core.turn.TurnSink.class));
         assertThat(
                         AgentOSCli.execute(
                                 "--config",

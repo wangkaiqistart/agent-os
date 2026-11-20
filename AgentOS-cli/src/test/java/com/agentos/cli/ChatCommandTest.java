@@ -81,22 +81,22 @@ class ChatCommandTest {
         agent("main");
         agent("custom");
         Files.writeString(workspace.resolve("agents/main/AGENT.md"), "broken");
-        when(service.process(any())).thenReturn(success());
+        when(service.process(any(), any())).thenReturn(success());
         assertThat(chat(launcher(), "--profile", "custom")).isZero();
         assertThat(closed[0]).isTrue();
         var request = ArgumentCaptor.forClass(ProcessRequest.class);
-        verify(service).process(request.capture());
+        verify(service).process(request.capture(), any());
         assertThat(request.getValue().agentName()).isEqualTo("custom");
         agent("main");
         assertThat(chat(launcher())).isZero();
-        verify(service, org.mockito.Mockito.times(2)).process(request.capture());
+        verify(service, org.mockito.Mockito.times(2)).process(request.capture(), any());
         assertThat(request.getValue().agentName()).isEqualTo("main");
     }
 
     @Test
     void oldSingleAgentStillWorksAndMultipleAgentsListCandidates() throws Exception {
         agent("legacy");
-        when(service.process(any())).thenReturn(success());
+        when(service.process(any(), any())).thenReturn(success());
         assertThat(chat(launcher())).isZero();
         agent("another");
         assertThat(
@@ -132,7 +132,8 @@ class ChatCommandTest {
                             throw new IllegalStateException("synthetic-secret");
                         }))
                 .isEqualTo(1);
-        when(service.process(any())).thenThrow(new IllegalStateException("synthetic-secret"));
+        when(service.process(any(), any()))
+                .thenThrow(new IllegalStateException("synthetic-secret"));
         assertThat(chat(launcher())).isEqualTo(3);
         assertThat(closed[0]).isTrue();
         assertThat(output.toString()).doesNotContain("synthetic-secret", "Exception");
@@ -160,7 +161,7 @@ class ChatCommandTest {
         agent("main");
         var error = new com.agentos.core.tool.DuplicateAgentToolException("main", "http_get");
         error.initCause(new IllegalStateException("synthetic-cause-secret"));
-        when(service.process(any())).thenThrow(error);
+        when(service.process(any(), any())).thenThrow(error);
         assertThat(chat(launcher())).isEqualTo(2);
         assertThat(output.toString())
                 .contains("agents/main/AGENT.md", "tools", "http_get", "重复")
@@ -173,7 +174,7 @@ class ChatCommandTest {
         agent("main");
         var error = new UnknownAgentToolException("main", "does_not_exist");
         error.initCause(new IllegalStateException("synthetic-cause-secret"));
-        when(service.process(any())).thenThrow(error);
+        when(service.process(any(), any())).thenThrow(error);
 
         assertThat(chat(launcher())).isEqualTo(2);
         assertThat(output.toString())
@@ -185,7 +186,7 @@ class ChatCommandTest {
     @Test
     void unrelatedArgumentErrorsKeepSafeOutputAndDoNotExposeCauses() throws Exception {
         agent("main");
-        when(service.process(any()))
+        when(service.process(any(), any()))
                 .thenThrow(
                         new AgentOSException(
                                 ErrorCode.INVALID_ARGUMENT,
@@ -203,7 +204,7 @@ class ChatCommandTest {
     void unsuccessfulOrUnconfirmedTurnIsNotReportedAsSuccessAndBlankMessageDoesNotLaunch()
             throws Exception {
         agent("main");
-        when(service.process(any()))
+        when(service.process(any(), any()))
                 .thenReturn(
                         new TurnResult(
                                 UUID.randomUUID(),
@@ -226,7 +227,7 @@ class ChatCommandTest {
     @RepeatedTest(20)
     void newArchivesOnlyTheSelectedAgentBeforeProcessing() throws Exception {
         agent("main");
-        when(service.process(any())).thenReturn(success());
+        when(service.process(any(), any())).thenReturn(success());
         SessionManager sessions = mock(SessionManager.class);
         when(sessions.archiveIfIdle(any())).thenReturn(true);
         ContextLauncher withSessions =
@@ -248,7 +249,7 @@ class ChatCommandTest {
                 .archiveIfIdle(
                         org.mockito.ArgumentMatchers.argThat(key ->
                                 key.channel().equals("cli") && key.profileName().equals("main")));
-        verify(service).process(any());
+        verify(service).process(any(), any());
     }
 
     @Test
@@ -278,7 +279,7 @@ class ChatCommandTest {
     @Test
     void newWithoutAnActiveSessionStartsNormally() throws Exception {
         agent("main");
-        when(service.process(any())).thenReturn(success());
+        when(service.process(any(), any())).thenReturn(success());
         SessionManager sessions = mock(SessionManager.class);
         when(sessions.archiveIfIdle(any())).thenReturn(false);
         ContextLauncher withSessions =
@@ -297,7 +298,7 @@ class ChatCommandTest {
 
         assertThat(chat(withSessions, "--new")).isZero();
         verify(sessions).archiveIfIdle(any());
-        verify(service).process(any());
+        verify(service).process(any(), any());
     }
 
     @Test
@@ -331,7 +332,7 @@ class ChatCommandTest {
     @Test
     void busySingleMessageExitsThreeAndInteractiveBusyCanContinue() throws Exception {
         agent("main");
-        when(service.process(any()))
+        when(service.process(any(), any()))
                 .thenThrow(new AgentOSException(ErrorCode.SESSION_BUSY, "synthetic-secret"));
         assertThat(chat(launcher())).isEqualTo(3);
         assertThat(output.toString()).contains("上一条消息还在处理").doesNotContain("synthetic-secret");
@@ -356,7 +357,7 @@ class ChatCommandTest {
     @Test
     void injectedIdentityIsUsedForSessionRequestAndNoUserOverrideOptionExists() throws Exception {
         agent("main");
-        when(service.process(any())).thenReturn(success());
+        when(service.process(any(), any())).thenReturn(success());
         var command =
                 new ChatCommand(
                         launcher(),
@@ -370,8 +371,74 @@ class ChatCommandTest {
         assertThat(line.execute("--workspace", workspace.toString(), "--message", "hello"))
                 .isZero();
         var request = ArgumentCaptor.forClass(ProcessRequest.class);
-        verify(service).process(request.capture());
+        verify(service).process(request.capture(), any());
         assertThat(request.getValue().userId()).isEqualTo("synthetic-os-user");
+    }
+
+    /** 让桩服务像真实服务一样向输出端投递一轮带工具的事件，再返回成功结果。 */
+    private static Object deliverToolTurn(org.mockito.invocation.InvocationOnMock invocation) {
+        com.agentos.core.turn.TurnSink sink = invocation.getArgument(1);
+        UUID turn = UUID.randomUUID();
+        UUID session = UUID.randomUUID();
+        long[] seq = {0};
+        java.util.function.Consumer<com.agentos.core.turn.TurnEventPayload> send =
+                payload ->
+                        sink.onEvent(
+                                new com.agentos.core.turn.TurnEvent(
+                                        1,
+                                        session,
+                                        turn,
+                                        ++seq[0],
+                                        java.time.Instant.now(),
+                                        payload));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.RunStarted("main", "cli"));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.StepStarted(1));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.MessageStarted("m1", 1, null));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.MessageDelta("m1", "先查"));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.MessageEnded("m1"));
+        send.accept(
+                new com.agentos.core.turn.TurnEventPayload.ToolStarted(
+                        "c1", "http_get", "builtin", 1, "{\"url\":\"https://example.com\"}"));
+        send.accept(
+                new com.agentos.core.turn.TurnEventPayload.ToolFinished(
+                        "c1",
+                        "http_get",
+                        com.agentos.core.turn.TurnEventPayload.ToolStatus.SUCCESS,
+                        12,
+                        false,
+                        "ok",
+                        true));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.StepStarted(2));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.MessageStarted("m2", 2, null));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.MessageDelta("m2", "answer"));
+        send.accept(new com.agentos.core.turn.TurnEventPayload.MessageEnded("m2"));
+        send.accept(
+                new com.agentos.core.turn.TurnEventPayload.RunCompleted(
+                        "answer", 2, PersistenceStatus.CONFIRMED));
+        return success();
+    }
+
+    @Test
+    void singleMessageKeepsStdoutAndWritesToolProgressToStderr() throws Exception {
+        agent("main");
+        when(service.process(any(), any())).thenAnswer(ChatCommandTest::deliverToolTurn);
+        var out = new StringWriter();
+        var err = new StringWriter();
+        var line = AgentOSCli.commandLine(launcher(), workspace, key -> null);
+        line.setOut(new PrintWriter(out));
+        line.setErr(new PrintWriter(err));
+
+        int exit = line.execute("chat", "--workspace", workspace.toString(), "--message", "hello");
+
+        assertThat(exit).isZero();
+        // 标准输出与 007 之前逐字节一致：只有最终回答一行。
+        assertThat(out.toString()).isEqualTo("answer" + System.lineSeparator());
+        assertThat(err.toString())
+                .contains("⚙ http_get", "✓ http_get  成功", "── 完成 · 模型调用 2 次 · 工具 1 次")
+                .doesNotContain("先查", "answer");
+        var sink = ArgumentCaptor.forClass(com.agentos.core.turn.TurnSink.class);
+        verify(service).process(any(), sink.capture());
+        assertThat(sink.getValue().streaming()).isFalse();
     }
 
     private static TurnResult success() {

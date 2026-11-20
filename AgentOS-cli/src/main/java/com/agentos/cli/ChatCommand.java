@@ -1,5 +1,6 @@
 package com.agentos.cli;
 
+import com.agentos.channel.cli.TerminalTurnRenderer;
 import com.agentos.core.agent.AgentLoader;
 import com.agentos.core.error.AgentOSException;
 import com.agentos.core.error.ErrorCode;
@@ -223,14 +224,15 @@ public final class ChatCommand implements Callable<Integer> {
             com.agentos.core.interaction.TurnRuntimeCapabilities capabilities) {
         try {
             var request = new ProcessRequest("cli", identity.userId(), selected, text, "cli");
+            // 交互模式边生成边显示；--message 只把工具进度写标准错误，标准输出仍只有最终回答。
+            boolean interactive = capabilities != null;
+            var renderer =
+                    new TerminalTurnRenderer(
+                            spec.commandLine().getOut(), spec.commandLine().getErr(), interactive);
             TurnResult result =
-                    capabilities == null
-                            ? context.agentService().process(request)
-                            : context.agentService()
-                                    .process(
-                                            request,
-                                            com.agentos.core.turn.TurnSink.NOOP,
-                                            capabilities);
+                    interactive
+                            ? context.agentService().process(request, renderer, capabilities)
+                            : context.agentService().process(request, renderer);
             if (result.persistenceStatus() == PersistenceStatus.UNCONFIRMED) {
                 spec.commandLine()
                         .getErr()
@@ -238,10 +240,14 @@ public final class ChatCommand implements Callable<Integer> {
                 return 3;
             }
             if (result.status() == TurnStatus.SUCCEEDED) {
-                spec.commandLine().getOut().println(result.text());
+                if (!renderer.finalAnswerStreamed()) {
+                    spec.commandLine().getOut().println(result.text());
+                }
                 return 0;
             }
-            spec.commandLine().getErr().println(result.text());
+            if (!renderer.terminalRendered()) {
+                spec.commandLine().getErr().println(result.text());
+            }
             return 3;
         } catch (UnknownAgentToolException | DuplicateAgentToolException e) {
             // 仅展示专用配置错误的固定提示；其他业务错误和底层异常继续隐藏细节。

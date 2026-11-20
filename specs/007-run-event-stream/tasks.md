@@ -110,15 +110,15 @@
 
 ### 测试（先写，确认失败）
 
-- [ ] T036 [P] [US1] 在 `AgentOS-channel-cli/src/test/java/com/agentos/channel/cli/TerminalTurnRendererTest.java` 按 `contracts/cli-output.md` §1 编写：文字增量原样输出不换行；`tool.started` 前补换行；工具行格式、中文状态、"（可能已执行）"后缀；参数 / 结果摘要去换行并限长 80 字符、超出以 `…` 结尾；`approval.*` / `input.*` 不输出；成功且调用过工具时打印终态行、未调用工具时不打印；失败且已显示文字时先打印"（回答未完成）"；`run.cancelled` 带 `possiblyExecuted` 时打印"已取消；该操作可能已生效"；输出中不含 ESC 字符（`\u001b`）；`progressOnly` 模式下不输出文字增量、工具行与终态行写入指定的错误输出
-- [ ] T037 [P] [US1] 在 `AgentOS-cli/src/test/java/com/agentos/cli/ChatCommandStreamingTest.java` 编写：交互模式下 `TurnSink.streaming()` 为 `true`；桩模型分三段、每段间隔 300ms 返回时，第一段在到达后 1 秒内出现在输出中（SC-001）；成功时回答正文只出现一次；`returnDirect` 工具的结果仍被打印
-- [ ] T038 [P] [US1] 在 `AgentOS-cli/src/test/java/com/agentos/cli/ChatCommandTest.java` 增加回归：`--message` 成功时标准输出与改动前逐字节一致（只有最终回答一行），工具行写标准错误，退出码不变（SC-006）
+- [X] T036 [P] [US1] 在 `AgentOS-channel-cli/src/test/java/com/agentos/channel/cli/TerminalTurnRendererTest.java` 按 `contracts/cli-output.md` §1 编写：文字增量原样输出不换行；`tool.started` 前补换行；工具行格式、中文状态、"（可能已执行）"后缀；参数 / 结果摘要去换行并限长 80 字符、超出以 `…` 结尾；`approval.*` / `input.*` 不输出；成功且调用过工具时打印终态行、未调用工具时不打印；失败且已显示文字时先打印"（回答未完成）"；`run.cancelled` 带 `possiblyExecuted` 时打印"已取消；该操作可能已生效"；输出中不含 ESC 字符（`\u001b`）；`progressOnly` 模式下不输出文字增量、工具行与终态行写入指定的错误输出
+- [X] T037 [P] [US1] 在 `AgentOS-cli/src/test/java/com/agentos/cli/ChatCommandStreamingTest.java` 编写：交互模式下 `TurnSink.streaming()` 为 `true`；桩模型分三段、每段间隔 300ms 返回时，第一段在到达后 1 秒内出现在输出中（SC-001）；成功时回答正文只出现一次；`returnDirect` 工具的结果仍被打印
+- [X] T038 [P] [US1] 在 `AgentOS-cli/src/test/java/com/agentos/cli/ChatCommandTest.java` 增加回归：`--message` 成功时标准输出与改动前逐字节一致（只有最终回答一行），工具行写标准错误，退出码不变（SC-006）
 
 ### 实现
 
-- [ ] T039 [US1] 新建 `AgentOS-channel-cli/src/main/java/com/agentos/channel/cli/TerminalTurnRenderer.java` 实现 `TurnSink`：构造参数 `(PrintWriter out, PrintWriter err, boolean interactive)`；`streaming()` 返回 `interactive`；覆写 `onEvent` 按 `contracts/cli-output.md` §1 渲染；维护"当前行是否有未换行文字"、本轮工具次数、模型调用次数（`step.started` 计数）、起始时间；对外提供 `boolean finalAnswerStreamed()`（最后一条消息的累计文字等于 `run.completed.text` 时为 true）与 `Optional<UUID> currentTurnId()`（取自 `run.started`，终态后清空）；不输出 ANSI 控制序列（使 T036 通过）
-- [ ] T040 [US1] 修改 `AgentOS-cli/src/main/java/com/agentos/cli/ChatCommand.java`：交互模式为每条消息创建 `TerminalTurnRenderer(out, err, true)` 并传给 `agentService.process(request, renderer, capabilities)`；成功时仅在 `!renderer.finalAnswerStreamed()` 时打印 `result.text()`；`--message` 模式用 `TerminalTurnRenderer(out, err, false)`，其余输出与退出码逻辑保持不变；`TurnStatus.CANCELLED` 与其他非成功状态一样返回退出码 3（使 T037、T038 通过）
-- [ ] T041 [US1] 运行 `mvn -B -ntp -pl AgentOS-channel-cli,AgentOS-cli -am test`；`ChatCommandStreamingTest` 把桩模型驱动的一次完整 chat 终端输出（含文字分段、两条工具行、确认提示、终态行，以及每段文字的到达与显示时间差）写到 `target/007-demo/chat-transcript.txt`，摘录到演示记录 `specs/007-run-event-stream/us1-demo.md`；真实模型下按 quickstart §4 第 1 步的手工演示为可选，结果追加到同一文件，未做记 NOT_RUN
+- [X] T039 [US1] 新建 `AgentOS-channel-cli/src/main/java/com/agentos/channel/cli/TerminalTurnRenderer.java` 实现 `TurnSink`：构造参数 `(PrintWriter out, PrintWriter err, boolean interactive)`；`streaming()` 返回 `interactive`；覆写 `onEvent` 按 `contracts/cli-output.md` §1 渲染；维护"当前行是否有未换行文字"、本轮工具次数、模型调用次数（`step.started` 计数）、起始时间；对外提供 `boolean finalAnswerStreamed()`（最后一条消息的累计文字等于 `run.completed.text` 时为 true）与 `Optional<UUID> currentTurnId()`（取自 `run.started`，终态后清空）；不输出 ANSI 控制序列（使 T036 通过）
+- [X] T040 [US1] 修改 `AgentOS-cli/src/main/java/com/agentos/cli/ChatCommand.java`：交互模式为每条消息创建 `TerminalTurnRenderer(out, err, true)` 并传给 `agentService.process(request, renderer, capabilities)`；成功时仅在 `!renderer.finalAnswerStreamed()` 时打印 `result.text()`；`--message` 模式用 `TerminalTurnRenderer(out, err, false)`，其余输出与退出码逻辑保持不变；`TurnStatus.CANCELLED` 与其他非成功状态一样返回退出码 3（使 T037、T038 通过）
+- [X] T041 [US1] 运行 `mvn -B -ntp -pl AgentOS-channel-cli,AgentOS-cli -am test`；`ChatCommandStreamingTest` 把桩模型驱动的一次完整 chat 终端输出（含文字分段、两条工具行、确认提示、终态行，以及每段文字的到达与显示时间差）写到 `target/007-demo/chat-transcript.txt`，摘录到演示记录 `specs/007-run-event-stream/us1-demo.md`；真实模型下按 quickstart §4 第 1 步的手工演示为可选，结果追加到同一文件，未做记 NOT_RUN
 
 **Checkpoint**: CLI 能实时显示执行过程
 
