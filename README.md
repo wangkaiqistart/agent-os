@@ -259,7 +259,7 @@ AgentOS-boot        Spring Boot 启动与依赖聚合
 - [ ] 定时任务 `AgentScheduler`（ShedLock）与验收 Demo（每日天气、每日科技日报、每日 GitHub 日报），评估测试通过
 - [ ] 流式输出、工具搜索、知识库（Spring AI ETL）、一句话生成 `AGENT.md`（结构化输出）
 
-1.0 之后由社区推进：IM 渠道、Provider 故障切换、Tool Policy、容器沙箱、SSE 端点、Web 管理台、SSO 与多租户、集群部署。
+1.0 之后由社区推进：IM 渠道、Provider 故障切换、Tool Policy、容器沙箱、Web 管理台、SSO 与多租户、集群部署。
 
 ## 文档
 

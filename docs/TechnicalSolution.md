@@ -56,11 +56,11 @@ AgentOS 的做法对应知识库"自行控制工具执行"一节：**循环自�
 2. **必须注入** Spring Boot 自动配置的 `ToolCallingManager` Bean，不要用 `ToolCallingManager.builder().build()` 自建，否则 `spring.ai.tools.limits.*`、异常处理器和观测配置都不生效。
 3. 若在其他地方（如一句话生成 `AGENT.md`、评估器）使用 `ChatClient`，一律不传 tools；全局配置 `spring.ai.chat.client.tool-calling.enabled=false` 关闭 `ToolCallingAdvisor` 自动注册，避免出现第二个执行入口。
 
-**决策三：同步执行模型。** 核心阶段采用同步阻塞执行模型，跟 Spring MVC 一致。一次消息从进来、ReAct loop 执行、Tool 调用、Provider 调用到最终响应返回，全程同步。这跟 Java 21 的 virtual thread 配合得很好，单节点支撑高并发不需要响应式编程。循环从第一版起就同时支持 `ChatModel.call` 和 `ChatModel.stream`（流式时用 `MessageAggregator` 在虚拟线程上聚合），扩展阶段接 SSE 时只新增输出适配器，不改循环（见 4.4）。
+**决策三：同步执行模型。** 核心阶段采用同步阻塞执行模型，跟 Spring MVC 一致。一次消息从进来、ReAct loop 执行、Tool 调用、Provider 调用到最终响应返回，全程同步。这跟 Java 21 的 virtual thread 配合得很好，单节点支撑高并发不需要响应式编程。循环从第一版起就同时支持 `ChatModel.call` 和 `ChatModel.stream`（流式时用 `MessageAggregator` 在虚拟线程上聚合），US-5 接 SSE 时只新增输出适配器，不改循环（见 4.4）。
 
 **决策四：工具统一为 Spring AI `ToolCallback`。** Spring AI 2.0 里本地 `@Tool` 方法和远程 MCP 工具都用 `ToolCallback` 表达，AgentOS 不再另造 `AgentTool` 接口：`@Tool` Bean 经 `ToolCallbacks.from(bean)` 转换，MCP 工具来自 `SyncMcpToolCallbackProvider`，`ToolRegistry` 保存的就是 `ToolCallback`。AgentOS 只在外面套一层 `GovernedToolCallback` 装饰器（实现 `ToolCallback` 接口），负责审计、超时和幂等重试（见 6.1）。注意 2.0 已移除按名称解析普通 `Function` Bean 的旧用法（`toolNames(...)`），工具必须显式提供为 `ToolCallback`；含 `@Tool` 方法的类要声明为 Spring Bean（GraalVM AOT 也依赖这一点）。
 
-**决策五：HTTP 服务层用 Spring MVC 加 Java 21 virtual thread。** 同步直观的代码加 virtual thread 的高并发能力，单机轻松撑住几千并发。扩展阶段要 SSE 流式返回时，Spring MVC 的 `SseEmitter` 也能支持。
+**决策五：HTTP 服务层用 Spring MVC 加 Java 21 virtual thread。** 同步直观的代码加 virtual thread 的高并发能力，单机轻松撑住几千并发。US-5 的 SSE 流式接口用 Spring MVC 的 `SseEmitter` 实现。
 
 **决策六：Sandbox 先定接口，核心阶段只填一档实现。** 隔离强度和开销是一个跷跷板，从轻到重依次是应用层白名单校验、容器隔离（namespace + cgroups + seccomp）、microVM（Firecracker / Kata / gVisor）、完整虚拟机或物理隔离。为了不让核心阶段的实现选择绑死未来的架构，先抽象出一个 `Sandbox` 接口，表达"在受控环境里执行一个动作"这个意图，不携带任何一档实现特有的概念（不出现"容器镜像""VM 配置"字样）。核心阶段只实现 `WhitelistSandbox` 这一档：文件操作限制工作目录、Shell 命令白名单、HTTP 域名白名单，在应用层做校验，不使用 Java `SecurityManager`（它在 JDK 17 起已废弃、JDK 21 已不可用，与本项目 JDK 21+ 要求冲突）。扩展阶段按信号驱动升级：出现"要跑不可信代码或要多租户"时上容器隔离；出现"要跑完全不可信代码或要规模化多租户"时上 microVM。接口不随升级变化，新增的是实现类。
 
@@ -424,7 +424,7 @@ HTTP 等待超时**不取消**轮次：工具可能已经产生副作用，中�
 - **`TurnReaper`**：启动时执行一次，之后每分钟执行一次（用 ShedLock 保证多实例下只有一个在跑），把没有匹配owner有效租约、仍为RUNNING的轮次标为INTERRUPTED，不要求deadline_at已过；过期会话接管时也在同一事务执行回收。独立收尾终态轮次遗留的in_progress工具记录为interrupted，不改父轮次终态，不清新owner或有效租约。US-2只做启动与接管回收，周期扫描与ShedLock调度在US-5接入。拿到 202 的调用方轮询时就能看到终态，不会无限等待。
 - **后台执行器**：202 之后在后台继续的轮次跑在 AgentOS 自己的虚拟线程执行器 `TurnExecutor` 上。Spring Boot 的优雅关闭只管 HTTP 请求，不管这类后台任务，所以应用关闭时 `TurnExecutor` 先停止接收新轮次（新请求返回 503），再等待在途轮次结束，最多等 `agentos.shutdown.turn-grace`（默认 60 秒）；没等完的留给下次启动时的 `TurnReaper`。
 
-**核心阶段不做：** Tool 调用并行（一次响应里多个 Tool 调用由 `DefaultToolCallingManager` 按顺序执行）、Agent 间任务委托、SSE 端点（循环已支持流式，见 4.4）。这些放扩展阶段。
+**核心阶段不做：** Tool 调用并行（一次响应里多个 Tool 调用由 `DefaultToolCallingManager` 按顺序执行）、Agent 间任务委托。这些放扩展阶段。SSE 端点随 US-5 交付（循环已支持流式，见 4.4）。
 
 ### 4.4 流式输出
 
@@ -442,7 +442,7 @@ new MessageAggregator().aggregate(
 ChatResponse response = aggregated.get();
 ```
 
-`TurnSink` 接口定义 `onDelta`、`onToolCall`、`onToolResult`、`onComplete`、`onError` 几个事件，放在 `AgentOS-core`。过程回调失败在终态确认前按取消收尾；最终complete/error在持久化处理结束后、sink仍可用且hardStop预算未耗尽时最多尝试一次，回调在受管任务中有界等待，阻塞/异常仅记录通知失败、不改已确认业务终态或persistenceStatus、不再补另一终结事件。无剩余预算或先前过程回调尚未退出时跳过通知并记录未送达，不能并发重入sink或延长返回时限。扩展阶段的 SSE 端点只需要实现一个基于 `SseEmitter` 的 `TurnSink`，循环本身不改。`blockLast()` 不能放在 WebFlux 事件循环线程上，AgentOS 的 Web 层是 Spring MVC 加虚拟线程，没有这个问题；流式需要 Reactor，所以 `AgentOS-boot` 引入 `spring-boot-starter-webflux`，但 Web 服务器仍然是 Spring MVC。
+`TurnSink` 接口定义 `onDelta`、`onToolCall`、`onToolResult`、`onComplete`、`onError` 几个事件，放在 `AgentOS-core`。过程回调失败在终态确认前按取消收尾；最终complete/error在持久化处理结束后、sink仍可用且hardStop预算未耗尽时最多尝试一次，回调在受管任务中有界等待，阻塞/异常仅记录通知失败、不改已确认业务终态或persistenceStatus、不再补另一终结事件。无剩余预算或先前过程回调尚未退出时跳过通知并记录未送达，不能并发重入sink或延长返回时限。US-5 的 SSE 端点只需要新增事件消费方（事件落库、断线重放、AG-UI 翻译），循环本身不改。`blockLast()` 不能放在 WebFlux 事件循环线程上，AgentOS 的 Web 层是 Spring MVC 加虚拟线程，没有这个问题；流式需要 Reactor，所以 `AgentOS-boot` 引入 `spring-boot-starter-webflux`，但 Web 服务器仍然是 Spring MVC。
 
 ---
 
@@ -847,7 +847,7 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 
 ### 7.3 扩展阶段补齐的端点
 
-**`Agent` 目录的上传/查看/更新/删除**（业务方通过 API 而不是手动把目录丢进 `.AgentOS/agents/` 来创建新 Agent，含一句话生成 `AGENT.md`，这才是"纯 API 定义一个新 Agent"的完整闭环）；Memory 的 append/clear/search；Tool describe 和调用历史；LLM call 历史和 token 统计；**`AgentScheduler` 的调度管理**（增删查改某个 Agent frontmatter 的 `schedules`，不用改文件重启进程）；Webhook 触发；SSE 流式响应；Prometheus metrics；OpenAPI spec。
+**`Agent` 目录的上传/查看/更新/删除**（业务方通过 API 而不是手动把目录丢进 `.AgentOS/agents/` 来创建新 Agent，含一句话生成 `AGENT.md`，这才是"纯 API 定义一个新 Agent"的完整闭环）；Memory 的 append/clear/search；Tool describe 和调用历史；LLM call 历史和 token 统计；**`AgentScheduler` 的调度管理**（增删查改某个 Agent frontmatter 的 `schedules`，不用改文件重启进程）；Webhook 触发；Prometheus metrics；OpenAPI spec。
 
 > **核心阶段为什么不做：** 核心阶段"定义一个 Agent"的路径是业务方手写一个 `.AgentOS/agents/<name>/` 目录（`AGENT.md`[+ 脚本 / 子指令]）、重启或热加载生效（`ContextLoader` 每次组装 prompt 都重新读取，不需要重启也能生效，见 8.3），Web Service 核心阶段的端点都只做查询，不做创建，这跟"业务系统通过 API 动态创建新 Agent"是两件事——后者需要 Agent 目录上传接口（含一句话生成）、`AgentScheduler` 的运行时增删接口一起补齐，缺了这条链路就不完整，所以放在同一批扩展阶段一起做，不拆开先做一半。
 
@@ -862,7 +862,6 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 ### 7.5 核心阶段不做的部分
 
 - 认证机制（无认证假设内网，扩展补 API Key 加 JWT）
-- 流式响应 SSE
 - WebSocket
 - RBAC 权限
 - 限流

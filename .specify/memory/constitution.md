@@ -1,3 +1,15 @@
+<!--
+Sync Impact Report
+- Version change: 1.0.0 → 1.1.0（MINOR：实质性扩充原则 II 的核心阶段范围）
+- Modified principles: II. 五大核心能力优先 —— "SSE 端点"移出扩展阶段禁止清单；新增运行事件
+  契约随 ReAct 循环交付、Web 流式接口随 US-5 交付的规则；核心循环不得感知 HTTP / SSE / 前端协议
+- Added sections: 无
+- Removed sections: 无
+- Templates: .specify/templates/* 无需修改（Constitution Check 按原则引用，不含 SSE 条目）
+- Synced docs: CLAUDE.md、docs/TechnicalSolution.md（决策三 / 决策五、4.4、4.x 核心阶段不做、7.3、7.5）、
+  docs/DemandAnalysis.md（扩展阶段端点、核心阶段不做）、README.md（路线图）
+- Follow-up TODOs: 无
+-->
 # AgentOS Constitution
 
 ## Core Principles（核心原则）
@@ -17,11 +29,15 @@
 ### II. 五大核心能力优先
 
 - 核心阶段只交付运行时内核的五大能力：对接 LLM、ReAct 循环、三层 Memory、Tool 体系、Web Service。
-- 多租户、SSO、Tool Policy、SSE 端点、容器沙箱、Prometheus 导出等扩展阶段能力，核心阶段
+- 运行过程的流式可见性属于核心能力：每轮的运行事件契约（有序序号、唯一终态、已脱敏内容）
+  随 ReAct 循环交付；Web Service 的流式接口（SSE 订阅、断线重放、AG-UI 翻译、网页端操作确认）
+  随 US-5 交付。核心循环只经 `TurnSink` 与事件契约输出，禁止感知 HTTP、SSE 或具体前端协议。
+- 多租户、SSO、Tool Policy、容器沙箱、Prometheus 导出等扩展阶段能力，核心阶段
   禁止提前实现，只保留接口扩展点（如 `TurnSink`、`Sandbox`）。
 - 对外文案（README、官网）禁止把未实现的能力写成"已支持"。
 
-理由：核心阶段交付的是内核底座，企业级治理层是终局，先把地基做扎实。
+理由：核心阶段交付的是内核底座，企业级治理层是终局，先把地基做扎实。Agent 一轮可能运行
+数分钟并需要用户确认操作，执行过程不可见、不可取消就无法接入网页端，所以流式接口归入核心。
 
 ### III. 循环自实现，组件用 Spring AI 2.0
 
@@ -121,4 +137,4 @@
   MAJOR = 删除或重新定义原则；MINOR = 新增原则或实质性扩充；PATCH = 措辞澄清。
 - 合规检查：每个 plan 必须通过 Constitution Check；每个 PR 评审须确认未违反本宪章。
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-08 | **Last Amended**: 2026-11-08
+**Version**: 1.1.0 | **Ratified**: 2026-11-08 | **Last Amended**: 2026-11-21

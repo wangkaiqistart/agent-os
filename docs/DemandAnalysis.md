@@ -435,9 +435,9 @@ Web Service 是 AgentOS 的对外完整门面，业务系统通过 REST API 接�
 
 #### 扩展阶段补齐的端点
 
-Agent 目录的上传/查看/更新/删除与一句话生成 `AGENT.md`；定时任务管理；Memory 的 append/clear/search；Tool describe 和调用历史查询；LLM call 历史、token 统计；Webhook 触发、流式 SSE 响应；Prometheus metrics、OpenAPI spec。
+Agent 目录的上传/查看/更新/删除与一句话生成 `AGENT.md`；定时任务管理；Memory 的 append/clear/search；Tool describe 和调用历史查询；LLM call 历史、token 统计；Webhook 触发；Prometheus metrics、OpenAPI spec。
 
-**核心阶段不做**：认证机制（无认证假设内网）、流式响应 SSE、WebSocket、RBAC 权限。
+**核心阶段不做**：认证机制（无认证假设内网）、WebSocket、RBAC 权限。流式响应 SSE 随 US-5 交付。
 
 #### 业务系统集成场景
 
