@@ -441,6 +441,60 @@ class ChatCommandTest {
         assertThat(sink.getValue().streaming()).isFalse();
     }
 
+    @Test
+    void interactiveUnconfirmedFailureDoesNotRepeatTheTerminalLineText() throws Exception {
+        agent("main");
+        UUID turn = UUID.randomUUID();
+        when(service.process(any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    com.agentos.core.turn.TurnSink sink = invocation.getArgument(1);
+                    sink.onEvent(
+                            new com.agentos.core.turn.TurnEvent(
+                                    1,
+                                    UUID.randomUUID(),
+                                    turn,
+                                    1,
+                                    java.time.Instant.now(),
+                                    new com.agentos.core.turn.TurnEventPayload.RunStarted(
+                                            "main", "cli")));
+                    sink.onEvent(
+                            new com.agentos.core.turn.TurnEvent(
+                                    1,
+                                    UUID.randomUUID(),
+                                    turn,
+                                    2,
+                                    java.time.Instant.now(),
+                                    new com.agentos.core.turn.TurnEventPayload.RunFailed(
+                                            com.agentos.core.turn.TurnFailureCode.AUDIT_UNCONFIRMED,
+                                            TurnStatus.FAILED,
+                                            "审计写入未确认",
+                                            0,
+                                            PersistenceStatus.UNCONFIRMED,
+                                            false)));
+                    return new TurnResult(
+                            turn,
+                            TurnStatus.FAILED,
+                            "审计写入未确认",
+                            0,
+                            PersistenceStatus.UNCONFIRMED,
+                            com.agentos.core.turn.TurnFailureCode.AUDIT_UNCONFIRMED);
+                });
+        var command =
+                new ChatCommand(
+                        launcher(),
+                        workspace,
+                        new java.io.BufferedReader(new java.io.StringReader("hi\n")));
+        var line = new picocli.CommandLine(command);
+        line.setOut(new PrintWriter(output));
+        line.setErr(new PrintWriter(output));
+
+        line.execute("--workspace", workspace.toString());
+
+        String screen = output.toString();
+        assertThat(screen).contains("── 失败：审计写入未确认", "持久化未确认，turnId=" + turn);
+        assertThat(screen.split("审计写入未确认", -1)).as("失败原因只出现一次").hasSize(2);
+    }
+
     private static TurnResult success() {
         return new TurnResult(
                 UUID.randomUUID(), TurnStatus.SUCCEEDED, "answer", 1, PersistenceStatus.CONFIRMED);

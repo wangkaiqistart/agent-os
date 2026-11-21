@@ -36,7 +36,7 @@
 ## 未完成与延期
 
 - **CLI 的 Ctrl+C（FR-018、US4 场景 1 与 5，任务 T044 / T050 / T051）**：延期。拦截 SIGINT 需要 `sun.misc.Signal`，与 Checkstyle 的 IllegalImport 规则冲突；项目方 2026-11-21 决定本期不做。取消能力经核心层 `AgentService.cancel(turnId)` 交付并已验收。
-- **真实模型手工演示**：NOT_RUN。所有演示记录来自不依赖真实模型的测试输出。
+- **真实模型手工演示**：US1 已由项目方在交互模式下实测（见 us1-demo.md，流式 + 工具调用 + 授权框经中转接口通过）；US2 的截断无法用真实模型触发（`primary` 中转接口不遵守 `max_completion_tokens`：上限 16 实际生成 509 个 token；DeepSeek 返回 402 余额不足），US4 的取消只能经测试；两项记为 NOT_RUN。
 
 ## 实施中对设计的调整
 

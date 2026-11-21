@@ -234,9 +234,9 @@ public final class ChatCommand implements Callable<Integer> {
                             ? context.agentService().process(request, renderer, capabilities)
                             : context.agentService().process(request, renderer);
             if (result.persistenceStatus() == PersistenceStatus.UNCONFIRMED) {
-                spec.commandLine()
-                        .getErr()
-                        .println("持久化未确认，turnId=" + result.turnId() + "；" + result.text());
+                // 渲染器已经在终态行里说明了原因时，这里只补轮次标识，不重复同一句话。
+                String detail = renderer.terminalRendered() ? "" : "；" + result.text();
+                spec.commandLine().getErr().println("持久化未确认，turnId=" + result.turnId() + detail);
                 return 3;
             }
             if (result.status() == TurnStatus.SUCCEEDED) {

@@ -53,6 +53,19 @@ DIRECT_RESULT
 
 确认框仍由 006 的 `TerminalInputBroker` 打印，格式不变。它出现在 `⚙ <工具名>` 行之后、`✓/✗ <工具名>` 行之前：事件顺序由 `RunEventContractIntegrationTest`（`approval.*` 位于 `tool.started` 与 `tool.finished` 之间）保证，渲染器在工具开始行之前结束未换行的文字，见 us3-demo.md 的"带确认的工具调用"摘录。
 
-## 真实模型手工演示
+## 真实模型手工演示（2026-11-21，`primary` 中转接口，交互模式 `chat --profile weather --new`）
 
-NOT_RUN：本次没有在真实模型下运行 `java -jar AgentOS-boot/target/AgentOS.jar chat`。
+由项目方在终端实际运行，下面是对输出的整理。
+
+| 项 | 结果 |
+| --- | --- |
+| 流式调用经中转接口 | 通过。审计行为 `mode=STREAM`，第 1 次 `finish=TOOL_CALLS toolCalls=1`（流式工具调用可用），第 2 次 `finish=STOP`；两次都有用量（`tokens=5045/44`、`8081/108`） |
+| 文字边生成边显示 | 通过。第 2 次调用的回答在 `模型调用审计` 日志行出现之前就已打印在终端上 |
+| 顺序 | 通过：`⚙ http_get` → 授权框 → 输入 `1` → `✓ http_get 成功 · 9.4s` → 回答 → `── 完成 · 模型调用 2 次 · 工具 1 次 · 23.7s` |
+| 回答只出现一次 | 通过 |
+| 授权等待不计入整轮时间 | 通过。`budgetPausedMs=5919`，与授权等待 5.9 秒一致 |
+| 同一会话的第二轮 | 工具和授权框同样出现；`historyMessages` 从 2 增到 6，历史按轮次带入 |
+
+**第二轮的失败**：回答已经完整打印后，写 `llm_calls` 审计时远程 PostgreSQL 读超时（`SocketTimeoutException`，审计单次等待 2 秒），轮次按既有规则以 `FAILED`、持久化未确认结束。同一次运行里应用启动用了 38.5 秒（当天早些时候是 6 秒），说明到共享库的网络当时很差。这是 004 以来的审计规则（审计写不进去就不能宣称成功），不是 007 引入的。
+
+终端上这次失败的显示暴露出一个重复：渲染器已经打印 `── 失败：审计写入未确认，操作可能已经执行`，`chat` 命令又打印了一遍同样的说明。已修复：渲染器已经说明原因时，命令只补 `持久化未确认，turnId=…`，对应测试 `ChatCommandTest.interactiveUnconfirmedFailureDoesNotRepeatTheTerminalLineText`。
