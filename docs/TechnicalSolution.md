@@ -442,7 +442,9 @@ new MessageAggregator().aggregate(
 ChatResponse response = aggregated.get();
 ```
 
-`TurnSink` 接口定义 `onDelta`、`onToolCall`、`onToolResult`、`onComplete`、`onError` 几个事件，放在 `AgentOS-core`。过程回调失败在终态确认前按取消收尾；最终complete/error在持久化处理结束后、sink仍可用且hardStop预算未耗尽时最多尝试一次，回调在受管任务中有界等待，阻塞/异常仅记录通知失败、不改已确认业务终态或persistenceStatus、不再补另一终结事件。无剩余预算或先前过程回调尚未退出时跳过通知并记录未送达，不能并发重入sink或延长返回时限。US-5 的 SSE 端点只需要新增事件消费方（事件落库、断线重放、AG-UI 翻译），循环本身不改。`blockLast()` 不能放在 WebFlux 事件循环线程上，AgentOS 的 Web 层是 Spring MVC 加虚拟线程，没有这个问题；流式需要 Reactor，所以 `AgentOS-boot` 引入 `spring-boot-starter-webflux`，但 Web 服务器仍然是 Spring MVC。
+**运行事件（007）。** 每一轮产生一份有序、终态唯一、内容已脱敏的运行事件序列，契约见 `specs/007-run-event-stream/contracts/run-events.md`：过程面（`run.started`、`step.*`、`tool.*`、`approval.*`、`input.*`）、数据面（`message.started` / `message.delta` / `message.ended`）、控制面（`run.completed` / `run.failed` / `run.cancelled`，失败带稳定错误码 `TurnFailureCode`）。`TurnSink` 是唯一的消费方端口，核心只调用 `onEvent(TurnEvent)`；`ManagedTurnSink` 作为发布器用锁串行分配 `seq`（从 1 连续），只有它能在持久化收尾后发出终态。步骤与消息事件由 `ReActLoop` 发出；工具、确认、提问事件由 `GovernedToolCallback`、`ToolApprovalGate`、`AskUserTools` 按单个工具发出，发布器经 `ToolContextKeys.TURN_EVENTS` 传入。结束原因为 `length` / `content_filter` 时本轮以 `OUTPUT_TRUNCATED` / `CONTENT_FILTERED` 失败，不执行该响应中的工具。用户取消经 `AgentService.cancel(turnId)`：记录 `CancelReason.USER`、中断循环执行线程，本轮以 `CANCELLED` 收尾。
+
+`onDelta`、`onToolCall`、`onToolResult`、`onComplete`、`onError` 保留为兼容层，由 `onEvent` 的默认实现转调。过程回调失败在终态确认前按取消收尾；最终complete/error在持久化处理结束后、sink仍可用且hardStop预算未耗尽时最多尝试一次，回调在受管任务中有界等待，阻塞/异常仅记录通知失败、不改已确认业务终态或persistenceStatus、不再补另一终结事件。无剩余预算或先前过程回调尚未退出时跳过通知并记录未送达，不能并发重入sink或延长返回时限。US-5 的 SSE 端点只需要新增事件消费方（事件落库、断线重放、AG-UI 翻译），循环本身不改。`blockLast()` 不能放在 WebFlux 事件循环线程上，AgentOS 的 Web 层是 Spring MVC 加虚拟线程，没有这个问题；流式需要 Reactor，所以 `AgentOS-boot` 引入 `spring-boot-starter-webflux`，但 Web 服务器仍然是 Spring MVC。
 
 ---
 

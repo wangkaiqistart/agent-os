@@ -121,7 +121,7 @@ AgentOS provider list | tool list | session list
 
 - 依赖用构造器注入；日志用 SLF4J 占位符（`log.info("x={}", x)`），不拼字符串，不打印密钥、prompt 全文和工具参数。
 - MDC 只用于日志关联，约定键 `sessionId`、`turnId`、`agent`、`iteration`；业务上下文走 `ToolContext`，不从 MDC 读。
-- 运行日志按事件打在固定位置（正文用 `key=value`，控制台读正文，文件里的 ECS JSON 另带结构化字段）：`DefaultAgentService` 的轮次开始/结束与各类失败、`ReActLoop` 的每次模型调用开始/返回、`GovernedToolCallback` 的工具调用开始/结束、`ToolApprovalGate` 的授权决定与等待时长、`McpClientService` 的来源连接/可用/不可用、模型调用审计行（正文带 `LlmCallRecord.summary()`）。只记名称、状态、次数、耗时、字符数，不记 prompt、模型输出、工具参数与结果、异常消息；失败只记异常类型。新增日志不能抛异常，要对可能为空的对象做空值保护。
+- 运行日志按事件打在固定位置（正文用 `key=value`，控制台读正文，文件里的 ECS JSON 另带结构化字段）：`DefaultAgentService` 的轮次开始/结束与各类失败、`ReActLoop` 的每次模型调用开始/返回、`GovernedToolCallback` 的工具调用开始/结束、`ToolApprovalGate` 的授权决定与等待时长、`McpClientService` 的来源连接/可用/不可用、模型调用审计行（正文带 `LlmCallRecord.summary()`）、`DefaultAgentService` 的用户取消受理（只记 turnId）。事件发布器与终端渲染器不打日志。只记名称、状态、次数、耗时、字符数，不记 prompt、模型输出、工具参数与结果、异常消息；失败只记异常类型。新增日志不能抛异常，要对可能为空的对象做空值保护。
 - 业务异常抛 `AgentOSException(ErrorCode, message)`，message 会返回给调用方，不能含内部细节；新增错误码要在 `GlobalExceptionHandler.toHttpStatus` 补映射。
 - REST 响应统一用 `ApiResponse` 信封，Controller 不自己 try/catch 拼错误响应。
 

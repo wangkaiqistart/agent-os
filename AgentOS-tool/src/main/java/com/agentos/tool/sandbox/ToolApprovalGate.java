@@ -95,10 +95,10 @@ public final class ToolApprovalGate {
                             subject.lines(),
                             subject.sessionGrantAllowed()));
         }
-        ApprovalDecision decision = null;
+        ApprovalDecision answered = null;
         long waitStarted = System.nanoTime();
         try (var paused = scope.pauseClock()) {
-            decision =
+            answered =
                     capabilities
                             .interaction()
                             .approve(
@@ -111,13 +111,18 @@ public final class ToolApprovalGate {
                                             System.nanoTime() + timeout.toNanos()),
                                     scope);
         } finally {
-            if (decision != null && decision.allowed()) {
+            if (answered != null && answered.allowed()) {
                 scope.approvalGranted();
             } else {
                 scope.approvalWithheld();
             }
-            publishResolved(events, requestId, scope.callId(), decision);
+            publishResolved(events, requestId, scope.callId(), answered);
         }
+        // 入口没有给出决定时按取消处理，与上面发出的确认结果事件一致。
+        ApprovalDecision decision =
+                answered == null
+                        ? ApprovalDecision.of(ApprovalDecision.Outcome.CANCELLED)
+                        : answered;
         // 只记录类别和决定，不记录路径、参数或 URL。
         log.info(
                 "工具授权 type={} outcome={} waitedMs={}",

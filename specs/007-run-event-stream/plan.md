@@ -16,7 +16,7 @@ setup-plan 返回规范化 BRANCH `007-run-event-stream`，实际 Git 分支如�
 - **工具事件**：`GovernedToolCallback`、`ToolApprovalGate`、`AskUserTools` 经 `ToolContext` 拿到发布器，按单个工具发事件。
 - **截断识别**：`ReActLoop` 读取结束原因，`length` / `content_filter` 时不执行工具、以错误码失败结束。
 - **取消**：`AgentService.cancel(turnId)` 记录取消原因并中断执行线程，持久化新的 `CANCELLED` 状态。
-- **CLI**：`AgentOS-channel-cli` 新增终端渲染器，`AgentOS-cli` 用 `sun.misc.Signal` 拦截 Ctrl+C。
+- **CLI**：`AgentOS-channel-cli` 新增终端渲染器。原计划用 `sun.misc.Signal` 拦截 Ctrl+C，实施时与 Checkstyle 的 IllegalImport 冲突，项目方决定本期不做（见 spec Clarifications、acceptance-results.md）。
 
 不交付：事件持久化与断线重放、SSE 端点、AG-UI 翻译、网页端确认接口、多实例通知、推理内容事件、工具参数逐段流式。这些按宪章 1.1.0 随 US-5 交付；本期契约已按 AG-UI 原文核对过可承接（[contracts/run-events.md §6](./contracts/run-events.md)）。
 
@@ -109,7 +109,7 @@ AgentOS-channel-cli/src/main/java/com/agentos/channel/cli/
 └── TerminalTurnRenderer.java          # 新增：终端渲染 TurnSink
 AgentOS-cli/src/main/java/com/agentos/cli/
 ├── ChatCommand.java                   # 改：装配渲染器、交互模式流式、--message 进度写标准错误
-└── InterruptCanceller.java            # 新增：Ctrl+C → AgentService.cancel
+└── InterruptCanceller.java            # 延期：Ctrl+C → AgentService.cancel（本期未实现）
 AgentOS-storage/src/main/resources/db/migration/
 └── V3__turn_status_cancelled.sql      # 新增
 ```

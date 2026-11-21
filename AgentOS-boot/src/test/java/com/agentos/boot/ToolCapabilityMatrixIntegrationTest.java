@@ -99,7 +99,7 @@ class ToolCapabilityMatrixIntegrationTest extends ToolCapabilitiesFixture {
                                                     "finish_reason",
                                                     "tool_calls")))),
                     LocalModelServer.textResponse("不应继续"));
-            var feedback = new ArrayList<String>();
+            var feedback = new ArrayList<com.agentos.core.turn.TurnEventPayload.ToolFinished>();
             var result =
                     context.getBean(AgentService.class)
                             .process(
@@ -110,9 +110,15 @@ class ToolCapabilityMatrixIntegrationTest extends ToolCapabilitiesFixture {
                                             "测试清理终止",
                                             "test"),
                                     new TurnSink() {
-                                        public void onToolResult(
-                                                String id, String name, String value) {
-                                            feedback.add(value);
+                                        // 007 起工具结束事件按单个工具发出，清理未确认时也会送达，状态为结果未确认。
+                                        public void onEvent(com.agentos.core.turn.TurnEvent event) {
+                                            if (event.payload()
+                                                    instanceof
+                                                    com.agentos.core.turn.TurnEventPayload
+                                                                    .ToolFinished
+                                                            finished) {
+                                                feedback.add(finished);
+                                            }
                                         }
                                     });
             assertThat(result.status()).isEqualTo(TurnStatus.FAILED);
@@ -120,7 +126,18 @@ class ToolCapabilityMatrixIntegrationTest extends ToolCapabilitiesFixture {
             assertThat(model.calls()).isOne();
             assertThat(probe.actions).hasValue(1);
             assertThat(Files.exists(target)).isFalse();
-            assertThat(feedback).isEmpty();
+            assertThat(feedback)
+                    .singleElement()
+                    .satisfies(finished -> {
+                        // 事件状态与审计行一致：业务失败为 FAILED，否则为结果未确认。
+                        assertThat(finished.status())
+                                .isEqualTo(
+                                        businessFailure
+                                                ? com.agentos.core.turn.TurnEventPayload.ToolStatus
+                                                        .FAILED
+                                                : com.agentos.core.turn.TurnEventPayload.ToolStatus
+                                                        .UNCONFIRMED);
+                    });
             assertThat(result.persistenceStatus())
                     .isEqualTo(com.agentos.core.turn.PersistenceStatus.CONFIRMED);
             var rows =

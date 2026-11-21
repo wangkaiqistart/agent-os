@@ -41,6 +41,14 @@
 | `cancel()` | 保留，等价于 `cancel(CancelReason.INTERNAL)` |
 | `cancel(CancelReason reason)` | **新增**；第一次的原因生效；`USER` 把 hard stop 收紧到现在 + 2 秒，其他原因收紧到现在 + 1 秒 |
 | `CancelReason cancelReason()` | **新增**；未取消时为空 |
+| `boolean userCancelled()` | **新增**；取消原因是否为 `USER` |
+
+## 5.1 `ToolExecutionScope`（`com.agentos.core.tool`）
+
+| 方法 | 变化 |
+| --- | --- |
+| `approvalGranted()` / `approvalWithheld()` | **新增**；`ToolApprovalGate` 在确认结束时调用 |
+| `boolean withheldBeforeApproval()` | **新增**；本次调用在任何授权通过之前就停止时为 true，治理层据此判定动作未发生 |
 
 ## 6. `ToolContextKeys`
 

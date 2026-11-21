@@ -153,10 +153,10 @@
 
 ## Phase 7: Polish & Cross-Cutting
 
-- [ ] T053 [P] 同步 `docs/TechnicalSolution.md`：4.4 节 `TurnSink` 段落改为事件模型（`onEvent`、发布器、序号、终态唯一、兼容层），并链接 `specs/007-run-event-stream/contracts/run-events.md`（7.4 节与第 9 章已在 T014 更新）
-- [ ] T054 [P] 在 `CLAUDE.md`「工程基线」的运行日志约定里补一句："`DefaultAgentService` 记录用户取消的受理（只记 turnId 与是否受理）；`InterruptCanceller` 信号处理器安装失败记一条 WARN（只记信号名与异常类型）；事件发布器与终端渲染器不打日志。"其他条目不改
-- [ ] T055 运行 `mvn spotless:apply` 后执行完整质量门 `mvn -B -ntp verify`，与 T001 的基线对比，结果写入 `specs/007-run-event-stream/acceptance-results.md`（含 SC-001–SC-008 逐条结论；需要真实模型的手工演示记 NOT_RUN 或实测结果）
-- [ ] T056 运行 `/speckit-analyze` 检查 `specs/007-run-event-stream/` 下 spec、plan、tasks 与实现的漂移，发现偏离先修正再收尾
+- [X] T053 [P] 同步 `docs/TechnicalSolution.md`：4.4 节 `TurnSink` 段落改为事件模型（`onEvent`、发布器、序号、终态唯一、兼容层），并链接 `specs/007-run-event-stream/contracts/run-events.md`（7.4 节与第 9 章已在 T014 更新）
+- [X] T054 [P] （InterruptCanceller 随 Ctrl+C 延期，只补了用户取消受理一句）在 `CLAUDE.md`「工程基线」的运行日志约定里补一句："`DefaultAgentService` 记录用户取消的受理（只记 turnId 与是否受理）；`InterruptCanceller` 信号处理器安装失败记一条 WARN（只记信号名与异常类型）；事件发布器与终端渲染器不打日志。"其他条目不改
+- [X] T055 运行 `mvn spotless:apply` 后执行完整质量门 `mvn -B -ntp verify`，与 T001 的基线对比，结果写入 `specs/007-run-event-stream/acceptance-results.md`（含 SC-001–SC-008 逐条结论；需要真实模型的手工演示记 NOT_RUN 或实测结果）
+- [X] T056 运行 `/speckit-analyze` 检查 `specs/007-run-event-stream/` 下 spec、plan、tasks 与实现的漂移，发现偏离先修正再收尾
 
 ---
 
