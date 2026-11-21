@@ -132,20 +132,20 @@
 
 ### 测试（先写，确认失败）
 
-- [ ] T042 [P] [US4] 在 `core-test/turn/AgentServiceCancelTest.java` 编写：在模型输出中、只读工具中、等待确认中三个时机取消后 `TurnResult.status == CANCELLED`、2 秒内返回、之后桩模型调用与工具调用次数为 0，终态事件为 `run.cancelled`；在有副作用工具执行中取消时断言 `possiblyExecuted == true`、文本带"可能已生效"，持久化结果为 `CANCELLED`（工具响应了中断）或 `persistence == UNCONFIRMED`（工具未在 2 秒内退出）；等待确认场景 `approval.resolved.decision == CANCELLED` 且工具真实执行 0 次；`cancel` 对未知或已结束的轮次返回 `false`、重复调用幂等；取消与成功同时到达时只有一个终态且与存储一致；`close()` 关闭导致的取消仍是 `INTERRUPTED`
-- [ ] T043 [P] [US4] 在 `AgentOS-tool/src/test/java/com/agentos/tool/govern/GovernedToolEventsTest.java` 增加用例：预算以 `USER` 原因取消时，工具审计状态为 `interrupted`（不是 `timeout`），`tool.finished.status == INTERRUPTED`
-- [ ] T044 [P] [US4] 在 `AgentOS-cli/src/test/java/com/agentos/cli/InterruptCancellerTest.java` 编写（用可注入的信号源替身，不发送真实信号）：有轮次时调用 `cancel(turnId)` 一次并打印"（正在取消…）"；取消进行中再次触发被忽略；`run.started` 之前触发时记为待取消、收到轮次标识后立即取消；空闲时调用安装前的原处理器；安装失败时只记警告
-- [ ] T045 [US4] 在 `AgentOS-boot/src/test/java/com/agentos/boot/TurnCancelIntegrationTest.java`（PostgreSQL）验证：取消后 `agent_turns.status = 'CANCELLED'`、`tool_invocations` 中被中止工具为 `interrupted`、会话租约已释放、同一会话可立即开始下一轮；并启用 T028 的取消场景
+- [X] T042 [P] [US4] 在 `core-test/turn/AgentServiceCancelTest.java` 编写：在模型输出中、只读工具中、等待确认中三个时机取消后 `TurnResult.status == CANCELLED`、2 秒内返回、之后桩模型调用与工具调用次数为 0，终态事件为 `run.cancelled`；在有副作用工具执行中取消时断言 `possiblyExecuted == true`、文本带"可能已生效"，持久化结果为 `CANCELLED`（工具响应了中断）或 `persistence == UNCONFIRMED`（工具未在 2 秒内退出）；等待确认场景 `approval.resolved.decision == CANCELLED` 且工具真实执行 0 次；`cancel` 对未知或已结束的轮次返回 `false`、重复调用幂等；取消与成功同时到达时只有一个终态且与存储一致；`close()` 关闭导致的取消仍是 `INTERRUPTED`
+- [X] T043 [P] [US4] 在 `AgentOS-tool/src/test/java/com/agentos/tool/govern/GovernedToolEventsTest.java` 增加用例：预算以 `USER` 原因取消时，工具审计状态为 `interrupted`（不是 `timeout`），`tool.finished.status == INTERRUPTED`
+- [ ] T044 **（延期：项目方 2026-11-21 决定本期不做 CLI 的 Ctrl+C，见 spec Clarifications）** [P] [US4] 在 `AgentOS-cli/src/test/java/com/agentos/cli/InterruptCancellerTest.java` 编写（用可注入的信号源替身，不发送真实信号）：有轮次时调用 `cancel(turnId)` 一次并打印"（正在取消…）"；取消进行中再次触发被忽略；`run.started` 之前触发时记为待取消、收到轮次标识后立即取消；空闲时调用安装前的原处理器；安装失败时只记警告
+- [X] T045 [US4] 在 `AgentOS-boot/src/test/java/com/agentos/boot/TurnCancelIntegrationTest.java`（PostgreSQL）验证：取消后 `agent_turns.status = 'CANCELLED'`、`tool_invocations` 中被中止工具为 `interrupted`、会话租约已释放、同一会话可立即开始下一轮；并启用 T028 的取消场景
 
 ### 实现
 
-- [ ] T046 [US4] 修改 `core/turn/AgentService.java` 新增 `default boolean cancel(UUID turnId) { return false; }`，Javadoc 按 `contracts/core-ports.md` §2
-- [ ] T047 [US4] 修改 `core/turn/TurnRunner.java`：新增 `run(Callable<T> task, TurnExecutionBudget budget, Consumer<Thread> onWorkerStart)` 重载（任务开始时把 `Thread.currentThread()` 交给回调），原 `run(task, budget)` 委托给它并传空回调；保持现有分段等待与 hard stop 逻辑不变
-- [ ] T048 [US4] 修改 `core/turn/DefaultAgentService.java`：`InFlight` 增加执行线程字段，只在包住 `loop.run(...)` 的那次 `runner.run(...)` 调用里经 T047 的回调登记，起步、查证、收尾的 `runner.run(...)` 不登记（避免取消时打断持久化）；循环结束后清空该字段；实现 `cancel(turnId)`：找到在途轮次 → `budget.cancel(USER)` → 中断执行线程（只中断一次）→ 返回 `true`；超时、租约丢失、通用异常三个 `catch` 分支在 `budget.cancelReason() == USER` 时改用 `TurnStatus.CANCELLED`、文本 `budget.submissionAwareText("本轮已取消")`、`failureCode` 为空；日志按现有规则只记状态与耗时（使 T042 通过）
-- [ ] T049 [US4] 修改 `AgentOS-tool/src/main/java/com/agentos/tool/govern/GovernedToolCallback.java`：捕获 `TurnDeadlineExceededException` 时，若 `budget.cancelReason() == USER`，状态记 `interrupted`（使 T043 通过）
-- [ ] T050 [US4] 新建 `AgentOS-cli/src/main/java/com/agentos/cli/InterruptCanceller.java`：用 `sun.misc.Signal.handle(new Signal("INT"), …)` 安装处理器并保存原处理器；通过构造参数接收"信号安装器"接口以便测试替换；按 T044 的行为实现；类注释说明选择 `sun.misc.Signal` 的原因与 JLine 替代方案（research R8）；`close()` 恢复原处理器（使 T044 通过）
-- [ ] T051 [US4] 修改 `AgentOS-cli/src/main/java/com/agentos/cli/ChatCommand.java`：交互模式在读取循环外创建 `InterruptCanceller`，每轮把当前 `TerminalTurnRenderer` 的轮次标识交给它；`--message` 模式不安装；退出时 `close()`
-- [ ] T052 [US4] 运行 `mvn -B -ntp -pl AgentOS-core,AgentOS-tool,AgentOS-cli -am test` 与 `mvn -B -ntp -pl AgentOS-boot -am -Dtest='TurnCancelIntegrationTest,RunEventContractIntegrationTest' -Dsurefire.failIfNoSpecifiedTests=false test`；`TurnCancelIntegrationTest` 把四个取消时机的耗时、`agent_turns.status`、工具审计状态与 CLI 终态行写到 `target/007-demo/cancel.txt`，摘录到演示记录 `specs/007-run-event-stream/us4-demo.md`；真实模型下按 quickstart §4 第 2、3 步的手工演示为可选，结果追加到同一文件，未做记 NOT_RUN
+- [X] T046 [US4] 修改 `core/turn/AgentService.java` 新增 `default boolean cancel(UUID turnId) { return false; }`，Javadoc 按 `contracts/core-ports.md` §2
+- [X] T047 [US4] 修改 `core/turn/TurnRunner.java`：新增 `run(Callable<T> task, TurnExecutionBudget budget, Consumer<Thread> onWorkerStart)` 重载（任务开始时把 `Thread.currentThread()` 交给回调），原 `run(task, budget)` 委托给它并传空回调；保持现有分段等待与 hard stop 逻辑不变
+- [X] T048 [US4] 修改 `core/turn/DefaultAgentService.java`：`InFlight` 增加执行线程字段，只在包住 `loop.run(...)` 的那次 `runner.run(...)` 调用里经 T047 的回调登记，起步、查证、收尾的 `runner.run(...)` 不登记（避免取消时打断持久化）；循环结束后清空该字段；实现 `cancel(turnId)`：找到在途轮次 → `budget.cancel(USER)` → 中断执行线程（只中断一次）→ 返回 `true`；超时、租约丢失、通用异常三个 `catch` 分支在 `budget.cancelReason() == USER` 时改用 `TurnStatus.CANCELLED`、文本 `budget.submissionAwareText("本轮已取消")`、`failureCode` 为空；日志按现有规则只记状态与耗时（使 T042 通过）
+- [X] T049 [US4] 修改 `AgentOS-tool/src/main/java/com/agentos/tool/govern/GovernedToolCallback.java`：捕获 `TurnDeadlineExceededException` 时，若 `budget.cancelReason() == USER`，状态记 `interrupted`（使 T043 通过）
+- [ ] T050 **（延期：项目方 2026-11-21 决定本期不做 CLI 的 Ctrl+C，见 spec Clarifications）** [US4] 新建 `AgentOS-cli/src/main/java/com/agentos/cli/InterruptCanceller.java`：用 `sun.misc.Signal.handle(new Signal("INT"), …)` 安装处理器并保存原处理器；通过构造参数接收"信号安装器"接口以便测试替换；按 T044 的行为实现；类注释说明选择 `sun.misc.Signal` 的原因与 JLine 替代方案（research R8）；`close()` 恢复原处理器（使 T044 通过）
+- [ ] T051 **（延期：项目方 2026-11-21 决定本期不做 CLI 的 Ctrl+C，见 spec Clarifications）** [US4] 修改 `AgentOS-cli/src/main/java/com/agentos/cli/ChatCommand.java`：交互模式在读取循环外创建 `InterruptCanceller`，每轮把当前 `TerminalTurnRenderer` 的轮次标识交给它；`--message` 模式不安装；退出时 `close()`
+- [X] T052 [US4] 运行 `mvn -B -ntp -pl AgentOS-core,AgentOS-tool,AgentOS-cli -am test` 与 `mvn -B -ntp -pl AgentOS-boot -am -Dtest='TurnCancelIntegrationTest,RunEventContractIntegrationTest' -Dsurefire.failIfNoSpecifiedTests=false test`；`TurnCancelIntegrationTest` 把四个取消时机的耗时、`agent_turns.status`、工具审计状态与 CLI 终态行写到 `target/007-demo/cancel.txt`，摘录到演示记录 `specs/007-run-event-stream/us4-demo.md`；真实模型下按 quickstart §4 第 2、3 步的手工演示为可选，结果追加到同一文件，未做记 NOT_RUN
 
 **Checkpoint**: 取消可用，10 类契约场景全部启用
 

@@ -13,6 +13,15 @@ public interface AgentService {
     /** 使用 sink 接收增量及终态；是否启用模型流式由 sink.streaming 决定。 */
     TurnResult process(ProcessRequest request, TurnSink sink);
 
+    /**
+     * 请求取消本进程内正在执行的轮次。只发出请求、不等待结束；结束由该轮 process 的返回值与终态事件体现。
+     *
+     * @return 已受理返回 true；轮次不存在、不在本进程或已结束返回 false。重复调用结果不变
+     */
+    default boolean cancel(java.util.UUID turnId) {
+        return false;
+    }
+
     /** 显式入口能力，兼容旧实现的无人值守语义。 */
     default TurnResult process(
             ProcessRequest request,

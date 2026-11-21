@@ -50,6 +50,27 @@ public final class ToolExecutionScope implements AutoCloseable {
     private TurnExecutionBudget.Submission submission;
     private volatile long cleanupDeadline = Long.MAX_VALUE;
 
+    // 授权结果：一次调用里第一次授权就被拒绝或中断时，受授权保护的动作确定没有发生。
+    private final AtomicBoolean approvalGranted = new AtomicBoolean();
+    private final AtomicBoolean withheldBeforeApproval = new AtomicBoolean();
+
+    /** 用户允许了本次调用里的一个动作。 */
+    public void approvalGranted() {
+        approvalGranted.set(true);
+    }
+
+    /** 授权被拒绝、超时或等待中被取消；之前没有任何授权通过时，记为动作未发生。 */
+    public void approvalWithheld() {
+        if (!approvalGranted.get()) {
+            withheldBeforeApproval.set(true);
+        }
+    }
+
+    /** 本次调用在任何授权通过之前就停止：受授权保护的副作用没有发生。 */
+    public boolean withheldBeforeApproval() {
+        return withheldBeforeApproval.get();
+    }
+
     public enum ExecutionState {
         NOT_STARTED,
         POSSIBLY_STARTED,

@@ -19,12 +19,28 @@ public final class TurnRunner {
 
     /** 同步等待任务结果；运行时业务异常保留原类型，超时或等待被中断统一转成轮次超时。 */
     public <T> T run(Callable<T> task, TurnExecutionBudget budget) {
+        return run(task, budget, worker -> {});
+    }
+
+    /**
+     * 同 {@link #run(Callable, TurnExecutionBudget)}，任务开始时把执行线程交给 onWorkerStart。
+     * 用户取消时据此直接中断执行线程，让阻塞中的流式模型请求立即返回，而不必等到 hard stop。
+     */
+    public <T> T run(
+            Callable<T> task,
+            TurnExecutionBudget budget,
+            java.util.function.Consumer<Thread> onWorkerStart) {
         Objects.requireNonNull(task);
         Objects.requireNonNull(budget);
+        Objects.requireNonNull(onWorkerStart);
         // 每次 run 使用自己的执行器，不在 finally 中关闭其他轮次正在共享的线程池。
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
-            Future<T> future = executor.submit(task);
+            Future<T> future =
+                    executor.submit(() -> {
+                        onWorkerStart.accept(Thread.currentThread());
+                        return task.call();
+                    });
             try {
                 // 等待人工授权时整轮计时会暂停、hard stop 随之后移，所以分段等待并每段重读余量。
                 while (true) {

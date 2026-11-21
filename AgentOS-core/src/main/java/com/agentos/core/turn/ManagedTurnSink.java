@@ -27,6 +27,7 @@ final class ManagedTurnSink implements TurnSink, TurnEventPublisher {
     private volatile UUID sessionId;
     private volatile boolean valid = true;
     private volatile boolean terminal;
+    private volatile boolean sideEffectUncertain;
     private long nextSeq = 1;
 
     ManagedTurnSink(TurnSink delegate, TurnExecutionBudget budget, UUID turnId) {
@@ -67,6 +68,11 @@ final class ManagedTurnSink implements TurnSink, TurnEventPublisher {
                 throw new LeaseLostException();
             }
             TurnEvent event = next(payload);
+            if (payload instanceof TurnEventPayload.ToolFinished finished
+                    && finished.possiblyExecuted()
+                    && finished.status() != TurnEventPayload.ToolStatus.SUCCESS) {
+                sideEffectUncertain = true;
+            }
             try {
                 delegate.onEvent(event);
             } catch (Throwable error) {
@@ -124,6 +130,11 @@ final class ManagedTurnSink implements TurnSink, TurnEventPublisher {
         }
     }
 
+    /** 本轮是否有非幂等工具在失败或中断时可能已经生效；终态与取消文本据此提示用户。 */
+    boolean sideEffectUncertain() {
+        return sideEffectUncertain;
+    }
+
     /** 只在持锁时调用。 */
     private TurnEvent next(TurnEventPayload payload) {
         return new TurnEvent(
@@ -154,7 +165,7 @@ final class ManagedTurnSink implements TurnSink, TurnEventPublisher {
     }
 
     private TurnEventPayload terminalPayload(TurnResult result) {
-        boolean possiblyExecuted = budget.submissionUnconfirmed();
+        boolean possiblyExecuted = budget.submissionUnconfirmed() || sideEffectUncertain;
         return switch (result.status()) {
             case SUCCEEDED ->
                     new TurnEventPayload.RunCompleted(

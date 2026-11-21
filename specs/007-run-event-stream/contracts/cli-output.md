@@ -49,7 +49,9 @@
 
 不使用流式模型调用；不出现确认交互（无人值守，006 现有行为）。
 
-## 3. Ctrl+C
+## 3. Ctrl+C（延期）
+
+> 2026-11-21 项目方决定本期不做：拦截 SIGINT 需要 `sun.misc.Signal`，与 Checkstyle 的 IllegalImport 规则冲突。本期 Ctrl+C 行为与 007 之前一致（退出 chat）；取消能力经核心层 `AgentService.cancel(turnId)` 提供。下表是后续接入时的目标行为。
 
 | 时机 | 行为 |
 | --- | --- |

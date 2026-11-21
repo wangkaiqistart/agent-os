@@ -81,6 +81,8 @@ terminal  := run.completed | run.failed | run.cancelled
 
 枚举取值见 [data-model.md §2、§4](../data-model.md)。
 
+`possiblyExecuted` 的含义：`tool.finished` 中，成功或结果未确认时为 `true`；失败、超时、中断时只有**非幂等**工具且已进入执行才为 `true`（幂等工具重做无害，不提示）；被拒绝、被跳过、第一次授权就没通过的调用一律为 `false`。`run.failed` / `run.cancelled` 中，有未确认的提交或任一工具结束事件为"非成功且 `possiblyExecuted`"时为 `true`。
+
 ## 4. 内容安全
 
 - `argumentsSummary`、`resultSummary`、`approval.requested.lines`、`input.requested.question` 与审计表使用同一个 `Redactor` 脱敏和同样的长度上限；`resultSummary` 就是模型看到的那份（已按 `max_result_chars` 截断）。

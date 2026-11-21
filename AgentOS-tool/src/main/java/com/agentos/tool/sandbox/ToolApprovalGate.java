@@ -111,6 +111,11 @@ public final class ToolApprovalGate {
                                             System.nanoTime() + timeout.toNanos()),
                                     scope);
         } finally {
+            if (decision != null && decision.allowed()) {
+                scope.approvalGranted();
+            } else {
+                scope.approvalWithheld();
+            }
             publishResolved(events, requestId, scope.callId(), decision);
         }
         // 只记录类别和决定，不记录路径、参数或 URL。

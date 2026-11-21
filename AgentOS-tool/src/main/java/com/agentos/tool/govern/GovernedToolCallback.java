@@ -288,7 +288,10 @@ public final class GovernedToolCallback implements ToolCallback {
             } else if (ex instanceof ToolCleanupUnconfirmedException) {
                 status = "unconfirmed";
             }
-            error = summary(ex.getMessage() == null ? "工具内部错误" : ex.getMessage(), 1000);
+            error =
+                    budget.userCancelled()
+                            ? "已被用户取消"
+                            : summary(ex.getMessage() == null ? "工具内部错误" : ex.getMessage(), 1000);
             failure = ex;
         }
         scope.close();
@@ -306,6 +309,7 @@ public final class GovernedToolCallback implements ToolCallback {
                 status = "unconfirmed";
             }
         } else if (failure != null
+                && !scope.withheldBeforeApproval()
                 && scope.executionState()
                         == com.agentos.core.tool.ToolExecutionScope.ExecutionState
                                 .POSSIBLY_STARTED) {
@@ -368,7 +372,7 @@ public final class GovernedToolCallback implements ToolCallback {
             }
             throw new AuditWriteException("工具执行后的审计未确认，操作可能已经执行");
         }
-        publishFinished(events, end, failure, scope);
+        publishFinished(events, end, failure, scope, policy.idempotent());
         if (failure instanceof AuditWriteException
                 || failure instanceof LeaseLostException
                 || failure instanceof TurnDeadlineExceededException
@@ -393,17 +397,23 @@ public final class GovernedToolCallback implements ToolCallback {
             com.agentos.core.turn.TurnEventPublisher events,
             ToolInvocationRecord end,
             RuntimeException failure,
-            com.agentos.core.tool.ToolExecutionScope scope) {
+            com.agentos.core.tool.ToolExecutionScope scope,
+            boolean idempotent) {
         if (events == null) {
             return;
         }
+        // 被拒绝、被跳过，或第一次授权就没通过的调用，动作确定没有发生。
         boolean neverRan =
-                "sandbox_denied".equals(end.status()) || "limit_skipped".equals(end.status());
+                "sandbox_denied".equals(end.status())
+                        || "limit_skipped".equals(end.status())
+                        || scope.withheldBeforeApproval();
         boolean possiblyExecuted =
                 !neverRan
                         && ("success".equals(end.status())
                                 || "unconfirmed".equals(end.status())
+                                // 幂等工具失败后重做无害，只有非幂等工具的"可能已执行"值得提示用户。
                                 || (failure != null
+                                        && !idempotent
                                         && scope.executionState()
                                                 == com.agentos.core.tool.ToolExecutionScope
                                                         .ExecutionState.POSSIBLY_STARTED));

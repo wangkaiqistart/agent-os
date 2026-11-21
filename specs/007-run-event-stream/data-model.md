@@ -41,6 +41,7 @@
 
 枚举取值：
 
+- `ToolFinished.possiblyExecuted`：规则见 [contracts/run-events.md §3](./contracts/run-events.md)；非幂等工具失败或中断且已进入执行时为 true，被拒绝、跳过或第一次授权就没通过时为 false。
 - `ToolFinished.status`：`SUCCESS`、`FAILED`、`TIMEOUT`、`DENIED`、`SKIPPED`、`INTERRUPTED`、`UNCONFIRMED`。与 `tool_invocations.status` 的对应：`success`、`failed`、`timeout`、`sandbox_denied`、`limit_skipped`、`interrupted`、`unconfirmed`。
 - `ApprovalResolved.decision`：`ALLOW_ONCE`、`ALLOW_SESSION`、`DENY`、`TIMED_OUT`、`UNATTENDED`、`CANCELLED`。由 `ApprovalDecision.Outcome` 映射，`UNSUPPORTED` → `UNATTENDED`，`EOF` → `CANCELLED`。
 - `InputResolved.outcome`：`ANSWERED`、`TIMED_OUT`、`UNATTENDED`、`CANCELLED`、`TOO_LONG`。

@@ -40,7 +40,20 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
     private final TurnRunner runner;
     private final TurnProperties turnProperties;
 
-    private record InFlight(Thread caller, TurnExecutionBudget budget) {}
+    /** 在途轮次：调用方线程用于关闭时中断，执行线程只在循环运行期间登记，供用户取消时中断。 */
+    private record InFlight(
+            Thread caller,
+            TurnExecutionBudget budget,
+            java.util.concurrent.atomic.AtomicReference<Thread> worker,
+            java.util.concurrent.atomic.AtomicBoolean interrupted) {
+        InFlight(Thread caller, TurnExecutionBudget budget) {
+            this(
+                    caller,
+                    budget,
+                    new java.util.concurrent.atomic.AtomicReference<>(),
+                    new java.util.concurrent.atomic.AtomicBoolean());
+        }
+    }
 
     private final java.util.concurrent.ConcurrentHashMap<UUID, InFlight> inFlight =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -276,7 +289,8 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                                                     request.trigger(),
                                                     toolSnapshot,
                                                     capabilities),
-                                    budget);
+                                    budget,
+                                    worker -> registerWorker(turnId, worker));
             String outcomeText = budget.submissionAwareText(outcome.text());
             String errorText =
                     outcome.status() == TurnStatus.SUCCEEDED
@@ -309,60 +323,71 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             // 库里已是别的终态（例如被接管为 INTERRUPTED）时，循环的错误码不再适用。
                             finalStatus == outcome.status() ? outcome.failureCode() : null);
         } catch (TurnDeadlineExceededException e) {
-            boolean closing = budget.cancelled() && !budget.expired();
-            TurnStatus interruptedStatus = closing ? TurnStatus.INTERRUPTED : TurnStatus.TIMED_OUT;
-            log.warn(
-                    "轮次{} timeoutSec={} elapsedMs={}",
-                    closing ? "被取消" : "超过整轮时限",
-                    agent.profile().settings().turnTimeout().toSeconds(),
-                    elapsedMillis(startNanos));
-            String timeoutText = budget.submissionAwareText("本轮处理超时");
-            // 超时同样需要更新轮次、释放属于自己的租约，不能只取消线程就直接返回。
-            TurnStore.FinishResult finish =
-                    finishWithinHardStop(
-                            budget,
-                            () ->
-                                    turns.finishAndRelease(
-                                            turn,
-                                            interruptedStatus.name(),
-                                            timeoutText,
-                                            e.getMessage()));
-            result =
-                    new TurnResult(
-                            turnId,
-                            finish.persistenceConfirmed()
-                                    ? TurnStatus.valueOf(finish.status())
-                                    : interruptedStatus,
-                            finish.persistenceConfirmed() ? finish.text() : timeoutText,
-                            0,
-                            finish.persistenceConfirmed() && budget.auditsConfirmed()
-                                    ? PersistenceStatus.CONFIRMED
-                                    : PersistenceStatus.UNCONFIRMED,
-                            closing ? cancelCode(budget) : TurnFailureCode.TIMED_OUT);
+            if (budget.userCancelled()) {
+                result = finishCancelled(turn, turnId, budget, managedSink, startNanos);
+            } else {
+                boolean closing = budget.cancelled() && !budget.expired();
+                TurnStatus interruptedStatus =
+                        closing ? TurnStatus.INTERRUPTED : TurnStatus.TIMED_OUT;
+                log.warn(
+                        "轮次{} timeoutSec={} elapsedMs={}",
+                        closing ? "被取消" : "超过整轮时限",
+                        agent.profile().settings().turnTimeout().toSeconds(),
+                        elapsedMillis(startNanos));
+                String timeoutText = budget.submissionAwareText("本轮处理超时");
+                // 超时同样需要更新轮次、释放属于自己的租约，不能只取消线程就直接返回。
+                TurnStore.FinishResult finish =
+                        finishWithinHardStop(
+                                budget,
+                                () ->
+                                        turns.finishAndRelease(
+                                                turn,
+                                                interruptedStatus.name(),
+                                                timeoutText,
+                                                e.getMessage()));
+                result =
+                        new TurnResult(
+                                turnId,
+                                finish.persistenceConfirmed()
+                                        ? TurnStatus.valueOf(finish.status())
+                                        : interruptedStatus,
+                                finish.persistenceConfirmed() ? finish.text() : timeoutText,
+                                0,
+                                finish.persistenceConfirmed() && budget.auditsConfirmed()
+                                        ? PersistenceStatus.CONFIRMED
+                                        : PersistenceStatus.UNCONFIRMED,
+                                closing ? cancelCode(budget) : TurnFailureCode.TIMED_OUT);
+            }
         } catch (LeaseLostException e) {
-            log.warn("轮次中断：会话租约或输出端已失效 elapsedMs={}", elapsedMillis(startNanos));
-            String interruptedText = budget.submissionAwareText("本轮处理已中断");
-            TurnStore.FinishResult finish =
-                    finishWithinHardStop(
-                            budget,
-                            () ->
-                                    turns.finishAndRelease(
-                                            turn,
-                                            TurnStatus.INTERRUPTED.name(),
-                                            interruptedText,
-                                            "会话租约或输出端已失效"));
-            result =
-                    new TurnResult(
-                            turnId,
-                            finish.persistenceConfirmed()
-                                    ? TurnStatus.valueOf(finish.status())
-                                    : TurnStatus.INTERRUPTED,
-                            finish.persistenceConfirmed() ? finish.text() : interruptedText,
-                            0,
-                            finish.persistenceConfirmed() && budget.auditsConfirmed()
-                                    ? PersistenceStatus.CONFIRMED
-                                    : PersistenceStatus.UNCONFIRMED,
-                            budget.cancelled() ? cancelCode(budget) : TurnFailureCode.LEASE_LOST);
+            if (budget.userCancelled()) {
+                result = finishCancelled(turn, turnId, budget, managedSink, startNanos);
+            } else {
+                log.warn("轮次中断：会话租约或输出端已失效 elapsedMs={}", elapsedMillis(startNanos));
+                String interruptedText = budget.submissionAwareText("本轮处理已中断");
+                TurnStore.FinishResult finish =
+                        finishWithinHardStop(
+                                budget,
+                                () ->
+                                        turns.finishAndRelease(
+                                                turn,
+                                                TurnStatus.INTERRUPTED.name(),
+                                                interruptedText,
+                                                "会话租约或输出端已失效"));
+                result =
+                        new TurnResult(
+                                turnId,
+                                finish.persistenceConfirmed()
+                                        ? TurnStatus.valueOf(finish.status())
+                                        : TurnStatus.INTERRUPTED,
+                                finish.persistenceConfirmed() ? finish.text() : interruptedText,
+                                0,
+                                finish.persistenceConfirmed() && budget.auditsConfirmed()
+                                        ? PersistenceStatus.CONFIRMED
+                                        : PersistenceStatus.UNCONFIRMED,
+                                budget.cancelled()
+                                        ? cancelCode(budget)
+                                        : TurnFailureCode.LEASE_LOST);
+            }
         } catch (ToolCleanupUnconfirmedException e) {
             log.warn("轮次终止：工具资源清理未确认 elapsedMs={}", elapsedMillis(startNanos));
             // 资源是否停止与持久化是否确认分别表达；不能把未知执行状态反馈模型后继续。
@@ -414,35 +439,39 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
                             PersistenceStatus.UNCONFIRMED,
                             TurnFailureCode.AUDIT_UNCONFIRMED);
         } catch (RuntimeException e) {
-            // 只记录异常类型和 Provider 的失败类别，不记录异常文本（可能含响应内容或凭证）。
-            log.warn(
-                    "轮次失败 failureType={} {} elapsedMs={}",
-                    e.getClass().getSimpleName(),
-                    failureDetail(e),
-                    elapsedMillis(startNanos));
-            String failedText = budget.submissionAwareText("处理失败");
-            // 给用户固定失败文案；存储摘要做有限脱敏，不向输出端返回原始内部异常。
-            TurnStore.FinishResult finish =
-                    finishWithinHardStop(
-                            budget,
-                            () ->
-                                    turns.finishAndRelease(
-                                            turn,
-                                            TurnStatus.FAILED.name(),
-                                            failedText,
-                                            safeMessage(e)));
-            result =
-                    new TurnResult(
-                            turnId,
-                            finish.persistenceConfirmed()
-                                    ? TurnStatus.valueOf(finish.status())
-                                    : TurnStatus.FAILED,
-                            finish.persistenceConfirmed() ? finish.text() : failedText,
-                            0,
-                            finish.persistenceConfirmed() && budget.auditsConfirmed()
-                                    ? PersistenceStatus.CONFIRMED
-                                    : PersistenceStatus.UNCONFIRMED,
-                            failureCode(e));
+            if (budget.userCancelled()) {
+                result = finishCancelled(turn, turnId, budget, managedSink, startNanos);
+            } else {
+                // 只记录异常类型和 Provider 的失败类别，不记录异常文本（可能含响应内容或凭证）。
+                log.warn(
+                        "轮次失败 failureType={} {} elapsedMs={}",
+                        e.getClass().getSimpleName(),
+                        failureDetail(e),
+                        elapsedMillis(startNanos));
+                String failedText = budget.submissionAwareText("处理失败");
+                // 给用户固定失败文案；存储摘要做有限脱敏，不向输出端返回原始内部异常。
+                TurnStore.FinishResult finish =
+                        finishWithinHardStop(
+                                budget,
+                                () ->
+                                        turns.finishAndRelease(
+                                                turn,
+                                                TurnStatus.FAILED.name(),
+                                                failedText,
+                                                safeMessage(e)));
+                result =
+                        new TurnResult(
+                                turnId,
+                                finish.persistenceConfirmed()
+                                        ? TurnStatus.valueOf(finish.status())
+                                        : TurnStatus.FAILED,
+                                finish.persistenceConfirmed() ? finish.text() : failedText,
+                                0,
+                                finish.persistenceConfirmed() && budget.auditsConfirmed()
+                                        ? PersistenceStatus.CONFIRMED
+                                        : PersistenceStatus.UNCONFIRMED,
+                                failureCode(e));
+            }
         } finally {
             // 无论循环成功、失败或收尾抛错，都解除进程内预算引用和当前线程的日志标记。
             budget.cancel(TurnExecutionBudget.CancelReason.INTERNAL);
@@ -483,6 +512,71 @@ public final class DefaultAgentService implements AgentService, AutoCloseable {
 
     private static long elapsedMillis(long startNanos) {
         return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+    }
+
+    /**
+     * 用户取消：标记取消原因并中断执行线程（只中断一次），让阻塞中的流式模型请求立即返回。
+     * 起步、查证、收尾阶段没有登记执行线程，不会被中断，持久化收尾不受影响。
+     */
+    @Override
+    public boolean cancel(UUID turnId) {
+        if (turnId == null) {
+            return false;
+        }
+        InFlight active = inFlight.get(turnId);
+        if (active == null) {
+            return false;
+        }
+        active.budget().cancel(TurnExecutionBudget.CancelReason.USER);
+        Thread worker = active.worker().get();
+        if (worker != null && active.interrupted().compareAndSet(false, true)) {
+            worker.interrupt();
+        }
+        log.info("用户取消已受理 turnId={}", turnId);
+        return true;
+    }
+
+    /** 循环开始时登记执行线程；登记前已被取消时立即中断。 */
+    private void registerWorker(UUID turnId, Thread worker) {
+        InFlight active = inFlight.get(turnId);
+        if (active == null) {
+            return;
+        }
+        active.worker().set(worker);
+        if (active.budget().userCancelled() && active.interrupted().compareAndSet(false, true)) {
+            worker.interrupt();
+        }
+    }
+
+    /** 用户取消后的收尾：持久化 CANCELLED，有副作用工具可能已生效时追加提示。 */
+    private TurnResult finishCancelled(
+            TurnSnapshot turn,
+            UUID turnId,
+            TurnExecutionBudget budget,
+            ManagedTurnSink sink,
+            long startNanos) {
+        log.warn("轮次已被用户取消 elapsedMs={}", elapsedMillis(startNanos));
+        String text =
+                budget.submissionAwareText("本轮已取消")
+                        + (sink.sideEffectUncertain() && !budget.submissionUnconfirmed()
+                                ? "；该操作可能已生效"
+                                : "");
+        TurnStore.FinishResult finish =
+                finishWithinHardStop(
+                        budget,
+                        () ->
+                                turns.finishAndRelease(
+                                        turn, TurnStatus.CANCELLED.name(), text, "用户取消"));
+        return new TurnResult(
+                turnId,
+                finish.persistenceConfirmed()
+                        ? TurnStatus.valueOf(finish.status())
+                        : TurnStatus.CANCELLED,
+                finish.persistenceConfirmed() ? finish.text() : text,
+                0,
+                finish.persistenceConfirmed() && budget.auditsConfirmed()
+                        ? PersistenceStatus.CONFIRMED
+                        : PersistenceStatus.UNCONFIRMED);
     }
 
     /** 起步未确认分支的轮次开始事件；发布失败不影响已经确定的返回值。 */

@@ -24,7 +24,7 @@ mvn -B -ntp -pl AgentOS-tool -am -Dtest='GovernedToolEventsTest,ToolApprovalGate
 mvn -B -ntp -pl AgentOS-channel-cli -am -Dtest='TerminalTurnRendererTest' -Dsurefire.failIfNoSpecifiedTests=false test
 
 # chat 装配、Ctrl+C 取消、--message 输出不变
-mvn -B -ntp -pl AgentOS-cli -am -Dtest='ChatCommandStreamingTest,InterruptCancellerTest,ChatCommandTest' -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -B -ntp -pl AgentOS-cli -am -Dtest='ChatCommandStreamingTest,ChatCommandTest' -Dsurefire.failIfNoSpecifiedTests=false test
 
 # 应用级：PostgreSQL + 真实 Manager + 治理链，10 类场景的事件序列，CANCELLED 落库
 mvn -B -ntp -pl AgentOS-boot -am -Dtest='RunEventContractIntegrationTest,TurnCancelIntegrationTest' -Dsurefire.failIfNoSpecifiedTests=false test
@@ -51,9 +51,8 @@ java -jar AgentOS-boot/target/AgentOS.jar chat
 ```
 
 1. 输入一个需要调用工具的问题，观察文字边生成边显示、工具行与确认提示的顺序。
-2. 让模型生成一段长文时按 Ctrl+C，确认显示"已取消"后回到输入提示，再输入一条消息能继续对话。
-3. 空闲时按 Ctrl+C，确认与改动前一样退出。
-4. 在 Agent 的 `AGENT.md` 里把 `max_output_tokens` 设为很小的值，确认本轮以"回答因长度上限被截断"结束。
+2. 空闲或执行中按 Ctrl+C，确认与改动前一样退出（CLI 取消本期延期）。
+3. 在 Agent 的 `AGENT.md` 里把 `max_output_tokens` 设为很小的值，确认本轮以"回答因长度上限被截断"结束。
 
 ## 5. 完整质量门
 
@@ -68,4 +67,4 @@ mvn -B -ntp verify
 - 同步（非流式）模型调用期间取消，网络读取不一定立即中断，最长等到单次请求超时或 2 秒 hard stop；交互式 chat 使用流式调用，不受影响（research R7）。
 - 事件不持久化：进程重启或 CLI 退出后无法重放；断线重放随 US-5 的 Web 流式接口交付。
 - 在等待确认时取消，006 的输入 broker 仍持有当前这一行：取消后用户输入的第一行会被当作迟到回答丢弃，并提示"请重新输入"。这与授权超时的现有行为一致，留待后续改进 broker。
-- Ctrl+C 依赖 `sun.misc.Signal`；平台不支持时记警告并退化为现有行为（Ctrl+C 直接退出）。
+- CLI 的 Ctrl+C 取消本期不做（项目方决定，见 spec Clarifications）：Ctrl+C 仍然直接退出 chat；取消能力只经核心层 `AgentService.cancel(turnId)` 提供，由测试与后续入口调用。

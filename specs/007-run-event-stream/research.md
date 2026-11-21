@@ -88,7 +88,9 @@
 
 **已知限制**: 同步（非流式）模型调用由 SDK 的 HTTP 客户端执行，线程中断不一定立即打断网络读取，最长要等到单次请求超时或 2 秒 hard stop。交互式 chat 使用流式调用，不受影响；记录在 quickstart 的已知限制里。
 
-## R8 CLI 捕获 Ctrl+C
+## R8 CLI 捕获 Ctrl+C（已延期）
+
+> 实施期间发现 Checkstyle 的 IllegalImport 规则禁止 `sun.*`，项目方 2026-11-21 决定本期不做 CLI 的 Ctrl+C，以下方案保留供后续参考。
 
 **Decision**: 用 `sun.misc.Signal.handle(new Signal("INT"), ...)`（JDK 的 `jdk.unsupported` 模块，`--release 21` 可编译）安装处理器，封装在 `AgentOS-cli` 的一个小类里：
 - 有轮次在执行：调用 `agentService.cancel(turnId)`，打印"正在取消…"。轮次标识来自 `run.started` 事件；如果 Ctrl+C 早于 `run.started` 到达，先记下"待取消"，收到 `run.started` 时立即取消。

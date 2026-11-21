@@ -24,6 +24,7 @@
 - Q: CLI 是否展示完整工具结果？ → A: 不展示，只显示一行摘要，完整结果在审计表。
 - Q: 本期事件是否持久化？ → A: 不持久化，只在进程内传递；落库与断线重放随 US-5 的 Web 流式接口交付。
 - Q: 宪章原则 II 禁止核心阶段实现 SSE 端点，后续网页流式接口怎么办？ → A: 项目方决定修订宪章至 1.1.0，SSE 流式接口归入 US-5。
+- Q: CLI 拦截 Ctrl+C 需要 `sun.misc.Signal`，但 Checkstyle 的 IllegalImport 禁止 `sun.*`，怎么办？（实施期间，2026-11-21） → A: 本期不做 CLI 的 Ctrl+C。核心层取消（`AgentService.cancel`、`CANCELLED` 状态、FR-019～FR-021）照常交付；US4 场景 1、5 与 FR-018 延期，后续网页停止按钮或终端方案确定后再接入。
 
 ## User Scenarios & Testing *(mandatory)*
 

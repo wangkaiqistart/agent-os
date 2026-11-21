@@ -77,6 +77,7 @@ class RunEventContractIntegrationTest {
         agent("main", "[read_file, write_file, http_get]", "turn_timeout: 10s");
         agent("slow", "[http_get]", "turn_timeout: 1s");
         agent("once", "[read_file]", "max_iterations: 1");
+        agent("cancel", "[http_get]", "turn_timeout: 30s");
         Files.writeString(workspace.resolve("present.txt"), "present");
         model = LocalModelServer.start();
         site = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -88,7 +89,8 @@ class RunEventContractIntegrationTest {
                         byte[] body = "slow".getBytes(StandardCharsets.UTF_8);
                         exchange.sendResponseHeaders(200, body.length);
                         try {
-                            Thread.sleep(1500);
+                            Thread.sleep(
+                                    exchange.getRequestURI().getQuery() == null ? 1500 : 20_000);
                         } catch (InterruptedException interrupted) {
                             Thread.currentThread().interrupt();
                         }
@@ -193,7 +195,14 @@ class RunEventContractIntegrationTest {
     }
 
     private Recorder run(String scenario, String agent, TurnRuntimeCapabilities capabilities) {
-        var recorder = new Recorder();
+        return run(scenario, agent, capabilities, new Recorder());
+    }
+
+    private Recorder run(
+            String scenario,
+            String agent,
+            TurnRuntimeCapabilities capabilities,
+            Recorder recorder) {
         TurnResult result =
                 service.process(
                         new ProcessRequest(
@@ -381,6 +390,32 @@ class RunEventContractIntegrationTest {
         assertThat(((TurnEventPayload.RunFailed) recorder.events.getLast().payload()).code())
                 .isEqualTo(com.agentos.core.turn.TurnFailureCode.OUTPUT_TRUNCATED);
         assertThat(model.calls()).isOne();
+    }
+
+    @Test
+    void userCancelEndsCancelled() {
+        model.reset(
+                LocalModelServer.toolResponse(
+                        "c-cancel",
+                        "http://127.0.0.1:" + site.getAddress().getPort() + "/slow?long=1"));
+        var recorder = new Recorder();
+        Thread.ofVirtual()
+                .start(() -> {
+                    try {
+                        while (recorder.events.stream()
+                                .noneMatch(e -> e.type().equals("tool.started"))) {
+                            Thread.sleep(5);
+                        }
+                        Thread.sleep(200);
+                        service.cancel(recorder.events.getFirst().turnId());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+        run("10-cancelled", "cancel", TurnRuntimeCapabilities.NONE, recorder);
+        assertThat(recorder.events.getLast().payload())
+                .isInstanceOf(TurnEventPayload.RunCancelled.class);
+        assertThat(onlyTool(recorder).status()).isEqualTo(TurnEventPayload.ToolStatus.INTERRUPTED);
     }
 
     @Test
