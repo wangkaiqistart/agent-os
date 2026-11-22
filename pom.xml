@@ -44,7 +44,7 @@
         <spring-boot.version>4.1.2</spring-boot.version>
         <spring-ai.version>2.0.2</spring-ai.version>
         <!-- 与 Spring AI 2.0.2 的 SDK 依赖保持一致；其 BOM 未导出 SDK 子构件版本。 -->
-        <mcp-sdk.version>2.1.0</mcp-sdk.version>
+        <mcp-sdk.version>2.2.0</mcp-sdk.version>
         <springdoc.version>3.2.0</springdoc.version>
         <picocli.version>4.7.7</picocli.version>
         <shedlock.version>7.10.1</shedlock.version>
